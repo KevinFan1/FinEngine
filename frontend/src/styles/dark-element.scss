@@ -1,0 +1,192 @@
+/* Element Plus dark mode overrides. Most colors come from theme.css variables. */
+html.dark {
+  .el-loading-mask {
+    background-color: rgba(10, 14, 12, 0.84) !important;
+  }
+
+  .el-dialog,
+  .el-message-box,
+  .el-drawer,
+  .el-popover.el-popper,
+  .el-popper.is-light {
+    background: var(--bg-elevated) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .el-card__header,
+  .el-dialog__header,
+  .el-dialog__footer,
+  .el-drawer__header {
+    border-color: var(--border-color) !important;
+  }
+
+  .el-dialog__title,
+  .el-message-box__title,
+  .el-drawer__title {
+    color: var(--text-primary) !important;
+  }
+
+  .el-dialog__body,
+  .el-message-box__message,
+  .el-form-item__label {
+    color: var(--text-primary) !important;
+  }
+
+  .el-table {
+    --el-table-bg-color: var(--bg-card);
+    --el-table-tr-bg-color: var(--bg-card);
+    --el-table-header-bg-color: var(--table-header-bg);
+    --el-table-row-hover-bg-color: var(--table-row-hover);
+    --el-table-border-color: var(--table-border);
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+
+    th.el-table__cell {
+      background: var(--table-header-bg) !important;
+      color: var(--table-header-text) !important;
+    }
+
+    td.el-table__cell {
+      color: var(--text-primary) !important;
+      background: var(--bg-card) !important;
+    }
+
+    .el-table__row--striped td.el-table__cell {
+      background: var(--table-stripe-bg) !important;
+    }
+
+    .el-table__row:hover td.el-table__cell {
+      background: var(--table-row-hover) !important;
+    }
+
+    .el-table__empty-block,
+    .el-table__expanded-cell {
+      background: var(--bg-card) !important;
+    }
+
+    &::before,
+    &::after {
+      background-color: var(--table-border) !important;
+    }
+  }
+
+  .el-input__wrapper,
+  .el-select__wrapper,
+  .el-textarea__inner {
+    background-color: var(--input-bg) !important;
+    border-color: var(--input-border) !important;
+    box-shadow: 0 0 0 1px var(--input-border) inset !important;
+    color: var(--text-primary) !important;
+  }
+
+  .el-input__wrapper:hover,
+  .el-select__wrapper.is-hovering,
+  .el-textarea__inner:hover {
+    box-shadow: 0 0 0 1px var(--input-hover-border) inset !important;
+  }
+
+  .el-input__wrapper.is-focus,
+  .el-select__wrapper.is-focused,
+  .el-textarea__inner:focus {
+    box-shadow: 0 0 0 1px var(--primary) inset, var(--focus-ring) !important;
+  }
+
+  .el-input__inner,
+  .el-select__placeholder,
+  .el-textarea__inner {
+    color: var(--text-primary) !important;
+  }
+
+  .el-input__inner::placeholder,
+  .el-textarea__inner::placeholder {
+    color: var(--text-placeholder) !important;
+  }
+
+  .el-select-dropdown,
+  .el-picker__popper.el-popper,
+  .el-date-picker,
+  .el-date-table,
+  .el-dropdown-menu {
+    background-color: var(--bg-elevated) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .el-select-dropdown__item,
+  .el-dropdown-menu__item,
+  .el-picker-panel__icon-btn,
+  .el-date-picker__header-label,
+  .el-date-table td,
+  .el-month-table td {
+    color: var(--text-primary) !important;
+  }
+
+  .el-select-dropdown__item:hover,
+  .el-select-dropdown__item.hover,
+  .el-dropdown-menu__item:hover {
+    background-color: var(--bg-hover) !important;
+  }
+
+  .el-select-dropdown__item.is-selected,
+  .el-month-table td.current:not(.disabled) .cell,
+  .el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+    color: var(--primary) !important;
+  }
+
+  .el-pagination {
+    --el-pagination-bg-color: var(--bg-card);
+    --el-pagination-text-color: var(--text-secondary);
+    --el-pagination-button-bg-color: var(--bg-card);
+    --el-pagination-hover-color: var(--primary);
+  }
+
+  .el-menu {
+    background-color: var(--sidebar-bg) !important;
+  }
+
+  .el-menu-item {
+    color: var(--sidebar-text) !important;
+
+    &:hover {
+      background-color: var(--sidebar-hover-bg) !important;
+    }
+
+    &.is-active {
+      color: var(--sidebar-active-text) !important;
+      background-color: var(--sidebar-active-bg) !important;
+    }
+  }
+
+  .el-breadcrumb__inner {
+    color: var(--text-secondary) !important;
+  }
+
+  .el-breadcrumb__separator {
+    color: var(--text-disabled) !important;
+  }
+
+  .el-empty__description p {
+    color: var(--text-secondary) !important;
+  }
+
+  .el-message {
+    background-color: var(--bg-elevated) !important;
+    border-color: var(--border-color) !important;
+  }
+
+  .el-avatar {
+    --el-avatar-bg-color: var(--primary);
+  }
+
+  .el-overlay {
+    background-color: var(--bg-mask) !important;
+  }
+
+  .el-popper.is-dark,
+  .el-tooltip__popper.is-dark {
+    background: #0f1714 !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+  }
+}

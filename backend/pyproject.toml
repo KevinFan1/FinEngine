@@ -1,0 +1,56 @@
+[project]
+name = "finengine-backend"
+version = "0.1.0"
+description = "FinEngine — 财务数据处理系统"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.30.0",
+    "pydantic==2.10.3",
+    "pydantic-settings==2.7.0",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt<5.0.0",
+    "python-multipart==0.0.18",
+    "celery[redis]==5.4.0",
+    "redis==5.2.1",
+    "openpyxl==3.1.5",
+    "asteval==1.0.6",
+    "alembic==1.14.0",
+    "httpx==0.28.1",
+    "oss2>=2.19.1",
+]
+
+[project.scripts]
+dev = "app.cli.commands:dev"
+worker = "app.cli.commands:worker"
+debug-worker = "app.cli.debug_worker:main"
+seed-all = "app.cli.commands:seed_all"
+seed-platforms = "app.cli.commands:seed_platforms"
+seed-users = "app.cli.commands:seed_users"
+seed-file-specs = "app.cli.commands:seed_file_specs"
+seed-category-dicts = "app.cli.commands:seed_category_dicts"
+migrate-generate = "app.cli.commands:migrate_generate"
+migrate-upgrade = "app.cli.commands:migrate_upgrade"
+migrate-downgrade = "app.cli.commands:migrate_downgrade"
+migrate-current = "app.cli.commands:migrate_current"
+migrate-history = "app.cli.commands:migrate_history"
+migrate-check = "app.cli.commands:migrate_check"
+
+[build-system]
+requires = ["uv_build>=0.6.17,<0.7"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "."
+module-name = "app"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "ruff>=0.8",
+]

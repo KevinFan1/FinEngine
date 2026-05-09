@@ -1,0 +1,192 @@
+"""Upload service — batch management and uploaded-file callback."""
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.organization import Organization
+from app.models.task import ProcessingTask
+from app.models.upload import UploadBatch, UploadFile
+from app.models.user import User
+from app.schemas.upload import UploadBatchCreate, UploadFileCallback
+from app.services.audit_service import AuditService
+from app.services.shop_service import ShopService
+
+
+class UploadService:
+    @staticmethod
+    async def create_batch(
+        db: AsyncSession,
+        *,
+        data: UploadBatchCreate,
+        user: User,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> UploadBatch:
+        org_id = data.org_id if user.role == "superadmin" else user.org_id
+        if org_id is None:
+            raise ValueError("请选择上传数据所属组织")
+
+        org_result = await db.execute(select(Organization).where(Organization.id == org_id, Organization.status == 1, Organization.is_deleted.is_(False)))
+        if org_result.scalar_one_or_none() is None:
+            raise ValueError("组织不存在或已禁用")
+
+        batch = UploadBatch(
+            org_id=org_id,
+            user_id=user.id,
+            file_count=data.file_count,
+            status="pending",
+            remark=data.remark,
+        )
+        db.add(batch)
+        await db.flush()
+
+        await AuditService.log(
+            db,
+            user_id=user.id,
+            username=user.username,
+            display_name=user.display_name,
+            org_id=org_id,
+            module="upload",
+            action="upload_start",
+            description=f"用户 [{user.display_name}] 发起批量上传，共 {data.file_count} 个文件",
+            target_type="batch",
+            target_id=batch.id,
+            ip=ip,
+            user_agent=user_agent,
+            extra_data={"file_count": data.file_count},
+        )
+
+        return batch
+
+    @staticmethod
+    async def get_batch_for_user(db: AsyncSession, *, batch_id: int, user: User) -> UploadBatch | None:
+        result = await db.execute(select(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.is_deleted.is_(False)))
+        batch = result.scalar_one_or_none()
+        if batch is None:
+            return None
+        if user.role != "superadmin" and batch.org_id != user.org_id:
+            return None
+        return batch
+
+    @staticmethod
+    async def handle_file_callback(
+        db: AsyncSession,
+        *,
+        batch_id: int,
+        data: UploadFileCallback,
+        user: User,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> UploadFile:
+        """Record an uploaded file, auto-create a processing task, and dispatch Celery job."""
+        batch = await UploadService.get_batch_for_user(db, batch_id=batch_id, user=user)
+        if batch is None:
+            raise ValueError("上传批次不存在或无权访问")
+
+        shop = None
+        if data.detected_platform and data.parsed_shop:
+            shop = await ShopService.get_or_create_shop(db, org_id=batch.org_id, platform_name=data.detected_platform, shop_name=data.parsed_shop)
+
+        upload_file = UploadFile(
+            batch_id=batch_id,
+            org_id=batch.org_id,
+            user_id=user.id,
+            shop_id=shop.id if shop else None,
+            original_name=data.original_name,
+            oss_key=data.oss_key,
+            file_size=data.file_size,
+            file_hash=data.file_hash,
+            parsed_year=data.parsed_year,
+            parsed_month=data.parsed_month,
+            parsed_type=data.parsed_type,
+            parsed_shop=data.parsed_shop,
+            detected_platform=data.detected_platform,
+            status="uploaded",
+        )
+        db.add(upload_file)
+        await db.flush()
+
+        # Auto-create processing task for each file
+        task = ProcessingTask(
+            file_id=upload_file.id,
+            org_id=batch.org_id,
+            user_id=user.id,
+            status="queued",
+            progress=0,
+        )
+        db.add(task)
+        await db.flush()
+
+        await AuditService.log(
+            db,
+            user_id=user.id,
+            username=user.username,
+            display_name=user.display_name,
+            org_id=batch.org_id,
+            module="upload",
+            action="upload_file",
+            description=f"用户 [{user.display_name}] 上传文件 [{data.original_name}]，大小 {round(data.file_size / 1024, 2)}MB",
+            target_type="upload_file",
+            target_id=upload_file.id,
+            target_name=data.original_name,
+            ip=ip,
+            user_agent=user_agent,
+            extra_data={"file_size": data.file_size, "task_id": task.id},
+        )
+
+        # Dispatch Celery task — use hardcoded platform processor
+        from app.tasks.processors import PLATFORM_PROCESSORS
+
+        if data.detected_platform and data.detected_platform in PLATFORM_PROCESSORS:
+            from app.tasks.celery_app import process_file_platform
+
+            process_file_platform.delay(
+                file_id=upload_file.id,
+                oss_key=data.oss_key,
+                org_id=batch.org_id,
+                platform_code=data.detected_platform,
+                shop_id=shop.id if shop else None,
+                shop_name=data.parsed_shop or "",
+            )
+        else:
+            # No processor found — mark task as failed
+            task.status = "failed"
+            task.error_message = f"未找到平台 [{data.detected_platform}] 的处理器" if data.detected_platform else "未检测到平台类型，请检查文件名格式"
+            upload_file.status = "failed"
+            upload_file.error_message = task.error_message
+
+        return upload_file
+
+    @staticmethod
+    async def list_batches(
+        db: AsyncSession,
+        *,
+        org_id: int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[UploadBatch], int]:
+        stmt = select(UploadBatch).where(UploadBatch.is_deleted.is_(False)).order_by(UploadBatch.id.desc())
+        count_stmt = select(func.count()).select_from(UploadBatch).where(UploadBatch.is_deleted.is_(False))
+
+        if org_id is not None:
+            stmt = stmt.where(UploadBatch.org_id == org_id)
+            count_stmt = count_stmt.where(UploadBatch.org_id == org_id)
+
+        total_result = await db.execute(count_stmt)
+        total = total_result.scalar() or 0
+
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(stmt)
+        batches = list(result.scalars().all())
+
+        return batches, total
+
+    @staticmethod
+    async def get_batch_detail(db: AsyncSession, batch_id: int) -> UploadBatch | None:
+        result = await db.execute(select(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.is_deleted.is_(False)))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_batch_files(db: AsyncSession, batch_id: int) -> list[UploadFile]:
+        result = await db.execute(select(UploadFile).where(UploadFile.batch_id == batch_id, UploadFile.is_deleted.is_(False)).order_by(UploadFile.id))
+        return list(result.scalars().all())

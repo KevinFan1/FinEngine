@@ -1,0 +1,313 @@
+/* ========== 明亮主题（默认）：金融工作台 ========== */
+:root {
+    color-scheme: light;
+
+    /* Brand */
+    --primary: #155bd5;
+    --primary-hover: #2f74ee;
+    --primary-active: #0f43a5;
+    --primary-contrast: #ffffff;
+    --primary-light: rgba(21, 91, 213, 0.1);
+    --primary-lighter: rgba(21, 91, 213, 0.06);
+    --primary-light-3: rgba(21, 91, 213, 0.24);
+    --primary-light-5: rgba(21, 91, 213, 0.18);
+    --primary-light-7: rgba(21, 91, 213, 0.12);
+    --primary-light-8: rgba(21, 91, 213, 0.08);
+    --primary-light-9: rgba(21, 91, 213, 0.05);
+    --accent: #0f9f9a;
+    --accent-light: rgba(15, 159, 154, 0.1);
+    --gold: #b7791f;
+    --gold-light: rgba(183, 121, 31, 0.12);
+
+    /* Semantic */
+    --success: #16a34a;
+    --success-light: rgba(22, 163, 74, 0.1);
+    --warning: #d97706;
+    --warning-light: rgba(217, 119, 6, 0.12);
+    --error: #dc2626;
+    --error-light: rgba(220, 38, 38, 0.1);
+    --info: #155bd5;
+    --info-light: rgba(21, 91, 213, 0.08);
+
+    /* Text */
+    --text-primary: #182234;
+    --text-secondary: #536276;
+    --text-tertiary: #7b8796;
+    --text-placeholder: #98a4b5;
+    --text-disabled: #c2cad7;
+
+    /* Border */
+    --border-color: #d5deeb;
+    --border-color-light: #eef3f9;
+    --border-light: #e2eaf4;
+
+    /* Background */
+    --bg-page: #eef4fb;
+    --bg-card: #ffffff;
+    --bg-elevated: #fbfdff;
+    --bg-hover: #f4f8ff;
+    --bg-active: #e7f0ff;
+    --bg-mask: rgba(15, 23, 42, 0.48);
+    --page-bg-gradient:
+        radial-gradient(circle at 12% 0%, rgba(21, 91, 213, 0.08), transparent 30%),
+        radial-gradient(circle at 86% 8%, rgba(15, 159, 154, 0.08), transparent 26%),
+        linear-gradient(180deg, #f7fbff 0%, #eef4fb 42%, #edf2f8 100%);
+    --surface-bg: #ffffff;
+    --surface-border: rgba(123, 135, 150, 0.18);
+    --surface-highlight: rgba(255, 255, 255, 0.74);
+
+    /* Form / code */
+    --input-bg: #ffffff;
+    --input-border: #cfd8e6;
+    --input-hover-border: #7aa7f7;
+    --code-bg: #edf5ff;
+    --code-text: #155bd5;
+    --focus-ring: 0 0 0 3px rgba(21, 91, 213, 0.14);
+
+    /* Sidebar */
+    --sidebar-bg: #0d1726;
+    --sidebar-logo-text: #f8fbff;
+    --sidebar-text: #aab7c8;
+    --sidebar-active-text: #ffffff;
+    --sidebar-hover-bg: rgba(96, 165, 250, 0.12);
+    --sidebar-active-bg: rgba(47, 116, 238, 0.2);
+    --sidebar-border: rgba(148, 163, 184, 0.18);
+    --sidebar-muted: #64748b;
+
+    /* Header */
+    --header-bg: rgba(255, 255, 255, 0.86);
+    --header-border: rgba(213, 222, 235, 0.86);
+
+    /* Tab bar */
+    --tab-bg: rgba(255, 255, 255, 0.76);
+    --tab-border: rgba(213, 222, 235, 0.82);
+    --tab-item-bg: rgba(255, 255, 255, 0.68);
+    --tab-item-active-bg: #ffffff;
+    --tab-item-active-text: #155bd5;
+
+    /* Login */
+    --login-page-bg: #f3f6fb;
+    --brand-panel-bg: #0f3f92;
+    --brand-panel-muted-bg: #0a3275;
+    --brand-panel-text: #ffffff;
+
+    /* Shadow: keep light for performance */
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+    --shadow-md: 0 12px 30px rgba(15, 23, 42, 0.1);
+    --shadow-card:
+        0 10px 24px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-card-hover:
+        0 14px 32px rgba(15, 23, 42, 0.09), 0 2px 4px rgba(15, 23, 42, 0.04);
+    --shadow-dropdown: 0 16px 40px rgba(15, 23, 42, 0.14);
+
+    /* Table */
+    --table-header-bg: #f4f7fb;
+    --table-header-text: #26364c;
+    --table-row-hover: #f7faff;
+    --table-border: #e1e8f1;
+    --table-stripe-bg: #fbfdff;
+
+    /* Stat cards */
+    --stat-blue-bg: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%);
+    --stat-blue-border: #c9ddff;
+    --stat-blue-text: #155bd5;
+    --stat-orange-bg: linear-gradient(135deg, #ffffff 0%, #fff6e9 100%);
+    --stat-orange-border: #f7d6a8;
+    --stat-orange-text: #b45309;
+    --stat-green-bg: linear-gradient(135deg, #ffffff 0%, #effdf5 100%);
+    --stat-green-border: #bdebcf;
+    --stat-green-text: #15803d;
+    --stat-coral-bg: linear-gradient(135deg, #ffffff 0%, #fff1f3 100%);
+    --stat-coral-border: #f6c2cc;
+    --stat-coral-text: #be123c;
+
+    /* Layout */
+    --sidebar-width: 224px;
+    --sidebar-collapsed-width: 64px;
+    --header-height: 56px;
+    --tab-height: 40px;
+
+    /* Misc */
+    --radius: 8px;
+    --radius-sm: 6px;
+    --radius-lg: 8px;
+    --radius-card: 8px;
+    --radius-btn: 6px;
+    --radius-input: 6px;
+
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+
+    /* Scrollbar */
+    --scrollbar-thumb: #cbd5e1;
+    --scrollbar-thumb-hover: #94a3b8;
+
+    /* Element Plus variables */
+    --el-bg-color: var(--bg-card);
+    --el-bg-color-overlay: var(--bg-elevated);
+    --el-bg-color-page: var(--bg-page);
+    --el-text-color-primary: var(--text-primary);
+    --el-text-color-regular: var(--text-secondary);
+    --el-text-color-secondary: var(--text-tertiary);
+    --el-text-color-placeholder: var(--text-placeholder);
+    --el-text-color-disabled: var(--text-disabled);
+    --el-border-color: var(--border-color);
+    --el-border-color-light: var(--border-light);
+    --el-border-color-lighter: var(--border-color-light);
+    --el-border-color-extra-light: var(--border-color-light);
+    --el-fill-color: var(--bg-active);
+    --el-fill-color-light: var(--bg-hover);
+    --el-fill-color-lighter: var(--bg-hover);
+    --el-fill-color-blank: var(--bg-card);
+}
+
+/* ========== 暗黑主题：深色金融工作台 ========== */
+html.dark {
+    color-scheme: dark;
+
+    /* Brand */
+    --primary: #6aa6ff;
+    --primary-hover: #8bbcff;
+    --primary-active: #3d85f3;
+    --primary-contrast: #07111f;
+    --primary-light: rgba(91, 156, 255, 0.18);
+    --primary-lighter: rgba(91, 156, 255, 0.1);
+    --primary-light-3: rgba(91, 156, 255, 0.34);
+    --primary-light-5: rgba(91, 156, 255, 0.24);
+    --primary-light-7: rgba(91, 156, 255, 0.16);
+    --primary-light-8: rgba(91, 156, 255, 0.12);
+    --primary-light-9: rgba(91, 156, 255, 0.08);
+    --accent: #4fd1c5;
+    --accent-light: rgba(79, 209, 197, 0.14);
+    --gold: #f6c36b;
+    --gold-light: rgba(246, 195, 107, 0.14);
+
+    /* Semantic */
+    --success: #4ade80;
+    --success-light: rgba(74, 222, 128, 0.14);
+    --warning: #fbbf24;
+    --warning-light: rgba(251, 191, 36, 0.14);
+    --error: #f87171;
+    --error-light: rgba(248, 113, 113, 0.14);
+    --info: #7fb4ff;
+    --info-light: rgba(127, 180, 255, 0.12);
+
+    /* Text */
+    --text-primary: #edf3ff;
+    --text-secondary: #c5d0df;
+    --text-tertiary: #91a0b4;
+    --text-placeholder: #758398;
+    --text-disabled: #596677;
+
+    /* Border */
+    --border-color: #3b4656;
+    --border-color-light: #303a48;
+    --border-light: #344052;
+
+    /* Background */
+    --bg-page: #0d1420;
+    --bg-card: #151f2d;
+    --bg-elevated: #1a2636;
+    --bg-hover: #223044;
+    --bg-active: #2b3d58;
+    --bg-mask: rgba(9, 13, 20, 0.68);
+    --page-bg-gradient:
+        radial-gradient(circle at 12% 0%, rgba(106, 166, 255, 0.12), transparent 32%),
+        radial-gradient(circle at 88% 6%, rgba(79, 209, 197, 0.08), transparent 28%),
+        linear-gradient(180deg, #0f1726 0%, #0d1420 48%, #0b111b 100%);
+    --surface-bg: #151f2d;
+    --surface-border: rgba(148, 163, 184, 0.18);
+    --surface-highlight: rgba(255, 255, 255, 0.05);
+
+    /* Form / code */
+    --input-bg: #222d3d;
+    --input-border: #465469;
+    --input-hover-border: #6f85a5;
+    --code-bg: rgba(91, 156, 255, 0.14);
+    --code-text: #c8ddff;
+    --focus-ring: 0 0 0 2px rgba(91, 156, 255, 0.18);
+
+    /* Sidebar */
+    --sidebar-bg: #0a111d;
+    --sidebar-logo-text: #f8fbff;
+    --sidebar-text: #b4bfd0;
+    --sidebar-active-text: #d7e7ff;
+    --sidebar-hover-bg: rgba(91, 156, 255, 0.1);
+    --sidebar-active-bg: rgba(91, 156, 255, 0.16);
+    --sidebar-border: #344052;
+
+    /* Header */
+    --header-bg: rgba(18, 27, 41, 0.88);
+    --header-border: #344052;
+
+    /* Tab bar */
+    --tab-bg: rgba(18, 27, 41, 0.78);
+    --tab-border: #344052;
+    --tab-item-bg: rgba(26, 38, 54, 0.68);
+    --tab-item-active-bg: rgba(106, 166, 255, 0.16);
+    --tab-item-active-text: var(--primary);
+
+    /* Login */
+    --login-page-bg: #121a26;
+    --brand-panel-bg: #123f8f;
+    --brand-panel-muted-bg: #113574;
+    --brand-panel-text: #f8fbff;
+
+    /* Shadow */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16);
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.24);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.16);
+    --shadow-card-hover:
+        0 4px 12px rgba(0, 0, 0, 0.24), 0 2px 4px rgba(0, 0, 0, 0.18);
+    --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.28);
+
+    /* Table */
+    --table-header-bg: #243145;
+    --table-header-text: #e5eefb;
+    --table-row-hover: #27374d;
+    --table-border: #3b4656;
+    --table-stripe-bg: #182433;
+
+    /* Stat cards */
+    --stat-blue-bg: linear-gradient(135deg, #182437 0%, #172b48 100%);
+    --stat-blue-border: rgba(91, 156, 255, 0.32);
+    --stat-blue-text: #c8ddff;
+    --stat-orange-bg: linear-gradient(135deg, #1b2432 0%, #302719 100%);
+    --stat-orange-border: rgba(251, 146, 60, 0.3);
+    --stat-orange-text: #fed7aa;
+    --stat-green-bg: linear-gradient(135deg, #182437 0%, #173328 100%);
+    --stat-green-border: rgba(74, 222, 128, 0.3);
+    --stat-green-text: #bbf7d0;
+    --stat-coral-bg: linear-gradient(135deg, #1b2432 0%, #321f2a 100%);
+    --stat-coral-border: rgba(251, 113, 133, 0.3);
+    --stat-coral-text: #fecdd3;
+
+    /* Scrollbar */
+    --scrollbar-thumb: #475569;
+    --scrollbar-thumb-hover: #64748b;
+
+    /* Element Plus variables */
+    --el-bg-color: var(--bg-card);
+    --el-bg-color-overlay: var(--bg-elevated);
+    --el-bg-color-page: var(--bg-page);
+    --el-text-color-primary: var(--text-primary);
+    --el-text-color-regular: var(--text-secondary);
+    --el-text-color-secondary: var(--text-tertiary);
+    --el-text-color-placeholder: var(--text-placeholder);
+    --el-text-color-disabled: var(--text-disabled);
+    --el-border-color: var(--border-color);
+    --el-border-color-light: var(--border-light);
+    --el-border-color-lighter: var(--border-color-light);
+    --el-border-color-extra-light: var(--border-color-light);
+    --el-fill-color: var(--bg-active);
+    --el-fill-color-light: var(--bg-hover);
+    --el-fill-color-lighter: var(--bg-hover);
+    --el-fill-color-blank: var(--bg-card);
+    --el-mask-color: var(--bg-mask);
+}

@@ -1,0 +1,62 @@
+import type { App, Component } from 'vue'
+import {
+  ArrowDown,
+  Check,
+  CircleCheck,
+  Clock,
+  Close,
+  DataAnalysis,
+  Delete,
+  Document,
+  Download,
+  Expand,
+  Fold,
+  House,
+  List,
+  Loading,
+  Lock,
+  Moon,
+  OfficeBuilding,
+  Plus,
+  Search,
+  Shop,
+  Sunny,
+  SwitchButton,
+  Upload,
+  User,
+  Warning,
+} from '@element-plus/icons-vue'
+
+const icons: Record<string, Component> = {
+  ArrowDown,
+  Check,
+  CircleCheck,
+  Clock,
+  Close,
+  DataAnalysis,
+  Delete,
+  Document,
+  Download,
+  Expand,
+  Fold,
+  House,
+  List,
+  Loading,
+  Lock,
+  Moon,
+  OfficeBuilding,
+  Plus,
+  Search,
+  Shop,
+  Sunny,
+  SwitchButton,
+  Upload,
+  User,
+  Warning,
+}
+
+export function registerIcons(app: App) {
+  Object.entries(icons).forEach(([name, component]) => {
+    app.component(name, component)
+  })
+}
