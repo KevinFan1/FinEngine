@@ -1,7 +1,46 @@
 /* Element Plus dark mode overrides. Most colors come from theme.css variables. */
 html.dark {
+  /* ---- Override Element Plus color system at root level ---- */
+  /* These MUST be explicit values (not var() references) because EP's */
+  /* own CSS may redeclare --el-color-* and break the indirection chain. */
+  --el-color-primary: #4096ff !important;
+  --el-color-primary-light-3: #69b1ff !important;
+  --el-color-primary-light-5: rgba(64, 150, 255, 0.22) !important;
+  --el-color-primary-light-7: rgba(64, 150, 255, 0.16) !important;
+  --el-color-primary-light-8: rgba(64, 150, 255, 0.12) !important;
+  --el-color-primary-light-9: rgba(64, 150, 255, 0.08) !important;
+  --el-color-primary-dark-2: #1677ff !important;
+  --el-color-success: #73d13d !important;
+  --el-color-success-light-3: #95de64 !important;
+  --el-color-success-light-5: rgba(115, 209, 61, 0.22) !important;
+  --el-color-success-light-7: rgba(115, 209, 61, 0.16) !important;
+  --el-color-success-light-8: rgba(115, 209, 61, 0.12) !important;
+  --el-color-success-light-9: rgba(115, 209, 61, 0.08) !important;
+  --el-color-success-dark-2: #52c41a !important;
+  --el-color-warning: #ffc53d !important;
+  --el-color-warning-light-3: #ffd666 !important;
+  --el-color-warning-light-5: rgba(255, 197, 61, 0.22) !important;
+  --el-color-warning-light-7: rgba(255, 197, 61, 0.16) !important;
+  --el-color-warning-light-8: rgba(255, 197, 61, 0.12) !important;
+  --el-color-warning-light-9: rgba(255, 197, 61, 0.08) !important;
+  --el-color-warning-dark-2: #faad14 !important;
+  --el-color-danger: #ff7875 !important;
+  --el-color-danger-light-3: #ffa39e !important;
+  --el-color-danger-light-5: rgba(255, 120, 117, 0.22) !important;
+  --el-color-danger-light-7: rgba(255, 120, 117, 0.16) !important;
+  --el-color-danger-light-8: rgba(255, 120, 117, 0.12) !important;
+  --el-color-danger-light-9: rgba(255, 120, 117, 0.08) !important;
+  --el-color-danger-dark-2: #ff4d4f !important;
+  --el-color-info: #4096ff !important;
+  --el-color-info-light-3: #69b1ff !important;
+  --el-color-info-light-5: rgba(64, 150, 255, 0.22) !important;
+  --el-color-info-light-7: rgba(64, 150, 255, 0.16) !important;
+  --el-color-info-light-8: rgba(64, 150, 255, 0.12) !important;
+  --el-color-info-light-9: rgba(64, 150, 255, 0.08) !important;
+  --el-color-info-dark-2: #1677ff !important;
+
   .el-loading-mask {
-    background-color: rgba(10, 14, 12, 0.84) !important;
+    background-color: var(--bg-mask) !important;
   }
 
   .el-dialog,
@@ -185,7 +224,7 @@ html.dark {
 
   .el-popper.is-dark,
   .el-tooltip__popper.is-dark {
-    background: #0f1714 !important;
+    background: #111827 !important;
     color: var(--text-primary) !important;
     border-color: var(--border-color) !important;
   }

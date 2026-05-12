@@ -1,4 +1,4 @@
-"""小红书 hardcoded processors for GMV/动账/其他服务款 Excel/CSV files."""
+"""小红书 hardcoded processors for GMV/动账/其他服务款/订单 Excel/CSV files."""
 
 from decimal import Decimal
 
@@ -52,6 +52,81 @@ XIAOHONGSHU_DONGZHANG_HEADERS: list[str] = [
     "备注",
 ]
 
+XIAOHONGSHU_ORDER_HEADERS: list[str] = [
+    "订单号",
+    "订单状态",
+    "售后状态",
+    "订单类型",
+    "订单标记",
+    "收件人姓名",
+    "收件人电话",
+    "收件人地址",
+    "省",
+    "市",
+    "区",
+    "区域编码",
+    "小红书编码",
+    "条形码",
+    "规格ID",
+    "达人ID",
+    "达人名称",
+    "SKU名称",
+    "SKU规格",
+    "SKU件数",
+    "是否为赠品",
+    "发票/Invoice",
+    "商品总价(元)",
+    "用户应付金额(元)",
+    "平台优惠(元)",
+    "店铺优惠(元)",
+    "支付渠道优惠(元)",
+    "SKU商家改价(元)",
+    "商家应收金额(元)（支付金额）",
+    "支付方式",
+    "支付渠道订单号",
+    "支付期数",
+    "利息费用",
+    "手续费承担方",
+    "支付时间",
+    "sku净重(kg)",
+    "包裹总净重(kg)",
+    "包裹总运费(元)",
+    "快递公司",
+    "快递单号",
+    "发货链接",
+    "大头笔/Paint Marker",
+    "集包地/Express Extend 1",
+    "三段码/Express Extend 2",
+    "订购人身份证姓名/ID Name",
+    "订购人身份证号/ID Number",
+    "收件人身份证姓名",
+    "收件人身份证号",
+    "订单创建时间",
+    "预售订单开始发货时间",
+    "预售订单截止发货时间",
+    "承诺发货时间",
+    "订单发货时间",
+    "订单完成时间",
+    "发货仓库",
+    "确认收货类型",
+    "是否延迟收货",
+    "用户备注",
+    "包裹备注标记",
+    "包裹备注信息",
+    "异常原因",
+    "店铺名称",
+    "用户编号",
+    "运费模版名称",
+    "物流方案名称",
+    "第三方机构订单号",
+    "国补模式",
+    "供应商id",
+    "供应商名称",
+    "商家编码",
+    "商品ID",
+    "商品名称",
+]
+
 XIAOHONGSHU_GMV_FIELDS: tuple[str, ...] = (
     "gmv",
     "platform_income",
@@ -74,6 +149,8 @@ class XiaohongshuProcessor(FinancialSummaryExcelProcessorMixin):
             return self._process_other_service
         if type_code == "动账":
             return self._process_dongzhang
+        if type_code == "订单":
+            return self._process_order
         return None
 
     def _process_gmv(
@@ -241,6 +318,86 @@ class XiaohongshuProcessor(FinancialSummaryExcelProcessorMixin):
                 except Exception as e:
                     result["failed_rows"] += 1
                     result["errors"].append(f"Row {result['total_rows'] + 1}: {e}")
+
+        return result
+
+    def _process_order(
+        self,
+        *,
+        file_path: str,
+        shop_name: str,
+        category_dict: dict[str, list[str]] | None = None,
+    ) -> dict:
+        _ = shop_name, category_dict
+        result = {
+            "total_rows": 0,
+            "success_rows": 0,
+            "failed_rows": 0,
+            "errors": [],
+            "groups": {},
+            "orders": [],
+        }
+        required_headers = ("订单号", "订单创建时间")
+
+        with open_tabular_rows(file_path) as rows:
+            if rows is None:
+                result["errors"].append("无法打开表格文件")
+                return result
+
+            row_iter = iter(rows)
+            header_result = self._find_header_row(row_iter, required_headers)
+            if header_result is None:
+                result["errors"].append("无法读取表头")
+                self._log_header_compare(
+                    file_path=file_path,
+                    type_code="订单",
+                    actual_headers=[],
+                    required_headers=required_headers,
+                    missing_headers=required_headers,
+                    header_row_number=None,
+                )
+                return result
+
+            headers, header_row_number = header_result
+            col_idx = self._build_col_idx(headers, required_headers)
+            missing = self._missing_headers(col_idx, required_headers)
+            if missing:
+                result["errors"].append(f"缺少必要表头: {', '.join(missing)}")
+                self._log_header_compare(
+                    file_path=file_path,
+                    type_code="订单",
+                    actual_headers=headers,
+                    required_headers=required_headers,
+                    missing_headers=missing,
+                    header_row_number=header_row_number,
+                )
+                return result
+
+            for row in row_iter:
+                result["total_rows"] += 1
+                try:
+                    vals = self._row_to_values(row, col_idx)
+                    order_no = safe_str(vals.get("订单号"))
+                    order_created_at = parse_datetime(vals.get("订单创建时间"))
+                    if not order_no:
+                        result["failed_rows"] += 1
+                        result["errors"].append(f"Row {result['total_rows'] + header_row_number}: 订单号为空")
+                        continue
+                    if order_created_at is None:
+                        result["failed_rows"] += 1
+                        result["errors"].append(f"Row {result['total_rows'] + header_row_number}: 无法解析订单创建时间")
+                        continue
+
+                    result["orders"].append(
+                        {
+                            "order_no": order_no,
+                            "order_created_at": order_created_at,
+                        }
+                    )
+                    result["success_rows"] += 1
+                except Exception as e:
+                    result["failed_rows"] += 1
+                    result["errors"].append(f"Row {result['total_rows'] + header_row_number}: {e}")
 
         return result
 

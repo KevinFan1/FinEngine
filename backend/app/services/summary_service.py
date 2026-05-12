@@ -4,15 +4,16 @@ import io
 from decimal import Decimal
 
 from openpyxl import Workbook
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.shop import Shop
 from app.models.summary import FinancialSummary
 from app.services.summary_adjustment_service import SummaryAdjustmentService
 
 # Export header aligned with actual business Excel.
 EXPORT_HEADERS = [
-    "上传年月",
+    "核算年月",
     "归属年月",
     "平台",
     "店铺",
@@ -30,10 +31,9 @@ EXPORT_HEADERS = [
 ]
 
 REPORT_EXPORT_HEADERS = [
-    "上传年月",
+    "核算年月",
     "平台",
     "店铺",
-    "明细行数",
     "原始实收GMV",
     "GMV调整",
     "调整后实收GMV",
@@ -65,6 +65,24 @@ SUMMARY_MONEY_FIELDS = (
     "bic",
 )
 
+
+def split_filter_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def single_filter_value(value: str | None) -> str | None:
+    values = split_filter_values(value)
+    return values[0] if len(values) == 1 else None
+
+
+def month_period_value(year: int | None, month: int | None) -> int | None:
+    if year is None or month is None:
+        return None
+    return int(year) * 100 + int(month)
+
+
 PLATFORM_LABELS = {
     "douyin": "抖音",
     "抖店": "抖音",
@@ -79,6 +97,10 @@ PLATFORM_LABELS = {
     "天猫": "天猫",
     "taobao": "淘宝",
     "淘宝": "淘宝",
+    "alipay": "支付宝",
+    "支付宝": "支付宝",
+    "qianniu": "千牛",
+    "千牛": "千牛",
     "miniprogram": "小程序",
     "小程序": "小程序",
 }
@@ -95,13 +117,19 @@ class SummaryService:
         source_year: int | None = None,
         source_month: int | None = None,
         platform_name: str | None = None,
+        report_platform_name: str | None = None,
         shop_id: int | None = None,
         shop_name: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[FinancialSummary], int]:
+    ) -> tuple[list[dict], int]:
         """Query financial summaries with filters."""
-        stmt = select(FinancialSummary).where(FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False))
+        stmt = (
+            select(FinancialSummary, Shop.shop_color.label("shop_color"))
+            .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
+            .where(FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False))
+        )
         count_stmt = select(func.count()).select_from(FinancialSummary).where(FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False))
 
         if summary_year is not None:
@@ -120,25 +148,41 @@ class SummaryService:
             stmt = stmt.where(FinancialSummary.source_month == source_month)
             count_stmt = count_stmt.where(FinancialSummary.source_month == source_month)
 
-        if platform_name:
-            stmt = stmt.where(FinancialSummary.platform_name == platform_name)
-            count_stmt = count_stmt.where(FinancialSummary.platform_name == platform_name)
+        platform_names = split_filter_values(platform_name)
+        if platform_names:
+            stmt = stmt.where(FinancialSummary.source_platform_code.in_(platform_names))
+            count_stmt = count_stmt.where(FinancialSummary.source_platform_code.in_(platform_names))
+
+        report_platform_names = split_filter_values(report_platform_name)
+        if report_platform_names:
+            stmt = stmt.where(FinancialSummary.report_platform_code.in_(report_platform_names))
+            count_stmt = count_stmt.where(FinancialSummary.report_platform_code.in_(report_platform_names))
 
         if shop_id is not None:
             stmt = stmt.where(FinancialSummary.shop_id == shop_id)
             count_stmt = count_stmt.where(FinancialSummary.shop_id == shop_id)
 
-        if shop_name:
-            like_pattern = f"%{shop_name}%"
-            stmt = stmt.where(FinancialSummary.shop_name.ilike(like_pattern))
-            count_stmt = count_stmt.where(FinancialSummary.shop_name.ilike(like_pattern))
+        shop_names = split_filter_values(shop_name)
+        if shop_names:
+            stmt = stmt.where(FinancialSummary.shop_name.in_(shop_names))
+            count_stmt = count_stmt.where(FinancialSummary.shop_name.in_(shop_names))
+
+        if keyword:
+            like_pattern = f"%{keyword.strip()}%"
+            keyword_cond = or_(
+                FinancialSummary.shop_name.ilike(like_pattern),
+                FinancialSummary.source_platform_code.ilike(like_pattern),
+                FinancialSummary.report_platform_code.ilike(like_pattern),
+            )
+            stmt = stmt.where(keyword_cond)
+            count_stmt = count_stmt.where(keyword_cond)
 
         stmt = stmt.order_by(
             FinancialSummary.source_year.desc(),
             FinancialSummary.source_month.desc(),
             FinancialSummary.summary_year.desc(),
             FinancialSummary.summary_month.desc(),
-            FinancialSummary.platform_name,
+            FinancialSummary.source_platform_code,
             FinancialSummary.shop_name,
         )
 
@@ -147,7 +191,13 @@ class SummaryService:
 
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)
-        summaries = list(result.scalars().all())
+        summaries = [
+            {
+                "summary": summary,
+                "shop_color": shop_color,
+            }
+            for summary, shop_color in result.all()
+        ]
 
         return summaries, total
 
@@ -161,8 +211,10 @@ class SummaryService:
         source_year: int | None = None,
         source_month: int | None = None,
         platform_name: str | None = None,
+        report_platform_name: str | None = None,
         shop_id: int | None = None,
         shop_name: str | None = None,
+        keyword: str | None = None,
         ids: list[int] | None = None,
         page: int | None = None,
         page_size: int | None = None,
@@ -185,19 +237,33 @@ class SummaryService:
             stmt = stmt.where(FinancialSummary.source_year == source_year)
         if source_month is not None:
             stmt = stmt.where(FinancialSummary.source_month == source_month)
-        if platform_name:
-            stmt = stmt.where(FinancialSummary.platform_name == platform_name)
+        platform_names = split_filter_values(platform_name)
+        if platform_names:
+            stmt = stmt.where(FinancialSummary.source_platform_code.in_(platform_names))
+        report_platform_names = split_filter_values(report_platform_name)
+        if report_platform_names:
+            stmt = stmt.where(FinancialSummary.report_platform_code.in_(report_platform_names))
         if shop_id is not None:
             stmt = stmt.where(FinancialSummary.shop_id == shop_id)
-        if shop_name:
-            stmt = stmt.where(FinancialSummary.shop_name == shop_name)
+        shop_names = split_filter_values(shop_name)
+        if shop_names:
+            stmt = stmt.where(FinancialSummary.shop_name.in_(shop_names))
+        if keyword:
+            like_pattern = f"%{keyword.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    FinancialSummary.shop_name.ilike(like_pattern),
+                    FinancialSummary.source_platform_code.ilike(like_pattern),
+                    FinancialSummary.report_platform_code.ilike(like_pattern),
+                )
+            )
 
         stmt = stmt.order_by(
             FinancialSummary.source_year.desc(),
             FinancialSummary.source_month.desc(),
             FinancialSummary.summary_year.desc(),
             FinancialSummary.summary_month.desc(),
-            FinancialSummary.platform_name,
+            FinancialSummary.source_platform_code,
             FinancialSummary.shop_name,
         )
 
@@ -216,26 +282,37 @@ class SummaryService:
         org_id: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_start_year: int | None = None,
+        source_start_month: int | None = None,
+        source_end_year: int | None = None,
+        source_end_month: int | None = None,
         platform_name: str | None = None,
+        report_platform_name: str | None = None,
         shop_id: int | None = None,
         shop_name: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
-        """Aggregate financial summaries by upload filename year/month."""
+        """Aggregate financial summaries by accounting year/month."""
         filters = SummaryService._build_report_filters(
             org_id=org_id,
             source_year=source_year,
             source_month=source_month,
-            platform_name=platform_name,
+            source_start_year=source_start_year,
+            source_start_month=source_start_month,
+            source_end_year=source_end_year,
+            source_end_month=source_end_month,
+            platform_name=report_platform_name or platform_name,
             shop_id=shop_id,
             shop_name=shop_name,
+            keyword=keyword,
         )
         group_cols = (
             FinancialSummary.org_id,
             FinancialSummary.source_year,
             FinancialSummary.source_month,
-            FinancialSummary.platform_name,
+            FinancialSummary.report_platform_code,
             FinancialSummary.shop_id,
             FinancialSummary.shop_name,
         )
@@ -250,18 +327,21 @@ class SummaryService:
                 FinancialSummary.org_id.label("org_id"),
                 FinancialSummary.source_year.label("source_year"),
                 FinancialSummary.source_month.label("source_month"),
-                FinancialSummary.platform_name.label("platform_name"),
+                FinancialSummary.report_platform_code.label("platform_name"),
+                FinancialSummary.report_platform_code.label("report_platform_code"),
                 FinancialSummary.shop_id.label("shop_id"),
                 FinancialSummary.shop_name.label("shop_name"),
+                func.max(Shop.shop_color).label("shop_color"),
                 func.count(FinancialSummary.id).label("summary_count"),
                 *metric_cols,
             )
+            .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
             .where(*filters)
             .group_by(*group_cols)
             .order_by(
                 FinancialSummary.source_year.desc(),
                 FinancialSummary.source_month.desc(),
-                FinancialSummary.platform_name,
+                FinancialSummary.report_platform_code,
                 FinancialSummary.shop_name,
             )
             .offset((page - 1) * page_size)
@@ -275,9 +355,13 @@ class SummaryService:
             rows=rows,
             source_year=source_year,
             source_month=source_month,
-            platform_name=platform_name,
+            source_start_year=source_start_year,
+            source_start_month=source_start_month,
+            source_end_year=source_end_year,
+            source_end_month=source_end_month,
+            platform_name=single_filter_value(report_platform_name or platform_name),
             shop_id=shop_id,
-            shop_name=shop_name,
+            shop_name=single_filter_value(shop_name),
         )
         return rows, total
 
@@ -288,27 +372,38 @@ class SummaryService:
         org_id: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_start_year: int | None = None,
+        source_start_month: int | None = None,
+        source_end_year: int | None = None,
+        source_end_month: int | None = None,
         platform_name: str | None = None,
+        report_platform_name: str | None = None,
         shop_id: int | None = None,
         shop_name: str | None = None,
+        keyword: str | None = None,
         ids: list[str] | None = None,
         page: int | None = None,
         page_size: int | None = None,
     ) -> io.BytesIO:
-        """Export upload-month aggregated summaries to Excel."""
+        """Export accounting-month aggregated summaries to Excel."""
         filters = SummaryService._build_report_filters(
             org_id=org_id,
             source_year=source_year,
             source_month=source_month,
-            platform_name=platform_name,
+            source_start_year=source_start_year,
+            source_start_month=source_start_month,
+            source_end_year=source_end_year,
+            source_end_month=source_end_month,
+            platform_name=report_platform_name or platform_name,
             shop_id=shop_id,
             shop_name=shop_name,
+            keyword=keyword,
         )
         group_cols = (
             FinancialSummary.org_id,
             FinancialSummary.source_year,
             FinancialSummary.source_month,
-            FinancialSummary.platform_name,
+            FinancialSummary.report_platform_code,
             FinancialSummary.shop_id,
             FinancialSummary.shop_name,
         )
@@ -318,18 +413,21 @@ class SummaryService:
                 FinancialSummary.org_id.label("org_id"),
                 FinancialSummary.source_year.label("source_year"),
                 FinancialSummary.source_month.label("source_month"),
-                FinancialSummary.platform_name.label("platform_name"),
+                FinancialSummary.report_platform_code.label("platform_name"),
+                FinancialSummary.report_platform_code.label("report_platform_code"),
                 FinancialSummary.shop_id.label("shop_id"),
                 FinancialSummary.shop_name.label("shop_name"),
+                func.max(Shop.shop_color).label("shop_color"),
                 func.count(FinancialSummary.id).label("summary_count"),
                 *metric_cols,
             )
+            .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
             .where(*filters)
             .group_by(*group_cols)
             .order_by(
                 FinancialSummary.source_year.desc(),
                 FinancialSummary.source_month.desc(),
-                FinancialSummary.platform_name,
+                FinancialSummary.report_platform_code,
                 FinancialSummary.shop_name,
             )
         )
@@ -345,9 +443,13 @@ class SummaryService:
             rows=rows,
             source_year=source_year,
             source_month=source_month,
-            platform_name=platform_name,
+            source_start_year=source_start_year,
+            source_start_month=source_start_month,
+            source_end_year=source_end_year,
+            source_end_month=source_end_month,
+            platform_name=single_filter_value(report_platform_name or platform_name),
             shop_id=shop_id,
-            shop_name=shop_name,
+            shop_name=single_filter_value(shop_name),
         )
         if ids is not None:
             selected_ids = set(ids)
@@ -370,7 +472,7 @@ class SummaryService:
                 [
                     SummaryService._month_label(s.source_year, s.source_month),
                     f"{s.summary_year}{s.summary_month:02d}",
-                    SummaryService._platform_label(s.platform_name),
+                    SummaryService._platform_label(s.source_platform_code),
                     s.shop_name,
                     float(s.gmv or 0),
                     float(s.platform_income or 0),
@@ -414,7 +516,6 @@ class SummaryService:
                     SummaryService._month_label(int(row.get("source_year") or 0), int(row.get("source_month") or 0)),
                     SummaryService._platform_label(str(row.get("platform_name") or "")),
                     row.get("shop_name") or "",
-                    int(row.get("summary_count") or 0),
                     float(row.get("original_gmv") or 0),
                     float(row.get("gmv_adjustment") or 0),
                     float(row.get("gmv") or 0),
@@ -468,6 +569,10 @@ class SummaryService:
         rows: list[dict],
         source_year: int | None,
         source_month: int | None,
+        source_start_year: int | None,
+        source_start_month: int | None,
+        source_end_year: int | None,
+        source_end_month: int | None,
         platform_name: str | None,
         shop_id: int | None,
         shop_name: str | None,
@@ -480,6 +585,10 @@ class SummaryService:
             org_id=org_id,
             source_year=source_year,
             source_month=source_month,
+            source_start_year=source_start_year,
+            source_start_month=source_start_month,
+            source_end_year=source_end_year,
+            source_end_month=source_end_month,
             platform_name=platform_name,
             shop_id=shop_id,
             shop_name=shop_name,
@@ -512,19 +621,42 @@ class SummaryService:
         org_id: int,
         source_year: int | None,
         source_month: int | None,
+        source_start_year: int | None = None,
+        source_start_month: int | None = None,
+        source_end_year: int | None = None,
+        source_end_month: int | None = None,
         platform_name: str | None,
         shop_id: int | None,
         shop_name: str | None,
+        keyword: str | None = None,
     ):
         filters = [FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False)]
         if source_year is not None:
             filters.append(FinancialSummary.source_year == source_year)
         if source_month is not None:
             filters.append(FinancialSummary.source_month == source_month)
-        if platform_name:
-            filters.append(FinancialSummary.platform_name == platform_name)
+        source_period = FinancialSummary.source_year * 100 + FinancialSummary.source_month
+        source_start_period = month_period_value(source_start_year, source_start_month)
+        source_end_period = month_period_value(source_end_year, source_end_month)
+        if source_start_period is not None:
+            filters.append(source_period >= source_start_period)
+        if source_end_period is not None:
+            filters.append(source_period <= source_end_period)
+        platform_names = split_filter_values(platform_name)
+        if platform_names:
+            filters.append(FinancialSummary.report_platform_code.in_(platform_names))
         if shop_id is not None:
             filters.append(FinancialSummary.shop_id == shop_id)
-        if shop_name:
-            filters.append(FinancialSummary.shop_name.ilike(f"%{shop_name}%"))
+        shop_names = split_filter_values(shop_name)
+        if shop_names:
+            filters.append(FinancialSummary.shop_name.in_(shop_names))
+        if keyword:
+            like_pattern = f"%{keyword.strip()}%"
+            filters.append(
+                or_(
+                    FinancialSummary.shop_name.ilike(like_pattern),
+                    FinancialSummary.source_platform_code.ilike(like_pattern),
+                    FinancialSummary.report_platform_code.ilike(like_pattern),
+                )
+            )
         return filters

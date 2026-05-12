@@ -4,10 +4,12 @@ export interface Platform {
   id: number
   code: string
   name: string
-  enabled: boolean
-  config: Record<string, any>
+  parent_code?: string | null
+  processor_code?: string | null
+  order_scope_code?: string | null
+  sort_order: number
+  status: number
   created_at: string
-  updated_at: string
 }
 
 /**

@@ -89,13 +89,12 @@ DOUYIN_SHIPPING_INSURANCE_HEADERS: list[str] = [
     "动账时间",
     "动账流水号",
     "保险交易单号",
+    "平台优惠【营销补贴】",
     "保障额度",
     "保障状态",
-    "平台优惠1",
-    "活动名称",
-    "平台优惠2",
-    "活动名称",
-    "平台优惠-合计",
+    "备注",
+    "平台优惠【特殊活动】",
+    "平台优惠",
 ]
 
 
@@ -155,6 +154,7 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         category_dict: dict[str, list[str]] | None = None,
     ) -> dict[str, Decimal]:
         beizhu = canonical_remark(safe_str(vals.get("备注")))
+
         matched_compensation = self._match_compensation(beizhu, category_dict)
 
         refund_to_compensation = ZERO_MONEY
@@ -191,9 +191,8 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             return None
 
         for category_name, keywords in category_dict.items():
-            for keyword in keywords:
-                if keyword in beizhu:
-                    return category_name
+            if beizhu in keywords:
+                return category_name
         return None
 
 

@@ -1,29 +1,56 @@
 <template>
   <div class="page-container">
-    <el-card shadow="never">
+    <el-card shadow="never" class="search-card">
+      <el-form :model="searchForm" inline>
+        <el-form-item label="搜索">
+          <el-input
+            v-model="searchForm.keyword"
+            placeholder="店铺名称/主体名称"
+            clearable
+            style="width: 280px"
+            @keyup.enter="fetchData"
+          >
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="平台">
+          <el-select
+            v-model="searchForm.platformNames"
+            placeholder="全部平台"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            style="width: 180px"
+          >
+            <el-option v-for="p in platformOptions" :key="p.value" :label="p.label" :value="p.value">
+              <PlatformBadge :platform="p.value" />
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="fetchData">搜索</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" class="table-card shop-table-card">
       <template #header>
         <div class="card-header">
-          <span>店铺管理</span>
+          <div class="shop-title-group">
+            <span class="card-header-title">店铺列表</span>
+            <span class="shop-count">共 {{ pagination.total }} 条</span>
+          </div>
           <el-button type="primary" @click="handleAdd">
             <el-icon><Plus /></el-icon> 新增店铺
           </el-button>
         </div>
       </template>
 
-      <!-- Search -->
-      <div class="search-bar">
-        <el-input v-model="searchForm.keyword" placeholder="搜索店铺名称/主体名称" clearable style="width: 280px" @keyup.enter="fetchData">
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
-        <el-select v-model="searchForm.platform_name" placeholder="全部平台" clearable style="width: 150px">
-          <el-option v-for="p in platformOptions" :key="p.value" :label="p.label" :value="p.value" />
-        </el-select>
-        <el-button type="primary" @click="fetchData">搜索</el-button>
-        <el-button @click="handleReset">重置</el-button>
-      </div>
-
       <!-- Table -->
-      <el-table :data="tableData" v-loading="loading" stripe border>
+      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%" height="calc(100vh - 278px)">
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
@@ -31,9 +58,15 @@
         </el-table-column>
         <el-table-column prop="platform_name" label="平台" width="120">
           <template #default="{ row }">
-            <el-tag size="small" :class="getPlatformTagClass(row.platform_name)">
-              {{ getPlatformLabel(row.platform_name) }}
-            </el-tag>
+            <PlatformBadge :platform="row.platform_name" />
+          </template>
+        </el-table-column>
+        <el-table-column label="店铺色" width="92" align="center">
+          <template #default="{ row }">
+            <span class="shop-color-chip" :style="shopColorStyle(row.shop_color)">
+              <span class="shop-color-dot"></span>
+              色标
+            </span>
           </template>
         </el-table-column>
         <el-table-column prop="shop_name" label="店铺名称" min-width="180" />
@@ -82,47 +115,64 @@
       :close-on-click-modal="false"
     >
       <div v-if="drawerMode === 'detail' && selectedShop" class="detail-panel">
-        <div class="detail-row">
-          <span class="detail-label">平台</span>
-          <el-tag size="small" :class="getPlatformTagClass(selectedShop.platform_name)">
-            {{ getPlatformLabel(selectedShop.platform_name) }}
-          </el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">店铺名称</span>
-          <strong>{{ selectedShop.shop_name }}</strong>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">主体名称</span>
-          <span>{{ selectedShop.entity_name || '-' }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">状态</span>
-          <el-tag :type="selectedShop.status === 1 ? 'success' : 'danger'" size="small">
-            {{ selectedShop.status === 1 ? '启用' : '禁用' }}
-          </el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">创建时间</span>
-          <span>{{ formatDateTime(selectedShop.created_at) }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">更新时间</span>
-          <span>{{ formatDateTime(selectedShop.updated_at) }}</span>
-        </div>
-        <div class="detail-row is-block">
-          <span class="detail-label">备注</span>
-          <p>{{ selectedShop.remark || '-' }}</p>
-        </div>
+        <section class="detail-hero-card">
+          <div>
+            <span class="detail-kicker">SHOP #{{ selectedShop.id }}</span>
+            <h3>{{ selectedShop.shop_name }}</h3>
+            <p>{{ selectedShop.entity_name || '未填写主体名称' }}</p>
+          </div>
+          <div class="detail-badge-row">
+            <PlatformBadge :platform="selectedShop.platform_name" />
+            <span class="shop-color-chip" :style="shopColorStyle(selectedShop.shop_color)">
+              <span class="shop-color-dot"></span>
+              店铺色
+            </span>
+            <el-tag :type="selectedShop.status === 1 ? 'success' : 'danger'" size="small">
+              {{ selectedShop.status === 1 ? '启用' : '禁用' }}
+            </el-tag>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>时间信息</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">创建时间</span>
+              <strong>{{ formatDateTime(selectedShop.created_at) }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">更新时间</span>
+              <strong>{{ formatDateTime(selectedShop.updated_at) }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>备注</span>
+          </div>
+          <p class="detail-note">{{ selectedShop.remark || '-' }}</p>
+        </section>
       </div>
       <el-form v-else ref="formRef" :model="form" :rules="rules" label-width="80px">
         <el-form-item label="平台" prop="platform_name">
           <el-select v-model="form.platform_name" placeholder="选择平台" style="width: 100%">
-            <el-option v-for="p in platformOptions" :key="p.value" :label="p.label" :value="p.value" />
+            <el-option v-for="p in platformOptions" :key="p.value" :label="p.label" :value="p.value">
+              <PlatformBadge :platform="p.value" />
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="店铺名称" prop="shop_name">
           <el-input v-model="form.shop_name" placeholder="输入店铺名称" />
+        </el-form-item>
+        <el-form-item label="店铺颜色">
+          <el-input v-model="form.shop_color" placeholder="#F59E0B，留空则自动分配">
+            <template #prefix>
+              <span class="color-input-prefix" :style="shopColorStyle(form.shop_color)"></span>
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item label="主体名称">
           <el-input v-model="form.entity_name" placeholder="输入主体名称（选填）" />
@@ -140,28 +190,26 @@
 </template>
 
 <script setup lang="ts">
+defineOptions({ name: 'Shops' })
+
 import { ref, reactive, computed, onMounted } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import { getShopList, createShop, updateShop, deleteShop, type Shop } from '@/api/shop'
-import { formatDateTime, getPlatformLabel, getPlatformTagClass } from '@/utils/format'
+import { getPlatformList, type Platform } from '@/api/platform'
+import { formatDateTime } from '@/utils/format'
+import { getFallbackPlatforms, toReportPlatformOptions, type PlatformOption } from '@/utils/platform'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
+import PlatformBadge from '@/components/PlatformBadge.vue'
 
-const platformOptions = [
-  { label: '抖音', value: 'douyin' },
-  { label: '快手', value: 'kuaishou' },
-  { label: '小红书', value: 'xiaohongshu' },
-  { label: '微信小店', value: 'weixin_video' },
-  { label: '天猫', value: 'tmall' },
-  { label: '淘宝', value: 'taobao' },
-  { label: '小程序', value: 'miniprogram' },
-]
+const platforms = ref<Platform[]>(getFallbackPlatforms())
+const platformOptions = ref<PlatformOption[]>(toReportPlatformOptions(platforms.value))
 
 // Search
 const searchForm = reactive({
   keyword: '',
-  platform_name: '',
+  platformNames: [] as string[],
 })
 
 // Table
@@ -185,6 +233,7 @@ const submitting = ref(false)
 const form = reactive({
   platform_name: '',
   shop_name: '',
+  shop_color: '',
   entity_name: '',
   remark: '',
 })
@@ -211,7 +260,7 @@ async function fetchData() {
       page: pagination.page,
       page_size: pagination.pageSize,
       keyword: searchForm.keyword || undefined,
-      platform_name: searchForm.platform_name || undefined,
+      platform_name: searchForm.platformNames.join(',') || undefined,
     })
     tableData.value = res.items || []
     pagination.total = res.total || 0
@@ -222,9 +271,19 @@ async function fetchData() {
   }
 }
 
+async function fetchPlatformOptions() {
+  try {
+    const res = await getPlatformList()
+    platforms.value = res.length ? res : getFallbackPlatforms()
+  } catch {
+    platforms.value = getFallbackPlatforms()
+  }
+  platformOptions.value = toReportPlatformOptions(platforms.value)
+}
+
 function handleReset() {
   searchForm.keyword = ''
-  searchForm.platform_name = ''
+  searchForm.platformNames = []
   pagination.page = 1
   fetchData()
 }
@@ -236,6 +295,7 @@ function handleAdd() {
   selectedShop.value = null
   form.platform_name = ''
   form.shop_name = ''
+  form.shop_color = ''
   form.entity_name = ''
   form.remark = ''
   drawerVisible.value = true
@@ -254,9 +314,26 @@ function handleEdit(row: Shop) {
   selectedShop.value = row
   form.platform_name = row.platform_name
   form.shop_name = row.shop_name
+  form.shop_color = row.shop_color || ''
   form.entity_name = row.entity_name || ''
   form.remark = row.remark || ''
   drawerVisible.value = true
+}
+
+function normalizeHexColor(value?: string) {
+  const color = String(value || '').trim()
+  if (!color) return '#CBD5E1'
+  return color.startsWith('#') ? color : `#${color}`
+}
+
+function shopColorStyle(color?: string) {
+  const value = normalizeHexColor(color)
+  return {
+    '--shop-color': value,
+    background: `color-mix(in srgb, ${value} 14%, white)`,
+    borderColor: `color-mix(in srgb, ${value} 34%, white)`,
+    color: value,
+  }
 }
 
 async function handleSubmit() {
@@ -269,6 +346,7 @@ async function handleSubmit() {
       await updateShop(editId.value, {
         platform_name: form.platform_name,
         shop_name: form.shop_name,
+        shop_color: form.shop_color || undefined,
         entity_name: form.entity_name || undefined,
         remark: form.remark || undefined,
       })
@@ -277,6 +355,7 @@ async function handleSubmit() {
       await createShop({
         platform_name: form.platform_name,
         shop_name: form.shop_name,
+        shop_color: form.shop_color || undefined,
         entity_name: form.entity_name || undefined,
         remark: form.remark || undefined,
       })
@@ -306,12 +385,33 @@ async function handleDelete(row: Shop) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await fetchPlatformOptions()
   fetchData()
 })
 </script>
 
 <style scoped lang="scss">
+.shop-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.shop-count {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.shop-table-card {
+  :deep(.el-card__body) {
+    padding: 0;
+  }
+}
+
 .drawer-footer {
   position: sticky;
   bottom: 0;
@@ -325,21 +425,28 @@ onMounted(() => {
 }
 
 .detail-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  gap: 12px;
 }
 
-.detail-row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 12px;
-  align-items: center;
-  color: var(--text-primary);
-  line-height: 1.7;
+.detail-hero-card,
+.detail-card {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+}
 
-  &.is-block {
-    align-items: flex-start;
+.detail-hero-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+
+  h3 {
+    margin: 4px 0;
+    color: var(--text-primary);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.4;
   }
 
   p {
@@ -349,8 +456,97 @@ onMounted(() => {
   }
 }
 
+.detail-kicker {
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.detail-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shop-color-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--shop-color);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shop-color-dot,
+.color-input-prefix {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--shop-color);
+}
+
+.color-input-prefix {
+  display: inline-flex;
+}
+
+.detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.detail-card-header {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color-light);
+  border-radius: calc(var(--radius-card) - 2px);
+  background: var(--bg-elevated);
+
+  strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .detail-label {
   color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-note {
+  margin: 0;
+  color: var(--text-secondary);
   font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

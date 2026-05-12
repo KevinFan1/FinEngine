@@ -88,6 +88,7 @@ class CategoryDictService:
         )
         db.add(cd)
         await db.flush()
+        await db.refresh(cd)
         return cd
 
     @staticmethod
@@ -106,6 +107,7 @@ class CategoryDictService:
         for field, value in update_data.items():
             setattr(cd, field, value)
         await db.flush()
+        await db.refresh(cd)
         return cd
 
     @staticmethod

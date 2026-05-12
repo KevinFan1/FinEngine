@@ -10,6 +10,7 @@ from app.tasks.aggregation import AggregationService
 from app.tasks.processors.xiaohongshu import (
     XIAOHONGSHU_DONGZHANG_HEADERS,
     XIAOHONGSHU_GMV_HEADERS,
+    XIAOHONGSHU_ORDER_HEADERS,
     XIAOHONGSHU_OTHER_SERVICE_HEADERS,
     xiaohongshu_processor,
 )
@@ -105,6 +106,27 @@ def test_xiaohongshu_dongzhang_extracts_small_receipt_negative_contribution(tmp_
     assert result["return_cost_contribution_rows"] == [{"order_no": "xhs-1", "return_cost": Decimal("-4.50")}]
 
 
+def test_xiaohongshu_order_extracts_order_times(tmp_path: Path) -> None:
+    file_path = tmp_path / "xiaohongshu_order.xlsx"
+    _write_workbook(
+        file_path,
+        XIAOHONGSHU_ORDER_HEADERS,
+        [
+            _row(XIAOHONGSHU_ORDER_HEADERS, 订单号="xhs-o-1", 订单创建时间="2026-04-01 12:00:00"),
+            _row(XIAOHONGSHU_ORDER_HEADERS, 订单号="xhs-o-2", 订单创建时间="2026/04/02"),
+            _row(XIAOHONGSHU_ORDER_HEADERS, 订单号="", 订单创建时间="2026/04/03"),
+        ],
+    )
+
+    result = xiaohongshu_processor.process(str(file_path), shop_name="小红书店铺", type_code="订单")
+
+    assert result["total_rows"] == 3
+    assert result["success_rows"] == 2
+    assert result["failed_rows"] == 1
+    assert [row["order_no"] for row in result["orders"]] == ["xhs-o-1", "xhs-o-2"]
+    assert [row["order_created_at"].month for row in result["orders"]] == [4, 4]
+
+
 async def _run_return_cost_contribution_case(first_value: Decimal, second_value: Decimal) -> FinancialSummary:
     summary = FinancialSummary(
         org_id=1,
@@ -113,6 +135,8 @@ async def _run_return_cost_contribution_case(first_value: Decimal, second_value:
         summary_month=4,
         source_year=2026,
         source_month=4,
+        source_platform_code="xiaohongshu",
+        report_platform_code="xiaohongshu",
         platform_name="xiaohongshu",
         shop_name="小红书店铺",
         return_cost=Decimal("0"),
@@ -171,14 +195,62 @@ async def _run_return_cost_contribution_case(first_value: Decimal, second_value:
 
 
 @pytest.mark.asyncio
-async def test_return_cost_contributions_are_summed_by_source_file() -> None:
+async def test_return_cost_contributions_are_summed_by_source_type() -> None:
     summary = await _run_return_cost_contribution_case(Decimal("12.30"), Decimal("-4.50"))
 
     assert summary.return_cost == Decimal("7.80")
     assert summary.extra_data == {
         "return_cost_contributions": {
-            "其他服务款:10": "12.30",
-            "动账:11": "-4.50",
+            "其他服务款": "12.30",
+            "动账": "-4.50",
         }
     }
     assert summary.source_file_ids == [10, 11]
+
+
+@pytest.mark.asyncio
+async def test_return_cost_contribution_replaces_existing_source_type() -> None:
+    summary = await _run_return_cost_contribution_case(Decimal("12.30"), Decimal("-4.50"))
+
+    class FakeResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, _stmt):
+            self.calls += 1
+            shop = Shop(id=1, org_id=1, platform_name="xiaohongshu", shop_name="小红书店铺")
+            return FakeResult(shop if self.calls % 2 == 1 else summary)
+
+        async def flush(self):
+            return None
+
+    await AggregationService.upsert_return_cost_contribution(
+        FakeSession(),
+        org_id=1,
+        shop_id=1,
+        year=2026,
+        month=4,
+        platform_name="xiaohongshu",
+        shop_name="小红书店铺",
+        contribution_key="其他服务款",
+        return_cost=Decimal("9.10"),
+        source_file_id=12,
+        source_year=2026,
+        source_month=4,
+    )
+
+    assert summary.return_cost == Decimal("4.60")
+    assert summary.extra_data == {
+        "return_cost_contributions": {
+            "动账": "-4.50",
+            "其他服务款": "9.10",
+        }
+    }
+    assert summary.source_file_ids == [10, 11, 12]

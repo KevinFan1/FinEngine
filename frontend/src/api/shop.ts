@@ -4,6 +4,7 @@ export interface Shop {
   id: number
   platform_name: string
   shop_name: string
+  shop_color?: string
   entity_name?: string
   remark?: string
   status: number
@@ -14,6 +15,7 @@ export interface Shop {
 export interface ShopForm {
   platform_name: string
   shop_name: string
+  shop_color?: string
   entity_name?: string
   remark?: string
 }

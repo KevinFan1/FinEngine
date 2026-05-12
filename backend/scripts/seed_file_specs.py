@@ -13,19 +13,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.core.database import async_session_factory
 from app.models.file_spec import FileSpec
 from app.models.platform import Platform
+from app.tasks.processors.alipay import ALIPAY_DONGZHANG_HEADERS
+from app.tasks.processors.douyin import DOUYIN_SHIPPING_INSURANCE_HEADERS
+from app.tasks.processors.qianniu import QIANNIU_DONGZHANG_HEADERS, QIANNIU_ORDER_HEADERS
 from app.tasks.processors.weixin_video import WEIXIN_VIDEO_BIC_HEADERS, WEIXIN_VIDEO_DONGZHANG_HEADERS, WEIXIN_VIDEO_ORDER_HEADERS
-from app.tasks.processors.xiaohongshu import XIAOHONGSHU_DONGZHANG_HEADERS, XIAOHONGSHU_GMV_HEADERS, XIAOHONGSHU_OTHER_SERVICE_HEADERS
+from app.tasks.processors.xiaohongshu import (
+    XIAOHONGSHU_DONGZHANG_HEADERS,
+    XIAOHONGSHU_GMV_HEADERS,
+    XIAOHONGSHU_ORDER_HEADERS,
+    XIAOHONGSHU_OTHER_SERVICE_HEADERS,
+)
 from sqlalchemy import select
 
 # ── Platform definitions ─────────────────────────────────────────────────────
 PLATFORMS = [
-    {"code": "douyin", "name": "抖音", "sort_order": 1},
-    {"code": "kuaishou", "name": "快手", "sort_order": 2},
-    {"code": "xiaohongshu", "name": "小红书", "sort_order": 3},
-    {"code": "weixin_video", "name": "微信小店", "sort_order": 4},
-    {"code": "tmall", "name": "天猫", "sort_order": 5},
-    {"code": "miniprogram", "name": "小程序", "sort_order": 6},
-    {"code": "taobao", "name": "淘宝", "sort_order": 7},
+    {"code": "douyin", "name": "抖音", "sort_order": 1, "parent_code": "douyin", "processor_code": "douyin", "order_scope_code": "douyin"},
+    {"code": "kuaishou", "name": "快手", "sort_order": 2, "parent_code": "kuaishou", "processor_code": "kuaishou", "order_scope_code": "kuaishou"},
+    {"code": "xiaohongshu", "name": "小红书", "sort_order": 3, "parent_code": "xiaohongshu", "processor_code": "xiaohongshu", "order_scope_code": "xiaohongshu"},
+    {"code": "weixin_video", "name": "微信小店", "sort_order": 4, "parent_code": "weixin_video", "processor_code": "weixin_video", "order_scope_code": "weixin_video"},
+    {"code": "taobao", "name": "淘宝", "sort_order": 5, "parent_code": "taobao", "processor_code": "taobao", "order_scope_code": "taobao"},
+    {"code": "alipay", "name": "支付宝", "sort_order": 6, "parent_code": "taobao", "processor_code": "alipay", "order_scope_code": "taobao"},
+    {"code": "qianniu", "name": "千牛", "sort_order": 7, "parent_code": "taobao", "processor_code": "qianniu", "order_scope_code": "taobao"},
+    {"code": "tmall", "name": "天猫", "sort_order": 8, "parent_code": "taobao", "processor_code": "tmall", "order_scope_code": "taobao"},
+    {"code": "miniprogram", "name": "小程序", "sort_order": 9, "parent_code": "miniprogram", "processor_code": "miniprogram", "order_scope_code": "miniprogram"},
 ]
 
 # ── File spec definitions ────────────────────────────────────────────────────
@@ -108,27 +118,7 @@ FILE_SPECS = [
         "type_code": "运费险",
         "name": "抖音运费险",
         "match_threshold": 5,
-        "headers": [
-            "投保单号",
-            "订单编号",
-            "下单时间",
-            "承保时间",
-            "保险名称",
-            "承保保司",
-            "保费来源",
-            "支付保费",
-            "保费状态",
-            "动账时间",
-            "动账流水号",
-            "保险交易单号",
-            "保障额度",
-            "保障状态",
-            "平台优惠1",
-            "活动名称",
-            "平台优惠2",
-            "活动名称",
-            "平台优惠-合计",
-        ],
+        "headers": DOUYIN_SHIPPING_INSURANCE_HEADERS,
     },
     {
         "platform_code": "kuaishou",
@@ -320,6 +310,34 @@ FILE_SPECS = [
         "match_threshold": 5,
         "headers": XIAOHONGSHU_DONGZHANG_HEADERS,
     },
+    {
+        "platform_code": "xiaohongshu",
+        "type_code": "订单",
+        "name": "小红书订单",
+        "match_threshold": 5,
+        "headers": XIAOHONGSHU_ORDER_HEADERS,
+    },
+    {
+        "platform_code": "alipay",
+        "type_code": "动账",
+        "name": "支付宝动账",
+        "match_threshold": 5,
+        "headers": ALIPAY_DONGZHANG_HEADERS,
+    },
+    {
+        "platform_code": "qianniu",
+        "type_code": "订单",
+        "name": "千牛订单",
+        "match_threshold": 5,
+        "headers": QIANNIU_ORDER_HEADERS,
+    },
+    {
+        "platform_code": "qianniu",
+        "type_code": "动账",
+        "name": "千牛动账",
+        "match_threshold": 5,
+        "headers": QIANNIU_DONGZHANG_HEADERS,
+    },
 ]
 
 
@@ -336,6 +354,9 @@ async def seed():
                 platform = Platform(
                     code=p["code"],
                     name=p["name"],
+                    parent_code=p["parent_code"],
+                    processor_code=p["processor_code"],
+                    order_scope_code=p["order_scope_code"],
                     sort_order=p["sort_order"],
                     status=1,
                 )
@@ -344,6 +365,9 @@ async def seed():
                 print(f"[+] Created platform: id={platform.id} code={p['code']}")
             else:
                 platform.name = p["name"]
+                platform.parent_code = p["parent_code"]
+                platform.processor_code = p["processor_code"]
+                platform.order_scope_code = p["order_scope_code"]
                 platform.sort_order = p["sort_order"]
                 await db.flush()
                 print(f"[=] Platform exists: id={platform.id} code={p['code']}")

@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Upload
     MAX_UPLOAD_SIZE_MB: int = 1024  # 最大上传文件大小 1024MB
 
+    # Logging
+    LOG_DIR: str = str(BACKEND_DIR / "logs")
+    LOG_LEVEL: str = "INFO"
+    LOG_RETENTION_DAYS: int = 15
+    LOG_ROTATION_TIME: str = "00:00"
+
     # Alibaba Cloud credentials
     ALIYUN_ACCESS_KEY_ID: str = ""
     ALIYUN_ACCESS_KEY_SECRET: str = ""

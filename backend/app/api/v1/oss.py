@@ -1,6 +1,6 @@
 """OSS API — Alibaba Cloud STS temporary credentials for frontend direct upload."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,14 +52,11 @@ async def get_oss_sts(
     Credentials expire after `ALIYUN_STS_EXPIRE_SECONDS` (default 3600s).
     """
     if not settings.ALIYUN_STS_ROLE_ARN or not settings.ALIYUN_ACCESS_KEY_ID:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="阿里云 OSS STS 未配置",
-        )
+        return ApiResponse(code=501, message="阿里云 OSS STS 未配置")
 
     batch = await UploadService.get_batch_for_user(db, batch_id=batch_id, user=current_user)
     if batch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="上传批次不存在或无权访问")
+        return ApiResponse(code=404, message="上传批次不存在或无权访问")
 
     prefix = f"user-upload/tmp/{batch.org_id}/{batch.id}/"
 
@@ -72,10 +69,7 @@ async def get_oss_sts(
             duration_seconds=settings.ALIYUN_STS_EXPIRE_SECONDS,
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"获取 STS 凭证失败: {e}",
-        )
+        return ApiResponse(code=502, message=f"获取 STS 凭证失败: {e}")
 
     return ApiResponse(
         data=StsCredentialOut(

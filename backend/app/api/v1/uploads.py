@@ -1,6 +1,6 @@
 """Upload API — batch management and uploaded-file callback."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -13,7 +13,7 @@ from app.services.upload_service import UploadService
 router = APIRouter()
 
 
-@router.post("/batch", response_model=ApiResponse[UploadBatchOut], status_code=status.HTTP_201_CREATED)
+@router.post("/batch", response_model=ApiResponse[UploadBatchOut])
 async def create_upload_batch(
     body: UploadBatchCreate,
     request: Request,
@@ -34,12 +34,12 @@ async def create_upload_batch(
             user_agent=ua,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        return ApiResponse(code=400, message=str(e))
 
     return ApiResponse(data=UploadBatchOut.model_validate(batch))
 
 
-@router.post("/callback", response_model=ApiResponse[UploadFileOut], status_code=status.HTTP_201_CREATED)
+@router.post("/callback", response_model=ApiResponse[UploadFileOut])
 async def upload_file_callback(
     body: UploadFileCallback,
     request: Request,
@@ -61,7 +61,7 @@ async def upload_file_callback(
             user_agent=ua,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        return ApiResponse(code=400, message=str(e))
 
     return ApiResponse(data=UploadFileOut.model_validate(upload_file))
 
@@ -95,7 +95,7 @@ async def get_upload_batch_detail(
     """Get upload batch detail with file list."""
     batch = await UploadService.get_batch_detail(db, batch_id)
     if batch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
+        return ApiResponse(code=404, message="批次不存在")
 
     files = await UploadService.get_batch_files(db, batch_id)
 

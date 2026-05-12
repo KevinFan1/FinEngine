@@ -19,7 +19,7 @@ export interface UserListParams {
   page?: number
   page_size?: number
   keyword?: string
-  org_id?: number
+  org_id?: number | string
   role?: string
   status?: string
 }

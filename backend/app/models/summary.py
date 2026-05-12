@@ -16,12 +16,15 @@ class FinancialSummary(SoftDeleteMixin, Base):
             "summary_year",
             "summary_month",
             "shop_id",
+            "source_platform_code",
             "source_year",
             "source_month",
             unique=True,
             postgresql_where=text("is_deleted = false"),
         ),
         Index("idx_fin_summaries_source_lookup", "org_id", "source_year", "source_month"),
+        Index("idx_fin_summaries_source_platform", "org_id", "source_platform_code"),
+        Index("idx_fin_summaries_report_platform", "org_id", "report_platform_code"),
         {"comment": "财务汇总表"},
     )
 
@@ -34,6 +37,8 @@ class FinancialSummary(SoftDeleteMixin, Base):
     summary_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="汇总月份")
     source_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default=text("0"), comment="数据表上传年份，来自文件名解析")
     source_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default=text("0"), comment="数据表上传月份，来自文件名解析")
+    source_platform_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="来源子平台编码，用于汇总明细")
+    report_platform_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="归集父平台编码，用于汇总报表")
     platform_name: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码冗余")
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称冗余")
 

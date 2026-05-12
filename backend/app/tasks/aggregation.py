@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
+from app.services.shop_color_service import assign_default_shop_color
 from app.utils.money import ZERO_MONEY, safe_decimal
 
 
@@ -36,13 +37,22 @@ class AggregationService:
         source_file_id: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_platform_code: str | None = None,
+        report_platform_code: str | None = None,
+        shop_platform_code: str | None = None,
     ) -> FinancialSummary:
         """Merge parsed rows into the summary table."""
+        source_platform, report_platform, shop_platform = AggregationService._normalize_platform_codes(
+            platform_name=platform_name,
+            source_platform_code=source_platform_code,
+            report_platform_code=report_platform_code,
+            shop_platform_code=shop_platform_code,
+        )
         shop = await AggregationService._resolve_shop(
             db,
             org_id=org_id,
             shop_id=shop_id,
-            platform_name=platform_name,
+            platform_name=shop_platform,
             shop_name=shop_name,
         )
         source_year_value = AggregationService._normalize_source_date_part(source_year)
@@ -53,6 +63,7 @@ class AggregationService:
             FinancialSummary.summary_year == year,
             FinancialSummary.summary_month == month,
             FinancialSummary.shop_id == shop.id,
+            FinancialSummary.source_platform_code == source_platform,
             FinancialSummary.source_year == source_year_value,
             FinancialSummary.source_month == source_month_value,
             FinancialSummary.is_deleted.is_(False),
@@ -68,13 +79,17 @@ class AggregationService:
                 summary_month=month,
                 source_year=source_year_value,
                 source_month=source_month_value,
-                platform_name=shop.platform_name,
+                source_platform_code=source_platform,
+                report_platform_code=report_platform,
+                platform_name=source_platform,
                 shop_name=shop.shop_name,
             )
             db.add(summary)
             await db.flush()
         else:
-            summary.platform_name = shop.platform_name
+            summary.source_platform_code = source_platform
+            summary.report_platform_code = report_platform
+            summary.platform_name = source_platform
             summary.shop_name = shop.shop_name
 
         # Aggregate rows by type
@@ -117,6 +132,9 @@ class AggregationService:
         source_file_id: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_platform_code: str | None = None,
+        report_platform_code: str | None = None,
+        shop_platform_code: str | None = None,
     ) -> FinancialSummary:
         """Write pre-aggregated values directly into the summary table.
 
@@ -126,11 +144,17 @@ class AggregationService:
           merchant_fee, promotion_fee, provider_commission, donation_fee,
           insurance_fee, bic
         """
+        source_platform, report_platform, shop_platform = AggregationService._normalize_platform_codes(
+            platform_name=platform_name,
+            source_platform_code=source_platform_code,
+            report_platform_code=report_platform_code,
+            shop_platform_code=shop_platform_code,
+        )
         shop = await AggregationService._resolve_shop(
             db,
             org_id=org_id,
             shop_id=shop_id,
-            platform_name=platform_name,
+            platform_name=shop_platform,
             shop_name=shop_name,
         )
         source_year_value = AggregationService._normalize_source_date_part(source_year)
@@ -140,6 +164,7 @@ class AggregationService:
             FinancialSummary.summary_year == year,
             FinancialSummary.summary_month == month,
             FinancialSummary.shop_id == shop.id,
+            FinancialSummary.source_platform_code == source_platform,
             FinancialSummary.source_year == source_year_value,
             FinancialSummary.source_month == source_month_value,
             FinancialSummary.is_deleted.is_(False),
@@ -155,13 +180,17 @@ class AggregationService:
                 summary_month=month,
                 source_year=source_year_value,
                 source_month=source_month_value,
-                platform_name=shop.platform_name,
+                source_platform_code=source_platform,
+                report_platform_code=report_platform,
+                platform_name=source_platform,
                 shop_name=shop.shop_name,
             )
             db.add(summary)
             await db.flush()
         else:
-            summary.platform_name = shop.platform_name
+            summary.source_platform_code = source_platform
+            summary.report_platform_code = report_platform
+            summary.platform_name = source_platform
             summary.shop_name = shop.shop_name
 
         # Directly set aggregated values
@@ -206,15 +235,18 @@ class AggregationService:
         source_file_id: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_platform_code: str | None = None,
+        report_platform_code: str | None = None,
+        shop_platform_code: str | None = None,
     ) -> FinancialSummary:
         """Upsert one file's return-cost contribution and recompute the total.
 
         小红书的「退货费用及其他费用」来自两个文件:
           其他服务款: 小额打款求和 A
           动账: 小额收款求和 B
-        Final value is A - B. We store each source file contribution and set
-        return_cost to their sum so retrying one file replaces its contribution
-        instead of double-counting or clearing the other file's value.
+        Final value is A - B. We store each source type contribution and set
+        return_cost to their sum so recalculating one source replaces its value
+        instead of double-counting or clearing the other source's value.
         """
         summary = await AggregationService._get_or_create_summary(
             db,
@@ -226,11 +258,19 @@ class AggregationService:
             shop_name=shop_name,
             source_year=source_year,
             source_month=source_month,
+            source_platform_code=source_platform_code,
+            report_platform_code=report_platform_code,
+            shop_platform_code=shop_platform_code,
         )
 
         extra_data = dict(summary.extra_data or {})
         contributions = dict(extra_data.get("return_cost_contributions") or {})
-        contribution_id = f"{contribution_key}:{source_file_id}"
+        legacy_prefix = f"{contribution_key}:"
+        for key in list(contributions):
+            if key == contribution_key or key.startswith(legacy_prefix):
+                contributions.pop(key, None)
+
+        contribution_id = contribution_key
         contributions[contribution_id] = str(safe_decimal(return_cost))
         extra_data["return_cost_contributions"] = contributions
         summary.extra_data = extra_data
@@ -268,12 +308,21 @@ class AggregationService:
         shop_name: str,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_platform_code: str | None = None,
+        report_platform_code: str | None = None,
+        shop_platform_code: str | None = None,
     ) -> FinancialSummary:
+        source_platform, report_platform, shop_platform = AggregationService._normalize_platform_codes(
+            platform_name=platform_name,
+            source_platform_code=source_platform_code,
+            report_platform_code=report_platform_code,
+            shop_platform_code=shop_platform_code,
+        )
         shop = await AggregationService._resolve_shop(
             db,
             org_id=org_id,
             shop_id=shop_id,
-            platform_name=platform_name,
+            platform_name=shop_platform,
             shop_name=shop_name,
         )
         source_year_value = AggregationService._normalize_source_date_part(source_year)
@@ -283,6 +332,7 @@ class AggregationService:
             FinancialSummary.summary_year == year,
             FinancialSummary.summary_month == month,
             FinancialSummary.shop_id == shop.id,
+            FinancialSummary.source_platform_code == source_platform,
             FinancialSummary.source_year == source_year_value,
             FinancialSummary.source_month == source_month_value,
             FinancialSummary.is_deleted.is_(False),
@@ -298,16 +348,33 @@ class AggregationService:
                 summary_month=month,
                 source_year=source_year_value,
                 source_month=source_month_value,
-                platform_name=shop.platform_name,
+                source_platform_code=source_platform,
+                report_platform_code=report_platform,
+                platform_name=source_platform,
                 shop_name=shop.shop_name,
             )
             db.add(summary)
             await db.flush()
         else:
-            summary.platform_name = shop.platform_name
+            summary.source_platform_code = source_platform
+            summary.report_platform_code = report_platform
+            summary.platform_name = source_platform
             summary.shop_name = shop.shop_name
 
         return summary
+
+    @staticmethod
+    def _normalize_platform_codes(
+        *,
+        platform_name: str,
+        source_platform_code: str | None,
+        report_platform_code: str | None,
+        shop_platform_code: str | None,
+    ) -> tuple[str, str, str]:
+        source_platform = (source_platform_code or platform_name).strip()
+        report_platform = (report_platform_code or source_platform).strip()
+        shop_platform = (shop_platform_code or report_platform).strip()
+        return source_platform, report_platform, shop_platform
 
     @staticmethod
     async def _resolve_shop(
@@ -334,7 +401,23 @@ class AggregationService:
         )
         shop = result.scalar_one_or_none()
         if shop is None:
-            shop = Shop(org_id=org_id, platform_name=platform_name, shop_name=shop_name)
+            shop = Shop(
+                org_id=org_id,
+                platform_name=platform_name,
+                shop_name=shop_name,
+                shop_color=assign_default_shop_color(
+                    org_id=org_id,
+                    platform_name=platform_name,
+                    shop_name=shop_name,
+                ),
+            )
             db.add(shop)
+            await db.flush()
+        elif not shop.shop_color:
+            shop.shop_color = assign_default_shop_color(
+                org_id=org_id,
+                platform_name=shop.platform_name,
+                shop_name=shop.shop_name,
+            )
             await db.flush()
         return shop

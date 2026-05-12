@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class ShopCreate(BaseModel):
     platform_name: str
     shop_name: str
+    shop_color: str | None = None
     entity_name: str | None = None
     remark: str | None = None
 
@@ -13,6 +14,7 @@ class ShopCreate(BaseModel):
 class ShopUpdate(BaseModel):
     platform_name: str | None = None
     shop_name: str | None = None
+    shop_color: str | None = None
     entity_name: str | None = None
     remark: str | None = None
     status: int | None = None
@@ -22,6 +24,7 @@ class ShopOut(BaseModel):
     id: int
     platform_name: str
     shop_name: str
+    shop_color: str | None
     entity_name: str | None
     remark: str | None
     status: int

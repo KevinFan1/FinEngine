@@ -43,7 +43,7 @@ class AliyunOSSService:
         host = parsed.netloc
         if host.startswith(bucket_prefix):
             host = host[len(bucket_prefix) :]
-        return f"{parsed.scheme}://{host}"
+        return f"https://{host}"
 
     def _bucket(self) -> oss2.Bucket:
         self._require_config()

@@ -51,6 +51,10 @@ class UploadFileOut(BaseModel):
     parsed_type: str | None
     parsed_shop: str | None
     detected_platform: str | None
+    source_platform_code: str | None
+    report_platform_code: str | None
+    processor_code: str | None
+    order_scope_code: str | None
     status: str
     error_message: str | None
     row_count: int | None

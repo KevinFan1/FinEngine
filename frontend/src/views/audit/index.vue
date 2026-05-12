@@ -1,18 +1,28 @@
 <template>
   <div class="page-container">
-    <!-- Page header -->
-    <div class="page-header">
-      <div class="page-header-info">
-        <h2 class="page-title">操作日志</h2>
-        <p class="page-desc">查看系统操作记录，用于审计和问题追踪</p>
-      </div>
-    </div>
-
     <!-- Filter bar -->
-    <el-card shadow="never" class="search-card">
-      <el-form :model="searchForm" inline>
+    <el-card shadow="never" class="search-card audit-search-card">
+      <div class="search-card-head">
+        <div>
+          <p class="search-card-kicker">AUDIT TRAIL</p>
+          <h2 class="search-card-title">先定位操作，再查看日志详情</h2>
+        </div>
+        <div class="search-card-tip">
+          支持按模块、操作类型、操作人和时间范围快速筛选
+        </div>
+      </div>
+
+      <el-form :model="searchForm" inline class="audit-filter-form">
         <el-form-item label="模块">
-          <el-select v-model="searchForm.module" placeholder="全部模块" clearable style="width: 130px">
+          <el-select
+            v-model="searchForm.modules"
+            placeholder="全部模块"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 160px"
+          >
             <el-option label="认证" value="auth" />
             <el-option label="组织" value="org" />
             <el-option label="用户" value="user" />
@@ -24,7 +34,16 @@
           </el-select>
         </el-form-item>
         <el-form-item label="操作类型">
-          <el-select v-model="searchForm.action" placeholder="全部类型" clearable style="width: 130px">
+          <el-select
+            v-model="searchForm.actions"
+            placeholder="全部类型"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            style="width: 160px"
+          >
             <el-option
               v-for="item in actionOptions"
               :key="item.value"
@@ -66,10 +85,23 @@
     <!-- Table -->
     <el-card shadow="never" class="table-card">
       <template #header>
-        <span class="card-header-title">操作日志</span>
+        <div class="card-header">
+          <div class="audit-title-group">
+            <span class="card-header-title">操作日志</span>
+            <span class="audit-count">共 {{ pagination.total }} 条</span>
+          </div>
+        </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" stripe border style="width: 100%">
+      <el-table
+        class="summary-table roomy-table"
+        :data="tableData"
+        v-loading="loading"
+        stripe
+        border
+        style="width: 100%"
+        height="calc(100vh - 278px)"
+      >
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
@@ -87,12 +119,12 @@
         </el-table-column>
         <el-table-column prop="module" label="模块" width="90" align="center">
           <template #default="{ row }">
-            <el-tag type="info" size="small">{{ moduleLabel(row.module) }}</el-tag>
+            <el-tag class="audit-type-pill" size="small">{{ moduleLabel(row.module) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="action" label="操作" width="90" align="center">
           <template #default="{ row }">
-            <el-tag size="small">{{ actionLabel(row.action) }}</el-tag>
+            <el-tag class="audit-type-pill" size="small">{{ actionLabel(row.action) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="description" label="描述" min-width="280" show-overflow-tooltip />
@@ -141,50 +173,49 @@
       :close-on-click-modal="false"
     >
       <div v-if="selectedLog" class="detail-panel">
-        <div class="detail-row">
-          <span class="detail-label">时间</span>
-          <span>{{ formatDateTime(selectedLog.created_at) }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">操作人</span>
-          <strong>{{ selectedLog.display_name || selectedLog.username || '-' }}</strong>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">模块</span>
-          <el-tag type="info" size="small">{{ moduleLabel(selectedLog.module) }}</el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">操作</span>
-          <el-tag size="small">{{ actionLabel(selectedLog.action) }}</el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">状态</span>
-          <el-tag :type="selectedLog.status === 'success' ? 'success' : 'danger'" size="small">
-            {{ selectedLog.status === 'success' ? '成功' : '失败' }}
-          </el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">IP</span>
-          <span>{{ selectedLog.ip || selectedLog.ip_address || '-' }}</span>
-        </div>
-        <div class="detail-row is-block">
-          <span class="detail-label">描述</span>
-          <p>{{ selectedLog.description || '-' }}</p>
-        </div>
-        <div v-if="selectedLog.error_msg" class="detail-row is-block">
-          <span class="detail-label">错误信息</span>
+        <section class="detail-hero-card">
+          <div>
+            <span class="detail-kicker">{{ formatDateTime(selectedLog.created_at) }}</span>
+            <h3>{{ selectedLog.display_name || selectedLog.username || '-' }}</h3>
+            <p>{{ selectedLog.ip || selectedLog.ip_address || '-' }}</p>
+          </div>
+          <div class="detail-badge-row">
+            <el-tag class="audit-type-pill" size="small">{{ moduleLabel(selectedLog.module) }}</el-tag>
+            <el-tag class="audit-type-pill" size="small">{{ actionLabel(selectedLog.action) }}</el-tag>
+            <el-tag :type="selectedLog.status === 'success' ? 'success' : 'danger'" size="small">
+              {{ selectedLog.status === 'success' ? '成功' : '失败' }}
+            </el-tag>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>描述</span>
+          </div>
+          <p class="detail-note">{{ selectedLog.description || '-' }}</p>
+        </section>
+
+        <section v-if="selectedLog.error_msg" class="detail-card detail-card--danger">
+          <div class="detail-card-header">
+            <span>错误信息</span>
+          </div>
           <p class="detail-error">{{ selectedLog.error_msg }}</p>
-        </div>
-        <div class="detail-row is-block">
-          <span class="detail-label">User Agent</span>
-          <p>{{ selectedLog.user_agent || '-' }}</p>
-        </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>User Agent</span>
+          </div>
+          <p class="detail-note">{{ selectedLog.user_agent || '-' }}</p>
+        </section>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
+defineOptions({ name: 'AuditLogs' })
+
 import { ref, reactive, onMounted } from 'vue'
 import { getAuditLogList, type AuditLog } from '@/api/audit'
 import { formatDateTime } from '@/utils/format'
@@ -192,8 +223,8 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils
 
 // Search
 const searchForm = reactive({
-  module: '',
-  action: '',
+  modules: [] as string[],
+  actions: [] as string[],
   username: '',
   dateRange: null as [string, string] | null,
 })
@@ -258,8 +289,8 @@ async function fetchData() {
     const params: Record<string, any> = {
       page: pagination.page,
       page_size: pagination.pageSize,
-      module: searchForm.module || undefined,
-      action: searchForm.action || undefined,
+      module: searchForm.modules.join(',') || undefined,
+      action: searchForm.actions.join(',') || undefined,
       username: searchForm.username || undefined,
     }
     if (searchForm.dateRange && searchForm.dateRange.length === 2) {
@@ -282,8 +313,8 @@ function handleSearch() {
 }
 
 function handleReset() {
-  searchForm.module = ''
-  searchForm.action = ''
+  searchForm.modules = []
+  searchForm.actions = []
   searchForm.username = ''
   searchForm.dateRange = null
   pagination.page = 1
@@ -303,48 +334,119 @@ onMounted(() => {
 <style scoped lang="scss">
 .page-container {
   width: 100%;
+  min-height: calc(100vh - 96px);
 }
 
-.page-header {
+.audit-search-card {
   margin-bottom: 16px;
+}
 
-  .page-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-  }
+.search-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
 
-  .page-desc {
-    font-size: 13px;
-    color: var(--text-tertiary);
-  }
+.search-card-kicker {
+  margin: 0 0 4px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.search-card-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.search-card-tip {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.audit-filter-form {
+  row-gap: 6px;
 }
 
 .table-card {
-  .card-header-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text-primary);
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+
+    &-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+  }
+}
+
+.audit-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.audit-count {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.audit-type-pill {
+  min-width: 52px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px !important;
+  color: var(--el-color-primary) !important;
+  background: var(--el-color-primary-light-9) !important;
+  border: 1px solid var(--el-color-primary-light-7) !important;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+@media (max-width: 768px) {
+  .search-card-head {
+    flex-direction: column;
   }
 }
 
 .detail-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  gap: 12px;
 }
 
-.detail-row {
-  display: grid;
-  grid-template-columns: 86px 1fr;
-  gap: 12px;
-  align-items: center;
-  color: var(--text-primary);
-  line-height: 1.7;
+.detail-hero-card,
+.detail-card {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+}
 
-  &.is-block {
-    align-items: flex-start;
+.detail-hero-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+
+  h3 {
+    margin: 4px 0;
+    color: var(--text-primary);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.4;
   }
 
   p {
@@ -354,12 +456,49 @@ onMounted(() => {
   }
 }
 
-.detail-label {
+.detail-kicker {
   color: var(--text-tertiary);
+  font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.detail-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.detail-card--danger {
+  border-color: var(--error);
+  background: var(--error-light);
+}
+
+.detail-card-header {
+  color: var(--text-primary);
   font-size: 13px;
+  font-weight: 700;
+}
+
+.detail-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
 }
 
 .detail-error {
+  margin: 0;
   color: var(--danger) !important;
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
 }
 </style>

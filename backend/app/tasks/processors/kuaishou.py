@@ -5,6 +5,7 @@ from decimal import Decimal
 from app.tasks.processors.base import (
     FinancialSummaryExcelProcessorMixin,
     FinancialSummaryStrategy,
+    GroupKey,
     SimpleMonthlySumProcessorMixin,
     canonical_remark,
     open_tabular_rows,
@@ -150,9 +151,21 @@ KUAISHOU_ORDER_HEADERS: list[str] = [
 class KuaishouGmvStrategy(FinancialSummaryStrategy):
     """Kuaishou GMV formulas."""
 
+    fields: tuple[str, ...] = (
+        "gmv",
+        "platform_income",
+        "platform_fee",
+        "commission",
+        "merchant_fee",
+        "promotion_fee",
+        "provider_commission",
+        "donation_fee",
+    )
+
     @property
     def required_headers(self) -> tuple[str, ...]:
         return (
+            "订单号",
             "订单创建时间",
             "订单实付(元)",
             "政府补贴",
@@ -190,7 +203,6 @@ class KuaishouGmvStrategy(FinancialSummaryStrategy):
             "gmv": self._compute_gmv(vals),
             "platform_income": self._compute_platform_income(vals),
             "platform_fee": self._compute_platform_fee(vals),
-            "return_cost": self._compute_return_cost(vals),
             "commission": self._compute_commission(vals),
             "merchant_fee": self._compute_merchant_fee(vals),
             "promotion_fee": self._compute_promotion_fee(vals),
@@ -217,13 +229,8 @@ class KuaishouGmvStrategy(FinancialSummaryStrategy):
         return safe_decimal(vals.get("技术服务费(元)")) + safe_decimal(vals.get("其他收费")) - safe_decimal(vals.get("支付营销回退（元）"))
 
     @staticmethod
-    def _compute_return_cost(vals: dict[str, object]) -> Decimal:
-        """Reserved for future Kuaishou return-cost classification."""
-        _ = vals
-        return ZERO_MONEY
-
-    @staticmethod
     def _compute_commission(vals: dict[str, object]) -> Decimal:
+        # 达人佣金 = 达人佣金(元) + 团长佣金(元)
         return safe_decimal(vals.get("达人佣金(元)")) + safe_decimal(vals.get("团长佣金(元)"))
 
     @staticmethod
@@ -267,6 +274,7 @@ class KuaishouDongzhangStrategy(FinancialSummaryStrategy):
     def required_headers(self) -> tuple[str, ...]:
         return (
             "关联业务单号",
+            "入账时间",
             "发生额（元）",
             "备注",
         )
@@ -321,12 +329,85 @@ class KuaishouProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumPro
         shop_name: str,
         category_dict: dict[str, list[str]] | None = None,
     ) -> dict:
-        return self._process_financial_summary_with_strategy(
-            file_path=file_path,
-            shop_name=shop_name,
-            category_dict=category_dict,
-            strategy=self.summary_strategy,
-        )
+        result = {
+            "total_rows": 0,
+            "success_rows": 0,
+            "failed_rows": 0,
+            "errors": [],
+            "groups": {},
+            "orders": [],
+        }
+        strategy = self.summary_strategy
+        required_headers = strategy.required_headers
+
+        with open_tabular_rows(file_path) as rows:
+            if rows is None:
+                result["errors"].append("无法打开表格文件")
+                return result
+
+            row_iter = iter(rows)
+            header_result = self._find_header_row(row_iter, required_headers)
+            if header_result is None:
+                result["errors"].append("无法读取表头")
+                self._log_header_compare(
+                    file_path=file_path,
+                    type_code="gmv",
+                    actual_headers=[],
+                    required_headers=required_headers,
+                    missing_headers=required_headers,
+                    header_row_number=None,
+                )
+                return result
+
+            headers, header_row_number = header_result
+            col_idx = self._build_col_idx(headers, required_headers)
+            missing = self._missing_headers(col_idx, required_headers)
+            if missing:
+                result["errors"].append(f"缺少必要表头: {', '.join(missing)}")
+                self._log_header_compare(
+                    file_path=file_path,
+                    type_code="gmv",
+                    actual_headers=headers,
+                    required_headers=required_headers,
+                    missing_headers=missing,
+                    header_row_number=header_row_number,
+                )
+                return result
+
+            groups: dict[GroupKey, dict[str, Decimal]] = {}
+            for row in row_iter:
+                result["total_rows"] += 1
+                try:
+                    vals = self._row_to_values(row, col_idx)
+                    year_month = strategy.compute_year_month(vals)
+                    if year_month is None:
+                        result["failed_rows"] += 1
+                        result["errors"].append(f"Row {result['total_rows'] + 1}: 无法解析归属年月")
+                        continue
+
+                    order_no = safe_str(vals.get("订单号"))
+                    order_created_at = parse_datetime(vals.get("订单创建时间"))
+                    if order_no and order_created_at is not None:
+                        result["orders"].append(
+                            {
+                                "order_no": order_no,
+                                "order_created_at": order_created_at,
+                            }
+                        )
+
+                    key = GroupKey(shop=shop_name, year=year_month[0], month=year_month[1])
+                    agg = groups.setdefault(key, strategy.empty_agg())
+                    row_values = strategy.compute_values(vals, category_dict)
+                    for field, value in row_values.items():
+                        agg[field] = agg.get(field, ZERO_MONEY) + safe_decimal(value)
+
+                    result["success_rows"] += 1
+                except Exception as e:
+                    result["failed_rows"] += 1
+                    result["errors"].append(f"Row {result['total_rows'] + 1}: {e}")
+
+        result["groups"] = self._serialize_groups(groups)
+        return result
 
     def _process_dongzhang(
         self,
@@ -412,6 +493,7 @@ class KuaishouProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumPro
                         result["return_cost_rows"].append(
                             {
                                 "order_no": order_no,
+                                "entry_time": parse_datetime(vals.get("入账时间")),
                                 "return_cost": amount,
                             }
                         )
@@ -442,7 +524,7 @@ class KuaishouProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumPro
 
         amount = safe_decimal(vals.get("发生额（元）"))
         finance_direction = safe_str(vals.get(finance_direction_header))
-        if finance_direction == "收":
+        if finance_direction == "支":
             return abs(amount)
         return -abs(amount)
 
@@ -462,7 +544,7 @@ class KuaishouProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumPro
             "groups": {},
             "insurance_fee_rows": [],
         }
-        required_headers = ("订单编号", "商家承担服务费用（元）")
+        required_headers = ("订单编号", "商家承担服务费用（元）", "生效时间")
 
         with open_tabular_rows(file_path) as rows:
             if rows is None:
@@ -511,6 +593,7 @@ class KuaishouProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumPro
                     result["insurance_fee_rows"].append(
                         {
                             "order_no": order_no,
+                            "effective_time": parse_datetime(vals.get("生效时间")),
                             "insurance_fee": safe_decimal(vals.get("商家承担服务费用（元）")),
                         }
                     )

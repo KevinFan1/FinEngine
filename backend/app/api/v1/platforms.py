@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,9 +37,12 @@ async def update_platform(
     result = await db.execute(select(Platform).where(Platform.id == platform_id, Platform.is_deleted.is_(False)))
     platform = result.scalar_one_or_none()
     if platform is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="平台不存在")
+        return ApiResponse(code=404, message="平台不存在")
 
     update_data = body.model_dump(exclude_unset=True)
+    for field in ("parent_code", "processor_code", "order_scope_code"):
+        if update_data.get(field) == "":
+            update_data[field] = None
     for field, value in update_data.items():
         setattr(platform, field, value)
     await db.flush()

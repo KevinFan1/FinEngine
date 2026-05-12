@@ -1,13 +1,5 @@
 <template>
   <div class="page-container">
-    <!-- Page header -->
-    <div class="page-header">
-      <div class="page-header-info">
-        <h2 class="page-title">组织管理</h2>
-        <p class="page-desc">管理系统中的组织机构，支持新增、编辑和启停用操作</p>
-      </div>
-    </div>
-
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
       <el-form :model="searchForm" inline>
@@ -43,11 +35,13 @@
       </template>
 
       <el-table
+        class="summary-table"
         :data="tableData"
         v-loading="loading"
         stripe
         border
         style="width: 100%"
+        max-height="calc(100vh - 286px)"
       >
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
@@ -183,6 +177,8 @@
 </template>
 
 <script setup lang="ts">
+defineOptions({ name: 'Organizations' })
+
 import { ref, reactive, computed, onMounted } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
@@ -354,22 +350,6 @@ onMounted(() => {
 <style scoped lang="scss">
 .page-container {
   width: 100%;
-}
-
-.page-header {
-  margin-bottom: 16px;
-
-  .page-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-  }
-
-  .page-desc {
-    font-size: 13px;
-    color: var(--text-tertiary);
-  }
 }
 
 .table-card {

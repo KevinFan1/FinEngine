@@ -84,6 +84,9 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False, comment="主键ID"),
         sa.Column("code", sa.String(30), nullable=False, comment="平台编码"),
         sa.Column("name", sa.String(50), nullable=False, comment="平台名称"),
+        sa.Column("parent_code", sa.String(30), nullable=True, comment="父平台编码，用于汇总报表归集"),
+        sa.Column("processor_code", sa.String(30), nullable=True, comment="处理器平台编码，默认等于平台编码"),
+        sa.Column("order_scope_code", sa.String(30), nullable=True, comment="订单索引归属编码，默认等于父平台编码"),
         sa.Column("sort_order", sa.Integer(), server_default="0", comment="排序值"),
         sa.Column("status", sa.SmallInteger(), server_default="1", comment="状态: 1=启用 0=禁用"),
         *soft_delete_columns(),
@@ -173,6 +176,10 @@ def upgrade() -> None:
         sa.Column("parsed_type", sa.String(20), nullable=True, comment="文件名解析业务类型"),
         sa.Column("parsed_shop", sa.String(200), nullable=True, comment="文件名解析店铺名称"),
         sa.Column("detected_platform", sa.String(30), nullable=True, comment="表头识别平台编码"),
+        sa.Column("source_platform_code", sa.String(30), nullable=True, comment="来源子平台编码"),
+        sa.Column("report_platform_code", sa.String(30), nullable=True, comment="归集父平台编码"),
+        sa.Column("processor_code", sa.String(30), nullable=True, comment="处理器平台编码"),
+        sa.Column("order_scope_code", sa.String(30), nullable=True, comment="订单索引归属编码"),
         sa.Column("status", sa.String(20), nullable=False, server_default="uploaded", comment="文件处理状态"),
         sa.Column("error_message", sa.Text(), nullable=True, comment="错误信息"),
         sa.Column("row_count", sa.Integer(), nullable=True, comment="处理行数"),
@@ -243,6 +250,8 @@ def upgrade() -> None:
         sa.Column("summary_month", sa.SmallInteger(), nullable=False, comment="汇总月份"),
         sa.Column("source_year", sa.SmallInteger(), nullable=False, server_default="0", comment="数据表上传年份，来自文件名解析"),
         sa.Column("source_month", sa.SmallInteger(), nullable=False, server_default="0", comment="数据表上传月份，来自文件名解析"),
+        sa.Column("source_platform_code", sa.String(50), nullable=False, comment="来源子平台编码，用于汇总明细"),
+        sa.Column("report_platform_code", sa.String(50), nullable=False, comment="归集父平台编码，用于汇总报表"),
         sa.Column("platform_name", sa.String(50), nullable=False, comment="平台编码冗余"),
         sa.Column("shop_name", sa.String(200), nullable=False, comment="店铺名称冗余"),
         sa.Column("gmv", sa.Numeric(14, 2), server_default="0", comment="实收GMV"),
@@ -267,12 +276,14 @@ def upgrade() -> None:
     active_unique_index(
         "uq_fin_summary_lookup",
         "fin_financial_summaries",
-        ["org_id", "summary_year", "summary_month", "shop_id", "source_year", "source_month"],
+        ["org_id", "summary_year", "summary_month", "shop_id", "source_platform_code", "source_year", "source_month"],
     )
     op.create_index("idx_fin_summaries_lookup", "fin_financial_summaries", ["org_id", "summary_year", "summary_month"])
     op.create_index("idx_fin_summaries_source_lookup", "fin_financial_summaries", ["org_id", "source_year", "source_month"])
     op.create_index("idx_fin_summaries_shop", "fin_financial_summaries", ["shop_id"])
     op.create_index("idx_fin_summaries_platform", "fin_financial_summaries", ["org_id", "platform_name"])
+    op.create_index("idx_fin_summaries_source_platform", "fin_financial_summaries", ["org_id", "source_platform_code"])
+    op.create_index("idx_fin_summaries_report_platform", "fin_financial_summaries", ["org_id", "report_platform_code"])
 
     op.create_table(
         "fin_summary_adjustments",

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -32,7 +32,7 @@ async def list_organizations(
     )
 
 
-@router.post("", response_model=ApiResponse[OrganizationOut], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApiResponse[OrganizationOut])
 async def create_organization(
     body: OrganizationCreate,
     request: Request,
@@ -64,7 +64,7 @@ async def get_organization(
     """Get organization detail (superadmin only)."""
     org = await OrgService.get_org(db, org_id)
     if org is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="组织不存在")
+        return ApiResponse(code=404, message="组织不存在")
     return ApiResponse(data=OrganizationOut.model_validate(org))
 
 
@@ -90,7 +90,7 @@ async def update_organization(
         user_agent=ua,
     )
     if org is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="组织不存在")
+        return ApiResponse(code=404, message="组织不存在")
     return ApiResponse(data=OrganizationOut.model_validate(org))
 
 
@@ -116,5 +116,5 @@ async def update_organization_status(
         user_agent=ua,
     )
     if org is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="组织不存在")
+        return ApiResponse(code=404, message="组织不存在")
     return ApiResponse(data=OrganizationOut.model_validate(org))

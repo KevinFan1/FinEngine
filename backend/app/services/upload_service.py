@@ -9,6 +9,7 @@ from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
 from app.schemas.upload import UploadBatchCreate, UploadFileCallback
 from app.services.audit_service import AuditService
+from app.services.platform_profile_service import resolve_platform_profile
 from app.services.shop_service import ShopService
 
 
@@ -39,6 +40,7 @@ class UploadService:
         )
         db.add(batch)
         await db.flush()
+        await db.refresh(batch)
 
         await AuditService.log(
             db,
@@ -84,8 +86,17 @@ class UploadService:
             raise ValueError("上传批次不存在或无权访问")
 
         shop = None
+        platform_profile = None
         if data.detected_platform and data.parsed_shop:
-            shop = await ShopService.get_or_create_shop(db, org_id=batch.org_id, platform_name=data.detected_platform, shop_name=data.parsed_shop)
+            platform_profile = await resolve_platform_profile(db, data.detected_platform)
+            shop = await ShopService.get_or_create_shop(
+                db,
+                org_id=batch.org_id,
+                platform_name=platform_profile.report_platform_code,
+                shop_name=data.parsed_shop,
+            )
+        elif data.detected_platform:
+            platform_profile = await resolve_platform_profile(db, data.detected_platform)
 
         upload_file = UploadFile(
             batch_id=batch_id,
@@ -101,6 +112,10 @@ class UploadService:
             parsed_type=data.parsed_type,
             parsed_shop=data.parsed_shop,
             detected_platform=data.detected_platform,
+            source_platform_code=platform_profile.source_platform_code if platform_profile else data.detected_platform,
+            report_platform_code=platform_profile.report_platform_code if platform_profile else data.detected_platform,
+            processor_code=platform_profile.processor_code if platform_profile else data.detected_platform,
+            order_scope_code=platform_profile.order_scope_code if platform_profile else data.detected_platform,
             status="uploaded",
         )
         db.add(upload_file)
@@ -137,7 +152,8 @@ class UploadService:
         # Dispatch Celery task — use hardcoded platform processor
         from app.tasks.processors import PLATFORM_PROCESSORS
 
-        if data.detected_platform and data.detected_platform in PLATFORM_PROCESSORS:
+        processor_code = platform_profile.processor_code if platform_profile else data.detected_platform
+        if data.detected_platform and processor_code in PLATFORM_PROCESSORS:
             from app.tasks.celery_app import process_file_platform
 
             process_file_platform.delay(
@@ -155,6 +171,8 @@ class UploadService:
             upload_file.status = "failed"
             upload_file.error_message = task.error_message
 
+        await db.flush()
+        await db.refresh(upload_file)
         return upload_file
 
     @staticmethod

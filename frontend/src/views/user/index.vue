@@ -1,13 +1,5 @@
 <template>
   <div class="page-container">
-    <!-- Page header -->
-    <div class="page-header">
-      <div class="page-header-info">
-        <h2 class="page-title">用户管理</h2>
-        <p class="page-desc">管理系统用户账号，支持角色分配和权限控制</p>
-      </div>
-    </div>
-
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
       <el-form :model="searchForm" inline>
@@ -25,7 +17,16 @@
           </el-input>
         </el-form-item>
         <el-form-item v-if="userStore.isSuperAdmin" label="组织">
-          <el-select v-model="searchForm.orgId" placeholder="全部组织" clearable style="width: 200px">
+          <el-select
+            v-model="searchForm.orgIds"
+            placeholder="全部组织"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            style="width: 220px"
+          >
             <el-option
               v-for="org in orgOptions"
               :key="org.id"
@@ -52,7 +53,7 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" stripe border style="width: 100%">
+      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%" height="calc(100vh - 278px)">
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
@@ -128,46 +129,57 @@
       :close-on-click-modal="false"
     >
       <div v-if="drawerMode === 'detail' && selectedUser" class="detail-panel">
-        <div class="detail-row">
-          <span class="detail-label">用户名</span>
-          <strong>{{ selectedUser.username }}</strong>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">显示名称</span>
-          <span>{{ selectedUser.display_name }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">手机号</span>
-          <span>{{ selectedUser.phone }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">邮箱</span>
-          <span>{{ selectedUser.email || '-' }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">所属组织</span>
-          <span>{{ selectedUser.org_name || '-' }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">角色</span>
-          <el-tag :type="roleTagMap[selectedUser.role] || 'info'" size="small">
-            {{ getRoleLabel(selectedUser.role) }}
-          </el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">状态</span>
-          <el-tag :type="isActive(selectedUser) ? 'success' : 'danger'" size="small">
-            {{ isActive(selectedUser) ? '启用' : '禁用' }}
-          </el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">最后登录</span>
-          <span>{{ formatDateTime(selectedUser.last_login_at) }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">创建时间</span>
-          <span>{{ formatDateTime(selectedUser.created_at) }}</span>
-        </div>
+        <section class="detail-hero-card">
+          <div>
+            <span class="detail-kicker">USER #{{ selectedUser.id }}</span>
+            <h3>{{ selectedUser.display_name || selectedUser.username }}</h3>
+            <p>{{ selectedUser.username }}</p>
+          </div>
+          <div class="detail-badge-row">
+            <el-tag :type="roleTagMap[selectedUser.role] || 'info'" size="small">
+              {{ getRoleLabel(selectedUser.role) }}
+            </el-tag>
+            <el-tag :type="isActive(selectedUser) ? 'success' : 'danger'" size="small">
+              {{ isActive(selectedUser) ? '启用' : '禁用' }}
+            </el-tag>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>基础信息</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">手机号</span>
+              <strong>{{ selectedUser.phone }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">邮箱</span>
+              <strong>{{ selectedUser.email || '-' }}</strong>
+            </div>
+            <div class="detail-item detail-item--wide">
+              <span class="detail-label">所属组织</span>
+              <strong>{{ selectedUser.org_name || '-' }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>时间信息</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">最后登录</span>
+              <strong>{{ formatDateTime(selectedUser.last_login_at) }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">创建时间</span>
+              <strong>{{ formatDateTime(selectedUser.created_at) }}</strong>
+            </div>
+          </div>
+        </section>
       </div>
       <el-form
         v-else-if="drawerMode === 'reset'"
@@ -273,6 +285,8 @@
 </template>
 
 <script setup lang="ts">
+defineOptions({ name: 'Users' })
+
 import { ref, reactive, computed, onMounted } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
@@ -296,7 +310,7 @@ const userStore = useUserStore()
 // Search
 const searchForm = reactive({
   keyword: '',
-  orgId: undefined as number | undefined,
+  orgIds: [] as number[],
 })
 
 // Organization options
@@ -346,8 +360,8 @@ async function fetchData() {
       page_size: pagination.pageSize,
       keyword: searchForm.keyword || undefined,
     }
-    if (searchForm.orgId) {
-      params.org_id = searchForm.orgId
+    if (searchForm.orgIds.length) {
+      params.org_id = searchForm.orgIds.join(',')
     }
     const res = await getUserList(params as any)
     tableData.value = res.items || []
@@ -376,7 +390,7 @@ function handleSearch() {
 
 function handleReset() {
   searchForm.keyword = ''
-  searchForm.orgId = undefined
+  searchForm.orgIds = []
   pagination.page = 1
   fetchData()
 }
@@ -585,22 +599,6 @@ onMounted(() => {
   width: 100%;
 }
 
-.page-header {
-  margin-bottom: 16px;
-
-  .page-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-  }
-
-  .page-desc {
-    font-size: 13px;
-    color: var(--text-tertiary);
-  }
-}
-
 .table-card {
   .card-header {
     display: flex;
@@ -628,22 +626,101 @@ onMounted(() => {
 }
 
 .detail-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  display: grid;
+  gap: 12px;
 }
 
-.detail-row {
+.detail-hero-card,
+.detail-card {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+}
+
+.detail-hero-card {
   display: grid;
-  grid-template-columns: 90px 1fr;
   gap: 12px;
-  align-items: center;
+  padding: 14px;
+
+  h3 {
+    margin: 4px 0;
+    color: var(--text-primary);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+
+  p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+  }
+}
+
+.detail-kicker {
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.detail-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.detail-card-header {
   color: var(--text-primary);
-  line-height: 1.7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color-light);
+  border-radius: calc(var(--radius-card) - 2px);
+  background: var(--bg-elevated);
+
+  strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.detail-item--wide {
+  grid-column: 1 / -1;
 }
 
 .detail-label {
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -11,7 +11,7 @@ export interface ParsedFileName {
 
 /**
  * Parse financial file name.
- * Expected format: {YY|YYYY年MM月}_{性质}_{店铺名称}.xlsx/.xlsm/.csv
+ * Expected format: {YY|YYYY年MM月}_{性质}_{店铺名称}.xlsx/.xlsm/.xls/.csv
  * Examples:
  *   26年02月_动账_宝蕴天工.xlsx
  *   26年02月_gmv_快手店铺.xlsx
@@ -23,7 +23,7 @@ export interface ParsedFileName {
  */
 export function parseFileName(filename: string): ParsedFileName | null {
     // Remove file extension
-    const nameWithoutExt = filename.replace(/\.(xlsx|xlsm|csv)$/i, "");
+    const nameWithoutExt = filename.replace(/\.(xlsx|xlsm|xls|csv)$/i, "");
 
     // Match pattern: YY/YYYY年M(M)月_性质_店铺
     const regex = /^(\d{2}|\d{4})年(\d{1,2})月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _](.+)$/i;
@@ -161,6 +161,8 @@ export const platformLabelMap: Record<string, string> = {
     weixin_video: "微信小店",
     tmall: "天猫",
     taobao: "淘宝",
+    alipay: "支付宝",
+    qianniu: "千牛",
     miniprogram: "小程序",
     抖音: "抖音",
     抖店: "抖音",
@@ -170,6 +172,8 @@ export const platformLabelMap: Record<string, string> = {
     微信小店: "微信小店",
     天猫: "天猫",
     淘宝: "淘宝",
+    支付宝: "支付宝",
+    千牛: "千牛",
     小程序: "小程序",
 };
 
@@ -189,6 +193,10 @@ const platformClassMap: Record<string, string> = {
     天猫: "tmall",
     taobao: "taobao",
     淘宝: "taobao",
+    alipay: "alipay",
+    支付宝: "alipay",
+    qianniu: "qianniu",
+    千牛: "qianniu",
     miniprogram: "miniprogram",
     mini_program: "miniprogram",
     小程序: "miniprogram",

@@ -13,6 +13,18 @@ export interface ApiResponse<T = any> {
     data: T;
 }
 
+export class ApiBusinessError extends Error {
+    code: number;
+    data?: unknown;
+
+    constructor(message: string, code: number, data?: unknown) {
+        super(message);
+        this.name = "ApiBusinessError";
+        this.code = code;
+        this.data = data;
+    }
+}
+
 // Paginated response type
 export interface PaginatedData<T = any> {
     items: T[];
@@ -49,18 +61,18 @@ service.interceptors.response.use(
     (response: AxiosResponse<ApiResponse>) => {
         const res = response.data;
 
-        // If the API wraps responses in { code, message, data }
+        // Backend returns HTTP 200 for business errors and exposes the real state in code/message.
         if (res.code !== undefined && res.code !== 200) {
-            ElMessage.error(res.message || "请求失败");
+            const message = res.message || "请求失败";
+            ElMessage.error(message);
 
-            // 401 Unauthorized - clear token and redirect to login
             if (res.code === 401) {
                 localStorage.removeItem("token");
                 localStorage.removeItem("userInfo");
                 router.push("/login");
             }
 
-            return Promise.reject(new Error(res.message || "请求失败"));
+            return Promise.reject(new ApiBusinessError(message, res.code, res.data));
         }
 
         return response;
@@ -70,24 +82,13 @@ service.interceptors.response.use(
             const status = error.response.status;
             const data = error.response.data;
 
-            switch (status) {
-                case 401:
-                    ElMessage.error("登录已过期，请重新登录");
-                    localStorage.removeItem("token");
-                    localStorage.removeItem("userInfo");
-                    router.push("/login");
-                    break;
-                case 403:
-                    ElMessage.error("没有权限执行此操作");
-                    break;
-                case 404:
-                    ElMessage.error("请求的资源不存在");
-                    break;
-                case 500:
-                    ElMessage.error(data?.message || "服务器内部错误");
-                    break;
-                default:
-                    ElMessage.error(data?.message || `请求失败 (${status})`);
+            const message = data?.message || `请求失败 (${status})`;
+            ElMessage.error(message);
+
+            if (status === 401 || data?.code === 401) {
+                localStorage.removeItem("token");
+                localStorage.removeItem("userInfo");
+                router.push("/login");
             }
         } else if (error.message?.includes("timeout")) {
             ElMessage.error("请求超时，请稍后重试");
@@ -167,7 +168,18 @@ export async function downloadBlob(
     params?: Record<string, any>,
 ): Promise<Blob> {
     const response = await service.get(url, { params, responseType: "blob" });
-    return response.data;
+    const blob = response.data as Blob;
+    const contentType = response.headers["content-type"] || blob.type;
+    if (contentType?.includes("application/json")) {
+        const text = await blob.text();
+        const parsed = JSON.parse(text) as ApiResponse;
+        if (parsed.code !== 200) {
+            const message = parsed.message || "导出失败";
+            ElMessage.error(message);
+            throw new ApiBusinessError(message, parsed.code, parsed.data);
+        }
+    }
+    return blob;
 }
 
 export default service;

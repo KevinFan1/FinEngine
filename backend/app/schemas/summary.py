@@ -10,7 +10,7 @@ class SummaryQuery(BaseModel):
     source_month: int | None = Field(None, description="数据表上传月份")
     platform_name: str | None = Field(None, description="平台名称")
     shop_id: int | None = Field(None, description="店铺ID")
-    shop_name: str | None = Field(None, description="店铺名（模糊搜索）")
+    shop_name: str | None = Field(None, description="店铺名（精确匹配，支持逗号分隔多选）")
 
 
 class SummaryOut(BaseModel):
@@ -24,12 +24,17 @@ class SummaryOut(BaseModel):
     source_month: int
     source_date: str
     platform_name: str
+    source_platform_code: str
+    report_platform_code: str
     shop_name: str
+    shop_color: str | None = None
 
     # Frontend-friendly aliases
     year: int
     month: int
     platform: str
+    source_platform: str
+    report_platform: str
 
     # 动账指标
     gmv: float = 0
@@ -76,12 +81,15 @@ class SummaryReportOut(BaseModel):
     source_month: int
     source_date: str
     platform_name: str
+    report_platform_code: str
     shop_name: str
+    shop_color: str | None = None
 
     # Frontend-friendly aliases
     year: int
     month: int
     platform: str
+    report_platform: str
 
     summary_count: int = 0
     original_gmv: float = 0

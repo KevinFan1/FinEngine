@@ -44,6 +44,10 @@ class UploadFile(SoftDeleteMixin, Base):
 
     # Detected platform from headers
     detected_platform: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="表头识别平台编码")
+    source_platform_code: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="来源子平台编码")
+    report_platform_code: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="归集父平台编码")
+    processor_code: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="处理器平台编码")
+    order_scope_code: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="订单索引归属编码")
 
     # Status
     status: Mapped[str] = mapped_column(String(20), default="uploaded", comment="文件处理状态")

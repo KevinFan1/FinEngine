@@ -1,20 +1,40 @@
 """Tasks API — list, detail, and progress query."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import or_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user
+from app.models.shop import Shop
 from app.models.task import ProcessingTask
 from app.models.upload import UploadFile
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.task import TaskListOut, TaskOut
+from app.services.platform_profile_service import resolve_platform_profile
 
 router = APIRouter()
-RECALCULABLE_TYPES = {"动账", "运费险", "bic", "其他服务款"}
+TASK_ACTION_EXPIRE_DAYS = 30
+
+
+def split_filter_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def split_int_filter_values(value: str | None) -> list[int]:
+    values: list[int] = []
+    for item in split_filter_values(value):
+        try:
+            values.append(int(item))
+        except ValueError:
+            continue
+    return values
 
 
 class TaskProgressOut(BaseModel):
@@ -33,13 +53,25 @@ class TaskProgressOut(BaseModel):
         from_attributes = True
 
 
+class TaskBatchActionIn(BaseModel):
+    task_ids: list[int]
+
+
+class TaskBatchActionOut(BaseModel):
+    total: int
+    success_count: int
+    failed_count: int
+    success_ids: list[int]
+    failed_items: list[dict[str, object]]
+
+
 @router.get("", response_model=ApiResponse[PageResponse[TaskListOut]])
 async def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status_filter: str | None = Query(None, alias="status"),
     platform: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_id: str | None = Query(None),
     shop_name: str | None = Query(None),
     parsed_type: str | None = Query(None),
     parsed_year: int | None = Query(None),
@@ -52,8 +84,9 @@ async def list_tasks(
 ):
     """List processing tasks with pagination and filters."""
     stmt = (
-        select(ProcessingTask, UploadFile)
+        select(ProcessingTask, UploadFile, Shop.shop_color)
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
+        .outerjoin(Shop, UploadFile.shop_id == Shop.id)
         .where(ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
         .order_by(ProcessingTask.id.desc())
     )
@@ -72,25 +105,30 @@ async def list_tasks(
         stmt = stmt.where(ProcessingTask.org_id == org_id)
         count_stmt = count_stmt.where(ProcessingTask.org_id == org_id)
 
-    if status_filter:
-        stmt = stmt.where(ProcessingTask.status == status_filter)
-        count_stmt = count_stmt.where(ProcessingTask.status == status_filter)
+    status_values = split_filter_values(status_filter)
+    if status_values:
+        stmt = stmt.where(ProcessingTask.status.in_(status_values))
+        count_stmt = count_stmt.where(ProcessingTask.status.in_(status_values))
 
-    if platform:
-        stmt = stmt.where(UploadFile.detected_platform == platform)
-        count_stmt = count_stmt.where(UploadFile.detected_platform == platform)
+    platform_values = split_filter_values(platform)
+    if platform_values:
+        stmt = stmt.where(UploadFile.detected_platform.in_(platform_values))
+        count_stmt = count_stmt.where(UploadFile.detected_platform.in_(platform_values))
 
-    if shop_id is not None:
-        stmt = stmt.where(UploadFile.shop_id == shop_id)
-        count_stmt = count_stmt.where(UploadFile.shop_id == shop_id)
+    shop_ids = split_int_filter_values(shop_id)
+    if shop_ids:
+        stmt = stmt.where(UploadFile.shop_id.in_(shop_ids))
+        count_stmt = count_stmt.where(UploadFile.shop_id.in_(shop_ids))
 
-    if shop_name:
-        stmt = stmt.where(UploadFile.parsed_shop.ilike(f"%{shop_name}%"))
-        count_stmt = count_stmt.where(UploadFile.parsed_shop.ilike(f"%{shop_name}%"))
+    shop_names = split_filter_values(shop_name)
+    if shop_names:
+        stmt = stmt.where(UploadFile.parsed_shop.in_(shop_names))
+        count_stmt = count_stmt.where(UploadFile.parsed_shop.in_(shop_names))
 
-    if parsed_type:
-        stmt = stmt.where(UploadFile.parsed_type == parsed_type)
-        count_stmt = count_stmt.where(UploadFile.parsed_type == parsed_type)
+    parsed_type_values = split_filter_values(parsed_type)
+    if parsed_type_values:
+        stmt = stmt.where(UploadFile.parsed_type.in_(parsed_type_values))
+        count_stmt = count_stmt.where(UploadFile.parsed_type.in_(parsed_type_values))
 
     if parsed_year is not None:
         stmt = stmt.where(UploadFile.parsed_year == parsed_year)
@@ -119,8 +157,8 @@ async def list_tasks(
     return ApiResponse(
         data=PageResponse(
             items=[
-                build_task_list_out(task, upload_file)
-                for task, upload_file in rows
+                build_task_list_out(task, upload_file, shop_color)
+                for task, upload_file, shop_color in rows
             ],
             total=total,
             page=page,
@@ -129,16 +167,20 @@ async def list_tasks(
     )
 
 
-def build_task_list_out(task: ProcessingTask, upload_file: UploadFile) -> TaskListOut:
+def build_task_list_out(task: ProcessingTask, upload_file: UploadFile, shop_color: str | None = None) -> TaskListOut:
     error_reason = task.error_reason or upload_file.error_message
+    action_expired = is_task_expired(task)
     return TaskListOut(
         id=task.id,
         file_id=task.file_id,
         batch_id=upload_file.batch_id,
         filename=upload_file.original_name,
-        platform=upload_file.detected_platform,
+        platform=upload_file.source_platform_code or upload_file.detected_platform,
+        source_platform_code=upload_file.source_platform_code or upload_file.detected_platform,
+        report_platform_code=upload_file.report_platform_code,
         shop_id=upload_file.shop_id,
         shop_name=upload_file.parsed_shop,
+        shop_color=shop_color,
         parsed_type=upload_file.parsed_type,
         parsed_year=upload_file.parsed_year,
         parsed_month=upload_file.parsed_month,
@@ -151,10 +193,141 @@ def build_task_list_out(task: ProcessingTask, upload_file: UploadFile) -> TaskLi
         result_failed=task.failed_rows,
         error_message=error_reason,
         error_reason=error_reason,
+        action_expired=action_expired,
+        action_expire_reason=_task_expired_message() if action_expired else None,
         started_at=task.started_at,
         finished_at=task.finished_at,
         created_at=task.created_at,
     )
+
+
+def is_task_expired(task: ProcessingTask) -> bool:
+    created_at = task.created_at
+    if created_at is None:
+        return False
+    now = datetime.now(timezone.utc)
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return created_at < now - timedelta(days=TASK_ACTION_EXPIRE_DAYS)
+
+
+def _task_expired_message() -> str:
+    return f"任务创建时间超过 {TASK_ACTION_EXPIRE_DAYS} 天，已过期，不能重试或重新统计"
+
+
+async def _load_task_with_file(
+    db: AsyncSession,
+    *,
+    task_id: int,
+    current_user: User,
+) -> tuple[ProcessingTask, UploadFile] | ApiResponse:
+    result = await db.execute(
+        select(ProcessingTask, UploadFile)
+        .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
+        .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
+    )
+    row = result.one_or_none()
+    if row is None:
+        return ApiResponse(code=404, message="任务不存在")
+
+    task, upload_file = row
+    if current_user.role != "superadmin" and task.org_id != current_user.org_id:
+        return ApiResponse(code=403, message="无权访问该任务")
+    return task, upload_file
+
+
+async def _validate_task_action(
+    db: AsyncSession,
+    *,
+    task: ProcessingTask,
+    upload_file: UploadFile,
+    action: str,
+) -> str | None:
+    if is_task_expired(task):
+        return _task_expired_message()
+    if action == "retry" and task.status != "failed":
+        return "只有失败任务可以重试"
+    if action == "recalculate":
+        if task.status in {"queued", "running"}:
+            return "排队中或运行中的任务不能重新统计"
+    if not upload_file.detected_platform:
+        return "文件缺少平台信息，无法重试" if action == "retry" else "文件缺少平台信息，无法重新统计"
+
+    from app.tasks.processors import PLATFORM_PROCESSORS
+
+    profile = await resolve_platform_profile(db, upload_file.detected_platform)
+    if profile.processor_code not in PLATFORM_PROCESSORS:
+        return f"未找到平台 [{profile.processor_code}] 的处理器"
+    return None
+
+
+async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db: AsyncSession) -> None:
+    task.status = "queued"
+    task.progress = 0
+    task.celery_task_id = None
+    task.processed_rows = 0
+    task.success_rows = 0
+    task.failed_rows = 0
+    task.error_message = None
+    task.result_summary = None
+    task.started_at = None
+    task.finished_at = None
+    upload_file.status = "uploaded"
+    upload_file.error_message = None
+    await db.commit()
+    await db.refresh(task)
+
+    from app.tasks.celery_app import process_file_platform
+
+    process_file_platform.delay(
+        file_id=upload_file.id,
+        oss_key=upload_file.oss_key,
+        org_id=task.org_id,
+        platform_code=upload_file.detected_platform,
+        shop_name=upload_file.parsed_shop or "",
+        shop_id=upload_file.shop_id,
+    )
+
+
+async def _batch_task_action(
+    *,
+    body: TaskBatchActionIn,
+    action: str,
+    current_user: User,
+    db: AsyncSession,
+) -> ApiResponse[TaskBatchActionOut]:
+    task_ids = list(dict.fromkeys(body.task_ids))
+    if not task_ids:
+        return ApiResponse(code=400, message="请选择任务")
+    if len(task_ids) > 100:
+        return ApiResponse(code=400, message="单次最多操作 100 个任务")
+
+    success_ids: list[int] = []
+    failed_items: list[dict[str, object]] = []
+    for task_id in task_ids:
+        loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
+        if isinstance(loaded, ApiResponse):
+            failed_items.append({"task_id": task_id, "message": loaded.message})
+            continue
+
+        task, upload_file = loaded
+        error_message = await _validate_task_action(db, task=task, upload_file=upload_file, action=action)
+        if error_message:
+            failed_items.append({"task_id": task_id, "message": error_message})
+            continue
+
+        await _enqueue_task_again(task, upload_file, db)
+        success_ids.append(task.id)
+
+    data = TaskBatchActionOut(
+        total=len(task_ids),
+        success_count=len(success_ids),
+        failed_count=len(failed_items),
+        success_ids=success_ids,
+        failed_items=failed_items,
+    )
+    message = "操作完成" if not failed_items else f"成功 {data.success_count} 个，失败 {data.failed_count} 个"
+    return ApiResponse(data=data, message=message)
 
 
 @router.get("/{task_id}", response_model=ApiResponse[TaskOut])
@@ -164,16 +337,60 @@ async def get_task(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get task detail."""
-    result = await db.execute(select(ProcessingTask).where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False)))
-    task = result.scalar_one_or_none()
-    if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    result = await db.execute(
+        select(ProcessingTask, UploadFile, Shop.shop_color)
+        .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
+        .outerjoin(Shop, UploadFile.shop_id == Shop.id)
+        .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
+    )
+    row = result.one_or_none()
+    if row is None:
+        return ApiResponse(code=404, message="任务不存在")
 
+    task, upload_file, shop_color = row
     # Scope check
     if current_user.role != "superadmin" and task.org_id != current_user.org_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该任务")
+        return ApiResponse(code=403, message="无权访问该任务")
 
-    return ApiResponse(data=TaskOut.model_validate(task))
+    return ApiResponse(data=build_task_out(task, upload_file, shop_color))
+
+
+def build_task_out(task: ProcessingTask, upload_file: UploadFile, shop_color: str | None = None) -> TaskOut:
+    data = TaskOut.model_validate(task)
+    data.batch_id = upload_file.batch_id
+    data.filename = upload_file.original_name
+    data.platform = upload_file.source_platform_code or upload_file.detected_platform
+    data.source_platform_code = upload_file.source_platform_code or upload_file.detected_platform
+    data.report_platform_code = upload_file.report_platform_code
+    data.shop_id = upload_file.shop_id
+    data.shop_name = upload_file.parsed_shop
+    data.shop_color = shop_color
+    data.parsed_type = upload_file.parsed_type
+    data.parsed_year = upload_file.parsed_year
+    data.parsed_month = upload_file.parsed_month
+    data.action_expired = is_task_expired(task)
+    data.action_expire_reason = _task_expired_message() if data.action_expired else None
+    return data
+
+
+@router.post("/batch/retry", response_model=ApiResponse[TaskBatchActionOut])
+async def batch_retry_tasks(
+    body: TaskBatchActionIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Batch retry failed processing tasks."""
+    return await _batch_task_action(body=body, action="retry", current_user=current_user, db=db)
+
+
+@router.post("/batch/recalculate", response_model=ApiResponse[TaskBatchActionOut])
+async def batch_recalculate_tasks(
+    body: TaskBatchActionIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Batch recalculate order-dependent processing tasks."""
+    return await _batch_task_action(body=body, action="recalculate", current_user=current_user, db=db)
 
 
 @router.post("/{task_id}/retry", response_model=ApiResponse[TaskOut])
@@ -183,55 +400,17 @@ async def retry_task(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Manually retry a failed processing task."""
-    result = await db.execute(
-        select(ProcessingTask, UploadFile)
-        .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
-        .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
-    )
-    row = result.one_or_none()
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
+    if isinstance(loaded, ApiResponse):
+        return loaded
 
-    task, upload_file = row
-    if current_user.role != "superadmin" and task.org_id != current_user.org_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该任务")
-    if task.status != "failed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有失败任务可以重试")
-    if not upload_file.detected_platform:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件缺少平台信息，无法重试")
+    task, upload_file = loaded
+    error_message = await _validate_task_action(db, task=task, upload_file=upload_file, action="retry")
+    if error_message:
+        return ApiResponse(code=400, message=error_message)
 
-    from app.tasks.processors import PLATFORM_PROCESSORS
-
-    if upload_file.detected_platform not in PLATFORM_PROCESSORS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"未找到平台 [{upload_file.detected_platform}] 的处理器")
-
-    task.status = "queued"
-    task.progress = 0
-    task.celery_task_id = None
-    task.processed_rows = 0
-    task.success_rows = 0
-    task.failed_rows = 0
-    task.error_message = None
-    task.result_summary = None
-    task.started_at = None
-    task.finished_at = None
-    upload_file.status = "uploaded"
-    upload_file.error_message = None
-    await db.commit()
-    await db.refresh(task)
-
-    from app.tasks.celery_app import process_file_platform
-
-    process_file_platform.delay(
-        file_id=upload_file.id,
-        oss_key=upload_file.oss_key,
-        org_id=task.org_id,
-        platform_code=upload_file.detected_platform,
-        shop_name=upload_file.parsed_shop or "",
-        shop_id=upload_file.shop_id,
-    )
-
-    return ApiResponse(data=TaskOut.model_validate(task))
+    await _enqueue_task_again(task, upload_file, db)
+    return ApiResponse(data=build_task_out(task, upload_file))
 
 
 @router.post("/{task_id}/recalculate", response_model=ApiResponse[TaskOut])
@@ -241,57 +420,17 @@ async def recalculate_task(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Manually recalculate an order-dependent processing task."""
-    result = await db.execute(
-        select(ProcessingTask, UploadFile)
-        .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
-        .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
-    )
-    row = result.one_or_none()
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
+    if isinstance(loaded, ApiResponse):
+        return loaded
 
-    task, upload_file = row
-    if current_user.role != "superadmin" and task.org_id != current_user.org_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该任务")
-    if task.status in {"queued", "running"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="排队中或运行中的任务不能重新统计")
-    if upload_file.parsed_type not in RECALCULABLE_TYPES:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前文件类型不支持重新统计")
-    if not upload_file.detected_platform:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件缺少平台信息，无法重新统计")
+    task, upload_file = loaded
+    error_message = await _validate_task_action(db, task=task, upload_file=upload_file, action="recalculate")
+    if error_message:
+        return ApiResponse(code=400, message=error_message)
 
-    from app.tasks.processors import PLATFORM_PROCESSORS
-
-    if upload_file.detected_platform not in PLATFORM_PROCESSORS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"未找到平台 [{upload_file.detected_platform}] 的处理器")
-
-    task.status = "queued"
-    task.progress = 0
-    task.celery_task_id = None
-    task.processed_rows = 0
-    task.success_rows = 0
-    task.failed_rows = 0
-    task.error_message = None
-    task.result_summary = None
-    task.started_at = None
-    task.finished_at = None
-    upload_file.status = "uploaded"
-    upload_file.error_message = None
-    await db.commit()
-    await db.refresh(task)
-
-    from app.tasks.celery_app import process_file_platform
-
-    process_file_platform.delay(
-        file_id=upload_file.id,
-        oss_key=upload_file.oss_key,
-        org_id=task.org_id,
-        platform_code=upload_file.detected_platform,
-        shop_name=upload_file.parsed_shop or "",
-        shop_id=upload_file.shop_id,
-    )
-
-    return ApiResponse(data=TaskOut.model_validate(task))
+    await _enqueue_task_again(task, upload_file, db)
+    return ApiResponse(data=build_task_out(task, upload_file))
 
 
 @router.get("/{task_id}/progress", response_model=ApiResponse[TaskProgressOut])
@@ -307,11 +446,11 @@ async def get_task_progress(
     result = await db.execute(select(ProcessingTask).where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False)))
     task = result.scalar_one_or_none()
     if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+        return ApiResponse(code=404, message="任务不存在")
 
     # Scope check
     if current_user.role != "superadmin" and task.org_id != current_user.org_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该任务")
+        return ApiResponse(code=403, message="无权访问该任务")
 
     return ApiResponse(
         data=TaskProgressOut(

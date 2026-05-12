@@ -21,6 +21,12 @@ from app.services.audit_service import AuditService
 ADJUSTABLE_SUMMARY_METRICS = tuple(SUMMARY_ADJUSTMENT_METRIC_LABELS.keys())
 
 
+def month_period_value(year: int | None, month: int | None) -> int | None:
+    if year is None or month is None:
+        return None
+    return int(year) * 100 + int(month)
+
+
 class SummaryAdjustmentService:
     @staticmethod
     async def list_adjustments(
@@ -73,6 +79,7 @@ class SummaryAdjustmentService:
         )
         db.add(adjustment)
         await db.flush()
+        await db.refresh(adjustment)
         await SummaryAdjustmentService._write_audit_log(
             db,
             request=request,
@@ -114,6 +121,7 @@ class SummaryAdjustmentService:
         adjustment.updated_by = current_user.id
 
         await db.flush()
+        await db.refresh(adjustment)
         await SummaryAdjustmentService._write_audit_log(
             db,
             request=request,
@@ -179,6 +187,10 @@ class SummaryAdjustmentService:
         org_id: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_start_year: int | None = None,
+        source_start_month: int | None = None,
+        source_end_year: int | None = None,
+        source_end_month: int | None = None,
         platform_name: str | None = None,
         shop_id: int | None = None,
         shop_name: str | None = None,
@@ -192,12 +204,19 @@ class SummaryAdjustmentService:
             filters.append(SummaryAdjustment.source_year == source_year)
         if source_month is not None:
             filters.append(SummaryAdjustment.source_month == source_month)
+        source_period = SummaryAdjustment.source_year * 100 + SummaryAdjustment.source_month
+        source_start_period = month_period_value(source_start_year, source_start_month)
+        source_end_period = month_period_value(source_end_year, source_end_month)
+        if source_start_period is not None:
+            filters.append(source_period >= source_start_period)
+        if source_end_period is not None:
+            filters.append(source_period <= source_end_period)
         if platform_name:
             filters.append(SummaryAdjustment.platform_name == platform_name)
         if shop_id is not None:
             filters.append(SummaryAdjustment.shop_id == shop_id)
         if shop_name:
-            filters.append(SummaryAdjustment.shop_name.ilike(f"%{shop_name}%"))
+            filters.append(SummaryAdjustment.shop_name == shop_name)
 
         stmt = (
             select(

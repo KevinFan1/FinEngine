@@ -6,6 +6,8 @@ from app.models.shop import Shop
 from app.models.user import User
 from app.schemas.shop import ShopCreate, ShopUpdate
 from app.services.audit_service import AuditService
+from app.services.shop_color_service import assign_default_shop_color, normalize_shop_color
+from app.services.platform_profile_service import resolve_platform_profile
 
 
 class ShopService:
@@ -29,8 +31,14 @@ class ShopService:
             stmt = stmt.where(Shop.org_id == org_id)
             count_stmt = count_stmt.where(Shop.org_id == org_id)
         if platform_name:
-            stmt = stmt.where(Shop.platform_name == platform_name)
-            count_stmt = count_stmt.where(Shop.platform_name == platform_name)
+            platform_values = [item.strip() for item in platform_name.split(",") if item.strip()]
+            report_platform_codes = set()
+            for platform_value in platform_values:
+                profile = await resolve_platform_profile(db, platform_value)
+                report_platform_codes.add(profile.report_platform_code)
+            if report_platform_codes:
+                stmt = stmt.where(Shop.platform_name.in_(report_platform_codes))
+                count_stmt = count_stmt.where(Shop.platform_name.in_(report_platform_codes))
         if keyword:
             like = f"%{keyword}%"
             cond = Shop.shop_name.ilike(like) | Shop.entity_name.ilike(like)
@@ -57,9 +65,21 @@ class ShopService:
         )
         if existing.scalar_one_or_none():
             raise ValueError(f"店铺 [{data.platform_name}] [{data.shop_name}] 已存在")
-        shop = Shop(org_id=org_id, platform_name=data.platform_name, shop_name=data.shop_name, entity_name=data.entity_name, remark=data.remark)
+        shop = Shop(
+            org_id=org_id,
+            platform_name=data.platform_name,
+            shop_name=data.shop_name,
+            shop_color=normalize_shop_color(data.shop_color) or assign_default_shop_color(
+                org_id=org_id,
+                platform_name=data.platform_name,
+                shop_name=data.shop_name,
+            ),
+            entity_name=data.entity_name,
+            remark=data.remark,
+        )
         db.add(shop)
         await db.flush()
+        await db.refresh(shop)
         await AuditService.log(
             db,
             user_id=operator.id,
@@ -82,11 +102,30 @@ class ShopService:
         shop = await ShopService.get_shop(db, shop_id)
         if not shop:
             return None
-        old = {"platform_name": shop.platform_name, "shop_name": shop.shop_name, "entity_name": shop.entity_name, "remark": shop.remark}
+        old = {
+            "platform_name": shop.platform_name,
+            "shop_name": shop.shop_name,
+            "shop_color": shop.shop_color,
+            "entity_name": shop.entity_name,
+            "remark": shop.remark,
+        }
         update_data = data.model_dump(exclude_unset=True)
+        if "shop_color" in update_data:
+            update_data["shop_color"] = normalize_shop_color(update_data["shop_color"])
+        if not update_data.get("shop_color") and (
+            "platform_name" in update_data or "shop_name" in update_data
+        ):
+            next_platform_name = update_data.get("platform_name") or shop.platform_name
+            next_shop_name = update_data.get("shop_name") or shop.shop_name
+            update_data["shop_color"] = assign_default_shop_color(
+                org_id=shop.org_id,
+                platform_name=next_platform_name,
+                shop_name=next_shop_name,
+            )
         for k, v in update_data.items():
             setattr(shop, k, v)
         await db.flush()
+        await db.refresh(shop)
         await AuditService.log(
             db,
             user_id=operator.id,
@@ -141,7 +180,16 @@ class ShopService:
         result = await db.execute(stmt)
         shop = result.scalar_one_or_none()
         if shop is None:
-            shop = Shop(org_id=org_id, platform_name=platform_name, shop_name=shop_name)
+            shop = Shop(
+                org_id=org_id,
+                platform_name=platform_name,
+                shop_name=shop_name,
+                shop_color=assign_default_shop_color(
+                    org_id=org_id,
+                    platform_name=platform_name,
+                    shop_name=shop_name,
+                ),
+            )
             db.add(shop)
             await db.flush()
         return shop

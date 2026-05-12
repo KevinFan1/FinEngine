@@ -32,8 +32,8 @@ celery_app.autodiscover_tasks(["app.tasks"])
 
 logger = logging.getLogger("finengine.worker")
 _worker_loop: asyncio.AbstractEventLoop | None = None
-SUPPORTED_TEMP_SUFFIXES = {".xlsx", ".xlsm", ".csv"}
-FILENAME_TYPE_PATTERN = re.compile(r"^\d{2,4}年\d{1,2}月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _].+\.(?:xlsx|xlsm|csv)$", re.IGNORECASE)
+SUPPORTED_TEMP_SUFFIXES = {".xlsx", ".xlsm", ".xls", ".csv"}
+FILENAME_TYPE_PATTERN = re.compile(r"^\d{2,4}年\d{1,2}月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _].+\.(?:xlsx|xlsm|xls|csv)$", re.IGNORECASE)
 
 
 def _get_worker_loop() -> asyncio.AbstractEventLoop:
@@ -84,6 +84,41 @@ def _group_return_cost_by_order_created_time(
         key = (order_created_at.year, order_created_at.month)
         grouped_return_cost[key] = grouped_return_cost.get(key, Decimal("0")) + Decimal(str(row.get("return_cost") or "0"))
     return grouped_return_cost, list(dict.fromkeys(missing_order_nos))
+
+
+def _group_money_by_order_or_fallback_time(
+    rows: list[dict],
+    *,
+    order_created_times: dict[str, datetime],
+    amount_key: str,
+    fallback_time_key: str,
+) -> tuple[dict[tuple[int, int], Decimal], list[str], list[str]]:
+    """Group money rows by order month, falling back to a row timestamp."""
+    grouped: dict[tuple[int, int], Decimal] = {}
+    fallback_order_nos: list[str] = []
+    missing_order_nos: list[str] = []
+
+    for row in rows:
+        order_no = safe_str(row.get("order_no"))
+        order_created_at = order_created_times.get(order_no)
+        group_time = order_created_at
+
+        if group_time is None:
+            fallback_time = row.get(fallback_time_key)
+            if isinstance(fallback_time, datetime):
+                group_time = fallback_time
+                if order_no:
+                    fallback_order_nos.append(order_no)
+
+        if group_time is None:
+            if order_no:
+                missing_order_nos.append(order_no)
+            continue
+
+        key = (group_time.year, group_time.month)
+        grouped[key] = grouped.get(key, Decimal("0")) + Decimal(str(row.get(amount_key) or "0"))
+
+    return grouped, list(dict.fromkeys(missing_order_nos)), list(dict.fromkeys(fallback_order_nos))
 
 
 def _group_money_by_order_created_time(
@@ -138,6 +173,35 @@ def _build_order_dependency_summary(
         "groups": groups,
         "errors": _json_safe(errors),
     }
+
+
+def _build_order_or_fallback_time_summary(
+    *,
+    type_code: str,
+    proc_result: dict,
+    summary_ids: list[int],
+    groups: int,
+    missing_order_nos: list[str],
+    fallback_order_nos: list[str],
+    fallback_label: str,
+) -> dict:
+    summary = _build_order_dependency_summary(
+        type_code=type_code,
+        proc_result=proc_result,
+        summary_ids=summary_ids,
+        groups=groups,
+        missing_order_nos=missing_order_nos,
+    )
+    fallback_count = len(fallback_order_nos)
+    summary["fallback_time_label"] = fallback_label
+    summary["fallback_time_count"] = fallback_count
+    summary["fallback_time_samples"] = fallback_order_nos[:20]
+    if fallback_order_nos:
+        sample_text = "、".join(fallback_order_nos[:20])
+        errors = list(summary.get("errors") or [])
+        errors.append(f"订单索引未命中 {fallback_count} 条，已使用{fallback_label}归属年月；订单号: {sample_text}")
+        summary["errors"] = _json_safe(errors)
+    return summary
 
 
 def _group_summary_rows_by_order_created_time(
@@ -272,6 +336,7 @@ async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id:
     from app.core.database import async_session_factory
     from app.models.task import ProcessingTask
     from app.models.upload import UploadFile
+    from app.services.platform_profile_service import resolve_platform_profile
 
     async with async_session_factory() as db:
         result = await db.execute(select(UploadFile).where(UploadFile.id == order_file_id, UploadFile.is_deleted.is_(False)))
@@ -279,9 +344,12 @@ async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id:
         if order_file is None:
             return 0
 
+        order_profile = await resolve_platform_profile(db, order_file.detected_platform or "")
+        order_scope_code = order_file.order_scope_code or order_profile.order_scope_code
+
         filters = [
             UploadFile.org_id == order_file.org_id,
-            UploadFile.detected_platform == order_file.detected_platform,
+            or_(UploadFile.order_scope_code == order_scope_code, UploadFile.detected_platform == order_file.detected_platform),
             UploadFile.parsed_type.in_(["动账", "运费险", "bic", "其他服务款"]),
             UploadFile.parsed_year == order_file.parsed_year,
             UploadFile.parsed_month == order_file.parsed_month,
@@ -344,11 +412,8 @@ async def _process_file_platform_async(
     from app.models.upload import UploadFile
     from app.services.category_dict_service import CategoryDictService
     from app.services.oss_service import oss_service
+    from app.services.platform_profile_service import resolve_platform_profile
     from app.tasks.processors import PLATFORM_PROCESSORS
-
-    processor = PLATFORM_PROCESSORS.get(platform_code)
-    if processor is None:
-        raise ValueError(f"未找到平台 [{platform_code}] 的处理器")
 
     async with async_session_factory() as db:
         # 1. Update task status to running
@@ -372,6 +437,26 @@ async def _process_file_platform_async(
         file_type = _infer_file_type(upload_file)
         source_year = upload_file.parsed_year if upload_file else None
         source_month = upload_file.parsed_month if upload_file else None
+        profile = await resolve_platform_profile(db, upload_file.detected_platform if upload_file else platform_code)
+        processor = PLATFORM_PROCESSORS.get(profile.processor_code)
+        platform_code = profile.source_platform_code
+        report_platform_code = profile.report_platform_code
+        order_scope_code = profile.order_scope_code
+        if upload_file:
+            upload_file.source_platform_code = profile.source_platform_code
+            upload_file.report_platform_code = profile.report_platform_code
+            upload_file.processor_code = profile.processor_code
+            upload_file.order_scope_code = profile.order_scope_code
+        if processor is None:
+            error_message = f"未找到平台 [{profile.processor_code}] 的处理器"
+            task.status = "failed"
+            task.error_message = error_message
+            task.finished_at = datetime.now(timezone.utc)
+            if upload_file:
+                upload_file.status = "failed"
+                upload_file.error_message = error_message
+            await db.commit()
+            raise ValueError(error_message)
         if upload_file:
             upload_file.status = "processing"
             await db.commit()
@@ -382,7 +467,7 @@ async def _process_file_platform_async(
                 oss_service.download_to_temp(oss_key, tmp.name)
 
                 # 4. Load category dictionary (best-effort)
-                platform_stmt = select(Platform).where(Platform.code == platform_code, Platform.is_deleted.is_(False))
+                platform_stmt = select(Platform).where(Platform.code == profile.processor_code, Platform.is_deleted.is_(False))
                 platform_result = await db.execute(platform_stmt)
                 platform = platform_result.scalar_one_or_none()
 
@@ -410,7 +495,8 @@ async def _process_file_platform_async(
                 task.processed_rows = proc_result["total_rows"]
                 await db.commit()
 
-                if file_type == "订单":
+                should_requeue_order_dependents = False
+                if file_type in {"订单", "gmv"} and proc_result.get("orders"):
                     from app.services.order_index_service import OrderIndexService
 
                     task.progress = 80
@@ -420,46 +506,40 @@ async def _process_file_platform_async(
                         db,
                         org_id=org_id,
                         shop_id=shop_id,
-                        platform_code=platform_code,
+                        platform_code=order_scope_code,
                         orders=proc_result.get("orders", []),
                         source_file_id=file_id,
                     )
-                    if not upserted_rows:
+                    if file_type == "订单" and not upserted_rows:
                         raise ValueError(f"订单索引解析结果为空，错误: {proc_result['errors'][:3]}")
 
-                    task.status = "success"
-                    task.progress = 100
-                    task.success_rows = proc_result["success_rows"]
-                    task.failed_rows = proc_result["failed_rows"]
-                    task.result_summary = {
-                        "type": "订单",
-                        "order_index_rows": upserted_rows,
-                        "total_rows": proc_result["total_rows"],
-                        "success_rows": proc_result["success_rows"],
-                        "failed_rows": proc_result["failed_rows"],
-                        "errors": _json_safe(proc_result["errors"][:10]),
-                    }
-                    task.finished_at = datetime.now(timezone.utc)
+                    if file_type == "gmv":
+                        should_requeue_order_dependents = upserted_rows > 0
+                    else:
+                        task.status = "success"
+                        task.progress = 100
+                        task.success_rows = proc_result["success_rows"]
+                        task.failed_rows = proc_result["failed_rows"]
+                        task.result_summary = {
+                            "type": "订单",
+                            "order_index_rows": upserted_rows,
+                            "total_rows": proc_result["total_rows"],
+                            "success_rows": proc_result["success_rows"],
+                            "failed_rows": proc_result["failed_rows"],
+                            "errors": _json_safe(proc_result["errors"][:10]),
+                        }
+                        task.finished_at = datetime.now(timezone.utc)
 
-                    if upload_file:
-                        upload_file.status = "success"
-                        upload_file.row_count = proc_result["total_rows"]
+                        if upload_file:
+                            upload_file.status = "success"
+                            upload_file.row_count = proc_result["total_rows"]
 
-                    await db.commit()
-                    await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
-                    return
+                        await db.commit()
+                        await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
+                        return
 
-                if file_type == "gmv" and proc_result.get("orders"):
-                    from app.services.order_index_service import OrderIndexService
-
-                    await OrderIndexService.upsert_order_times(
-                        db,
-                        org_id=org_id,
-                        shop_id=shop_id,
-                        platform_code=platform_code,
-                        orders=proc_result.get("orders", []),
-                        source_file_id=file_id,
-                    )
+                if file_type == "订单":
+                    raise ValueError(f"订单索引解析结果为空，错误: {proc_result['errors'][:3]}")
 
                 if file_type == "动账" and "return_cost_rows" in proc_result:
                     from app.services.order_index_service import OrderIndexService
@@ -495,13 +575,15 @@ async def _process_file_platform_async(
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
-                        platform_code=platform_code,
+                        platform_code=order_scope_code,
                         order_nos=[safe_str(row.get("order_no")) for row in return_cost_rows],
                     )
 
-                    grouped_return_cost, missing_order_nos = _group_return_cost_by_order_created_time(
+                    grouped_return_cost, missing_order_nos, fallback_order_nos = _group_money_by_order_or_fallback_time(
                         return_cost_rows,
-                        order_created_times,
+                        order_created_times=order_created_times,
+                        amount_key="return_cost",
+                        fallback_time_key="entry_time",
                     )
 
                     summary_ids: list[int] = []
@@ -518,17 +600,22 @@ async def _process_file_platform_async(
                             source_file_id=file_id,
                             source_year=source_year,
                             source_month=source_month,
+                            source_platform_code=platform_code,
+                            report_platform_code=report_platform_code,
+                            shop_platform_code=report_platform_code,
                         )
                         summary_ids.append(summary.id)
 
                     task.status = "success"
                     task.progress = 100
-                    task.result_summary = _build_order_dependency_summary(
+                    task.result_summary = _build_order_or_fallback_time_summary(
                         type_code="动账",
                         proc_result=proc_result,
                         summary_ids=summary_ids,
                         groups=len(grouped_return_cost),
                         missing_order_nos=missing_order_nos,
+                        fallback_order_nos=fallback_order_nos,
+                        fallback_label="入账时间",
                     )
                     task.success_rows = task.result_summary["success_rows"]
                     task.failed_rows = task.result_summary["failed_rows"]
@@ -547,6 +634,8 @@ async def _process_file_platform_async(
 
                     task.progress = 80
                     await db.commit()
+
+                    print(proc_result)
 
                     contribution_rows = proc_result.get("return_cost_contribution_rows", [])
                     if not contribution_rows:
@@ -573,7 +662,7 @@ async def _process_file_platform_async(
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
-                        platform_code=platform_code,
+                        platform_code=order_scope_code,
                         order_nos=[safe_str(row.get("order_no")) for row in contribution_rows],
                     )
                     grouped_return_cost, missing_order_nos = _group_money_by_order_created_time(
@@ -597,6 +686,9 @@ async def _process_file_platform_async(
                             source_file_id=file_id,
                             source_year=source_year,
                             source_month=source_month,
+                            source_platform_code=platform_code,
+                            report_platform_code=report_platform_code,
+                            shop_platform_code=report_platform_code,
                         )
                         summary_ids.append(summary.id)
 
@@ -650,13 +742,14 @@ async def _process_file_platform_async(
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
-                        platform_code=platform_code,
+                        platform_code=order_scope_code,
                         order_nos=[safe_str(row.get("order_no")) for row in insurance_fee_rows],
                     )
-                    grouped_insurance_fee, missing_order_nos = _group_money_by_order_created_time(
+                    grouped_insurance_fee, missing_order_nos, fallback_order_nos = _group_money_by_order_or_fallback_time(
                         insurance_fee_rows,
                         order_created_times=order_created_times,
                         amount_key="insurance_fee",
+                        fallback_time_key="effective_time",
                     )
 
                     summary_ids: list[int] = []
@@ -673,17 +766,22 @@ async def _process_file_platform_async(
                             source_file_id=file_id,
                             source_year=source_year,
                             source_month=source_month,
+                            source_platform_code=platform_code,
+                            report_platform_code=report_platform_code,
+                            shop_platform_code=report_platform_code,
                         )
                         summary_ids.append(summary.id)
 
                     task.status = "success"
                     task.progress = 100
-                    task.result_summary = _build_order_dependency_summary(
+                    task.result_summary = _build_order_or_fallback_time_summary(
                         type_code="运费险",
                         proc_result=proc_result,
                         summary_ids=summary_ids,
                         groups=len(grouped_insurance_fee),
                         missing_order_nos=missing_order_nos,
+                        fallback_order_nos=fallback_order_nos,
+                        fallback_label="生效时间",
                     )
                     task.success_rows = task.result_summary["success_rows"]
                     task.failed_rows = task.result_summary["failed_rows"]
@@ -727,7 +825,7 @@ async def _process_file_platform_async(
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
-                        platform_code=platform_code,
+                        platform_code=order_scope_code,
                         order_nos=[safe_str(row.get("order_no")) for row in order_summary_rows],
                     )
                     grouped_values, missing_order_nos = _group_summary_rows_by_order_created_time(
@@ -750,6 +848,9 @@ async def _process_file_platform_async(
                             source_file_id=file_id,
                             source_year=source_year,
                             source_month=source_month,
+                            source_platform_code=platform_code,
+                            report_platform_code=report_platform_code,
+                            shop_platform_code=report_platform_code,
                         )
                         summary_ids.append(summary.id)
 
@@ -803,7 +904,7 @@ async def _process_file_platform_async(
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
-                        platform_code=platform_code,
+                        platform_code=order_scope_code,
                         order_nos=[safe_str(row.get("order_no")) for row in bic_rows],
                     )
                     grouped_bic, missing_order_nos = _group_money_by_order_created_time(
@@ -826,6 +927,9 @@ async def _process_file_platform_async(
                             source_file_id=file_id,
                             source_year=source_year,
                             source_month=source_month,
+                            source_platform_code=platform_code,
+                            report_platform_code=report_platform_code,
+                            shop_platform_code=report_platform_code,
                         )
                         summary_ids.append(summary.id)
 
@@ -848,7 +952,29 @@ async def _process_file_platform_async(
                     return
 
                 if not proc_result["groups"]:
-                    raise ValueError(f"解析结果为空，错误: {proc_result['errors'][:3]}")
+                    if proc_result.get("errors"):
+                        raise ValueError(f"解析结果为空，错误: {proc_result['errors'][:3]}")
+
+                    task.status = "success"
+                    task.progress = 100
+                    task.success_rows = proc_result["success_rows"]
+                    task.failed_rows = proc_result["failed_rows"]
+                    task.result_summary = {
+                        "summary_ids": [],
+                        "total_rows": proc_result["total_rows"],
+                        "success_rows": proc_result["success_rows"],
+                        "failed_rows": proc_result["failed_rows"],
+                        "groups": 0,
+                        "errors": [],
+                    }
+                    task.finished_at = datetime.now(timezone.utc)
+
+                    if upload_file:
+                        upload_file.status = "success"
+                        upload_file.row_count = proc_result["total_rows"]
+
+                    await db.commit()
+                    return
 
                 # 7. Upsert each group into the summary table
                 task.progress = 80
@@ -873,6 +999,9 @@ async def _process_file_platform_async(
                         source_file_id=file_id,
                         source_year=source_year,
                         source_month=source_month,
+                        source_platform_code=platform_code,
+                        report_platform_code=report_platform_code,
+                        shop_platform_code=report_platform_code,
                     )
                     summary_ids.append(summary.id)
 
@@ -896,6 +1025,8 @@ async def _process_file_platform_async(
                     upload_file.row_count = proc_result["total_rows"]
 
                 await db.commit()
+                if should_requeue_order_dependents:
+                    await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
 
         except Exception as e:
             task.status = "failed"

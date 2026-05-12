@@ -62,6 +62,7 @@ class OrgService:
         )
         db.add(org)
         await db.flush()
+        await db.refresh(org)
 
         await AuditService.log(
             db,
@@ -102,6 +103,7 @@ class OrgService:
             setattr(org, field, value)
 
         await db.flush()
+        await db.refresh(org)
 
         new_value = {"name": org.name, "code": org.code, "remark": org.remark, "status": org.status}
 
@@ -142,6 +144,7 @@ class OrgService:
         old_status = org.status
         org.status = status_val
         await db.flush()
+        await db.refresh(org)
 
         action_desc = "启用" if status_val == 1 else "禁用"
         await AuditService.log(

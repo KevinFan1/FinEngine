@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npx vue-tsc *)",
+      "Bash(grep -oP \"html\\\\.dark\\\\s*\\\\{[^}]{0,2000}--el-color-primary[^}]{0,500}\\\\}\" /Users/kevinfan/Desktop/projects/FinEngine/frontend/node_modules/element-plus/dist/index.css)"
+    ]
+  }
+}

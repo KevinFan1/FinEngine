@@ -36,7 +36,12 @@ export interface SummaryRecord extends SummaryMetricFields {
     source_date: string;
     platform: string;
     platform_name: string;
+    source_platform_code: string;
+    report_platform_code: string;
+    source_platform: string;
+    report_platform: string;
     shop_name: string;
+    shop_color?: string | null;
     created_at: string;
 }
 
@@ -49,8 +54,11 @@ export interface SummaryReportRecord extends SummaryMetricFields, SummaryReportA
     source_date: string;
     platform: string;
     platform_name: string;
+    report_platform_code: string;
+    report_platform: string;
     shop_id: number;
     shop_name: string;
+    shop_color?: string | null;
     summary_count: number;
 }
 
@@ -61,8 +69,16 @@ export interface SummaryListParams {
     summary_month?: number;
     source_year?: number;
     source_month?: number;
+    accounting_year?: number;
+    accounting_month?: number;
+    accounting_start_year?: number;
+    accounting_start_month?: number;
+    accounting_end_year?: number;
+    accounting_end_month?: number;
     platform_name?: string;
+    report_platform_name?: string;
     shop_name?: string;
+    keyword?: string;
     org_id?: number;
 }
 
@@ -74,7 +90,7 @@ export function getSummaryList(params: SummaryListParams) {
 }
 
 /**
- * Get upload-month aggregated summary report
+ * Get accounting-month aggregated summary report
  */
 export function getSummaryReportList(params: SummaryListParams) {
     return get<PaginatedData<SummaryReportRecord>>("/summaries/report", params);
@@ -89,7 +105,9 @@ export async function exportSummaryExcel(params: {
     source_year?: number;
     source_month?: number;
     platform_name?: string;
+    report_platform_name?: string;
     shop_name?: string;
+    keyword?: string;
     scope?: "all" | "current_page" | "selected";
     ids?: string;
     page?: number;
@@ -99,13 +117,21 @@ export async function exportSummaryExcel(params: {
 }
 
 /**
- * Export upload-month aggregated summary report
+ * Export accounting-month aggregated summary report
  */
 export async function exportSummaryReportExcel(params: {
+    accounting_year?: number;
+    accounting_month?: number;
+    accounting_start_year?: number;
+    accounting_start_month?: number;
+    accounting_end_year?: number;
+    accounting_end_month?: number;
     source_year?: number;
     source_month?: number;
     platform_name?: string;
+    report_platform_name?: string;
     shop_name?: string;
+    keyword?: string;
     scope?: "all" | "current_page" | "selected";
     ids?: string;
     page?: number;

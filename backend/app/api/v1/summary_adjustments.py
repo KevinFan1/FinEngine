@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -44,7 +44,7 @@ async def list_summary_adjustments(
     return ApiResponse(data=[to_adjustment_out(item) for item in items])
 
 
-@router.post("", response_model=ApiResponse[SummaryAdjustmentOut], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApiResponse[SummaryAdjustmentOut])
 async def create_summary_adjustment(
     body: SummaryAdjustmentCreate,
     request: Request,
@@ -76,7 +76,7 @@ async def update_summary_adjustment(
         request=request,
     )
     if adjustment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="调整记录不存在")
+        return ApiResponse(code=404, message="调整记录不存在")
     return ApiResponse(data=to_adjustment_out(adjustment))
 
 
@@ -94,7 +94,7 @@ async def delete_summary_adjustment(
         request=request,
     )
     if adjustment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="调整记录不存在")
+        return ApiResponse(code=404, message="调整记录不存在")
     return ApiResponse(message="已删除")
 
 

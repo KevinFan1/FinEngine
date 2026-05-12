@@ -6,7 +6,10 @@ export interface Task {
     batch_id: number;
     filename: string;
     platform: string;
+    source_platform_code?: string | null;
+    report_platform_code?: string | null;
     shop_name: string;
+    shop_color?: string | null;
     parsed_type?: string;
     parsed_year?: number;
     parsed_month?: number;
@@ -16,6 +19,8 @@ export interface Task {
     result_failed?: number;
     error_message: string | null;
     error_reason: string | null;
+    action_expired?: boolean;
+    action_expire_reason?: string | null;
     result_summary?: {
         errors?: unknown;
         [key: string]: unknown;
@@ -40,13 +45,24 @@ export interface TaskListParams {
     page_size?: number;
     status?: string;
     platform?: string;
-    shop_id?: number;
+    shop_id?: number | string;
     shop_name?: string;
     parsed_type?: string;
     parsed_year?: number;
     parsed_month?: number;
     keyword?: string;
     batch_id?: number;
+}
+
+export interface TaskBatchActionResult {
+    total: number;
+    success_count: number;
+    failed_count: number;
+    success_ids: number[];
+    failed_items: Array<{
+        task_id: number;
+        message: string;
+    }>;
 }
 
 /**
@@ -77,9 +93,17 @@ export function retryTask(id: number) {
     return post<Task>(`/tasks/${id}/retry`);
 }
 
+export function batchRetryTasks(taskIds: number[]) {
+    return post<TaskBatchActionResult>("/tasks/batch/retry", { task_ids: taskIds });
+}
+
 /**
  * Recalculate an order-dependent task.
  */
 export function recalculateTask(id: number) {
     return post<Task>(`/tasks/${id}/recalculate`);
+}
+
+export function batchRecalculateTasks(taskIds: number[]) {
+    return post<TaskBatchActionResult>("/tasks/batch/recalculate", { task_ids: taskIds });
 }

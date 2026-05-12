@@ -1,136 +1,113 @@
 <template>
-  <div class="page-container">
-    <div class="dashboard-hero">
-      <div class="hero-content">
-        <div class="hero-kicker">
-          <span class="hero-status-dot"></span>
-          财务数据工作台
+  <div class="page-container dashboard-page">
+    <section class="dashboard-summary">
+      <div class="summary-main">
+        <div class="summary-kicker">
+          <span class="status-dot" :class="statusDotClass"></span>
+          财务工作台
         </div>
         <h2>工作台</h2>
-        <p>
-          欢迎回来，{{ userStore.displayName }}
-          <span v-if="userStore.userInfo?.org_name"> · {{ userStore.userInfo.org_name }}</span>
-          <span> · {{ roleLabel }}</span>
-        </p>
-      </div>
-
-      <div class="hero-status-card">
-        <span class="status-label">任务健康度</span>
-        <strong :class="healthClass">{{ healthLabel }}</strong>
-        <div class="health-bar">
-          <span :style="{ width: completionRate }"></span>
+        <div class="summary-meta">
+          <span>{{ userStore.displayName }}</span>
+          <span v-if="userStore.userInfo?.org_name">{{ userStore.userInfo.org_name }}</span>
+          <span>{{ roleLabel }}</span>
         </div>
-        <p>{{ pendingTasks }} 个待处理 · {{ failedTasks }} 个失败任务</p>
       </div>
 
-      <div class="dashboard-actions">
+      <div class="summary-actions">
         <el-button type="primary" @click="router.push('/upload')">
-          <el-icon><Upload /></el-icon> 上传文件
+          <el-icon><Upload /></el-icon>
+          上传文件
         </el-button>
-        <el-button @click="router.push('/tasks')">
-          <el-icon><List /></el-icon> 查看任务
+        <el-button @click="router.push('/summary-report')">
+          <el-icon><DataAnalysis /></el-icon>
+          查看报表
         </el-button>
       </div>
-    </div>
+    </section>
 
-    <div class="workflow-strip">
-      <div
-        v-for="(step, index) in workflowSteps"
-        :key="step.title"
-        class="workflow-step"
-        @click="router.push(step.path)"
+    <section class="metric-strip">
+      <button
+        v-for="metric in taskMetrics"
+        :key="metric.label"
+        type="button"
+        class="metric-cell"
+        :class="metric.className"
+        @click="router.push(metric.path)"
       >
-        <span class="step-index">{{ String(index + 1).padStart(2, '0') }}</span>
         <div>
-          <h3>{{ step.title }}</h3>
-          <p>{{ step.desc }}</p>
+          <span>{{ metric.label }}</span>
+          <strong>{{ metric.value }}</strong>
         </div>
-      </div>
-    </div>
+        <small>{{ metric.hint }}</small>
+      </button>
+    </section>
 
-    <div class="stats-row">
-      <div
-        v-for="stat in statsCards"
-        :key="stat.title"
-        class="stat-card"
-        :class="stat.className"
-        @click="router.push(stat.path)"
-      >
-        <div class="stat-top">
-          <div class="stat-icon">
-            <el-icon :size="22"><component :is="stat.icon" /></el-icon>
-          </div>
-          <span>{{ stat.badge }}</span>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ stat.value }}</div>
-          <div class="stat-title">{{ stat.title }}</div>
-          <div class="stat-desc">{{ stat.desc }}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="workbench-grid">
-      <el-card shadow="never" class="section-card">
+    <section class="dashboard-board">
+      <el-card shadow="never" class="status-card">
         <template #header>
           <div class="card-header">
-            <span class="card-header-title">待办提醒</span>
-            <el-button link type="primary" @click="router.push('/tasks')">查看全部</el-button>
+            <span class="card-header-title">任务状态</span>
+            <el-button link type="primary" @click="router.push('/tasks')">任务列表</el-button>
           </div>
         </template>
-        <div class="todo-list">
-          <div v-for="item in todoItems" :key="item.title" class="todo-item">
-            <div class="todo-info">
-              <h4>{{ item.title }}</h4>
-              <p>{{ item.desc }}</p>
-            </div>
-            <el-tag :type="item.type" size="small">{{ item.count }}</el-tag>
+        <div class="status-panel">
+          <div class="status-head">
+            <span>当前状态</span>
+            <strong :class="healthClass">{{ healthLabel }}</strong>
+          </div>
+          <div class="health-bar">
+            <span :style="{ width: completionRate }"></span>
+          </div>
+          <div class="status-foot">
+            <span>总任务 {{ totalTasks }}</span>
+            <span>待处理 {{ pendingTasks }}</span>
+            <span>失败 {{ failedTasks }}</span>
           </div>
         </div>
       </el-card>
 
-      <el-card shadow="never" class="section-card">
+      <el-card shadow="never" class="shortcut-card">
         <template #header>
           <span class="card-header-title">常用操作</span>
         </template>
-        <div class="entry-grid">
-          <div
-            v-for="entry in quickEntries"
+        <div class="shortcut-list">
+          <button
+            v-for="entry in shortcutEntries"
             :key="entry.path"
-            class="entry-card"
+            type="button"
+            class="shortcut-item"
             @click="router.push(entry.path)"
           >
-            <div class="entry-icon" :style="{ background: entry.iconBg }">
-              <el-icon :size="24" :color="entry.iconColor"><component :is="entry.icon" /></el-icon>
+            <el-icon :size="18"><component :is="entry.icon" /></el-icon>
+            <div>
+              <strong>{{ entry.title }}</strong>
+              <span>{{ entry.desc }}</span>
             </div>
-            <div class="entry-info">
-              <h4>{{ entry.title }}</h4>
-              <p>{{ entry.desc }}</p>
-            </div>
-          </div>
+          </button>
         </div>
       </el-card>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+defineOptions({ name: 'Dashboard' })
+
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { getRoleLabel } from '@/utils/format'
 import { getTaskList } from '@/api/task'
+import { getRoleLabel } from '@/utils/format'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const roleLabel = computed(() => getRoleLabel(userStore.userRole))
 
-const monthUploads = ref(0)
 const pendingTasks = ref(0)
 const completedTasks = ref(0)
 const failedTasks = ref(0)
-const summaryRecords = ref(0)
 
 const totalTasks = computed(() => pendingTasks.value + completedTasks.value + failedTasks.value)
 
@@ -151,116 +128,54 @@ const healthClass = computed(() => ({
   'is-success': failedTasks.value === 0 && pendingTasks.value === 0 && totalTasks.value > 0,
 }))
 
-const statsCards = computed(() => [
-  {
-    title: '待处理任务',
-    desc: '需要等待或继续处理',
-    value: pendingTasks.value,
-    icon: 'Clock',
-    badge: '处理中',
-    className: 'stat-card--orange',
-    path: '/tasks',
-  },
-  {
-    title: '失败任务',
-    desc: '建议优先检查并重试',
-    value: failedTasks.value,
-    icon: 'Warning',
-    badge: '优先处理',
-    className: 'stat-card--purple',
-    path: '/tasks',
-  },
-  {
-    title: '已完成任务',
-    desc: '当前可用于汇总查看',
-    value: completedTasks.value,
-    icon: 'CircleCheck',
-    badge: '可汇总',
-    className: 'stat-card--green',
-    path: '/tasks',
-  },
-  {
-    title: '本月上传',
-    desc: '本月已上传文件数量',
-    value: monthUploads.value,
-    icon: 'Upload',
-    badge: '本月',
-    className: 'stat-card--blue',
-    path: '/upload',
-  },
-])
+const statusDotClass = computed(() => ({
+  'is-danger': failedTasks.value > 0,
+  'is-warning': failedTasks.value === 0 && pendingTasks.value > 0,
+  'is-success': failedTasks.value === 0 && pendingTasks.value === 0 && totalTasks.value > 0,
+}))
 
-const workflowSteps = [
+const taskMetrics = computed(() => [
   {
-    title: '上传财务文件',
-    desc: '进入上传中心，先完成文件名、平台和表头检查',
-    path: '/upload',
-  },
-  {
-    title: '跟进处理任务',
-    desc: '查看解析进度，失败后进入任务列表定位原因',
+    label: '待处理',
+    value: pendingTasks.value,
+    hint: '查看进度',
+    className: 'metric-cell--warning',
     path: '/tasks',
   },
   {
-    title: '查看汇总报表',
-    desc: '按数据表上传年月、平台和店铺筛选，导出可交付结果',
+    label: '失败任务',
+    value: failedTasks.value,
+    hint: '优先处理',
+    className: 'metric-cell--danger',
+    path: '/tasks',
+  },
+  {
+    label: '已完成',
+    value: completedTasks.value,
+    hint: '进入报表',
+    className: 'metric-cell--success',
     path: '/summary-report',
   },
-]
-
-const todoItems = computed(() => [
-  {
-    title: '处理中的任务',
-    desc: '文件上传后会进入任务列表，可在这里跟进状态。',
-    count: pendingTasks.value,
-    type: 'warning',
-  },
-  {
-    title: '失败任务',
-    desc: '失败任务支持进入任务列表查看原因并手动重试。',
-    count: failedTasks.value,
-    type: 'danger',
-  },
-  {
-    title: '汇总报表',
-    desc: '处理完成后可进入汇总报表按上传年月、平台、店铺筛选导出。',
-    count: summaryRecords.value,
-    type: 'info',
-  },
 ])
 
-const quickEntries = [
+const shortcutEntries = [
   {
     title: '上传中心',
-    desc: '快速上传财务文件，并完成格式和表头检查',
+    desc: '导入文件',
     path: '/upload',
     icon: 'Upload',
-    iconBg: 'var(--primary-light)',
-    iconColor: 'var(--primary)',
   },
   {
     title: '任务列表',
-    desc: '查看处理进度、失败原因和手动重试',
+    desc: '处理进度',
     path: '/tasks',
     icon: 'List',
-    iconBg: 'var(--warning-light)',
-    iconColor: 'var(--warning)',
   },
   {
     title: '汇总报表',
-    desc: '按上传年月筛选汇总，并下钻查看明细',
+    desc: '查看结果',
     path: '/summary-report',
     icon: 'DataAnalysis',
-    iconBg: 'var(--info-light)',
-    iconColor: 'var(--info)',
-  },
-  {
-    title: '店铺管理',
-    desc: '维护平台店铺和主体信息',
-    path: '/shops',
-    icon: 'Shop',
-    iconBg: 'var(--success-light)',
-    iconColor: 'var(--success)',
   },
 ]
 
@@ -275,7 +190,7 @@ async function fetchStats() {
     const failedRes = await getTaskList({ page: 1, page_size: 1, status: 'failed' })
     failedTasks.value = failedRes.total || 0
   } catch {
-    // Stats are non-critical.
+    // 首页统计不阻断工作台加载。
   }
 }
 
@@ -285,305 +200,159 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-.page-container {
+.dashboard-page {
   max-width: none;
 }
 
-.dashboard-hero {
-  position: relative;
+.dashboard-summary {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  margin-bottom: var(--spacing);
-  padding: 24px;
-  overflow: hidden;
-  border: 1px solid var(--surface-border);
+  gap: 20px;
+  margin-bottom: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-card);
-  background:
-    linear-gradient(135deg, rgba(21, 91, 213, 0.12), transparent 36%),
-    linear-gradient(180deg, var(--surface-highlight), transparent),
-    var(--bg-elevated);
+  background: var(--bg-card);
   box-shadow: var(--shadow-card);
+}
 
-  &::after {
-    content: '';
-    position: absolute;
-    right: 28%;
-    top: 18px;
-    width: 1px;
-    height: calc(100% - 36px);
-    background: var(--border-light);
-  }
+.summary-main {
+  min-width: 0;
 
-  .hero-content {
-    position: relative;
-    z-index: 1;
-    flex: 1;
-    min-width: 260px;
-
-    .hero-kicker {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--primary);
-      font-size: 13px;
-      font-weight: 700;
-      margin-bottom: 10px;
-    }
-
-    .hero-status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--success);
-      box-shadow: 0 0 0 4px var(--success-light);
-    }
-
-    h2 {
-      font-size: clamp(28px, 3vw, 38px);
-      font-weight: 800;
-      line-height: 1.16;
-      color: var(--text-primary);
-      margin-bottom: 8px;
-      letter-spacing: 0;
-    }
-
-    p {
-      color: var(--text-secondary);
-      font-size: 14px;
-      line-height: 1.7;
-    }
-  }
-
-  .hero-status-card {
-    position: relative;
-    z-index: 1;
-    width: 220px;
-    flex-shrink: 0;
-    padding: 16px;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius);
-    background: var(--bg-card);
-    box-shadow: var(--shadow-sm);
-
-    .status-label {
-      display: block;
-      color: var(--text-tertiary);
-      font-size: 12px;
-      margin-bottom: 5px;
-    }
-
-    strong {
-      display: block;
-      color: var(--text-primary);
-      font-size: 22px;
-      line-height: 1.2;
-      margin-bottom: 12px;
-
-      &.is-danger {
-        color: var(--error);
-      }
-
-      &.is-warning {
-        color: var(--warning);
-      }
-
-      &.is-success {
-        color: var(--success);
-      }
-    }
-
-    .health-bar {
-      height: 7px;
-      border-radius: 999px;
-      background: var(--border-color-light);
-      overflow: hidden;
-      margin-bottom: 10px;
-
-      span {
-        display: block;
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, var(--primary), var(--accent));
-      }
-    }
-
-    p {
-      color: var(--text-tertiary);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-  }
-
-  .dashboard-actions {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    flex-wrap: wrap;
+  h2 {
+    margin: 4px 0 6px;
+    color: var(--text-primary);
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.2;
   }
 }
 
-.workflow-strip {
+.summary-kicker,
+.summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-kicker {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.summary-meta {
+  color: var(--text-tertiary);
+  font-size: 13px;
+
+  span + span::before {
+    content: '/';
+    margin-right: 8px;
+    color: var(--border-color);
+  }
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+
+  &.is-success {
+    background: var(--success);
+  }
+
+  &.is-warning {
+    background: var(--warning);
+  }
+
+  &.is-danger {
+    background: var(--error);
+  }
+}
+
+.summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.metric-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--spacing);
-  margin-bottom: var(--spacing);
-}
-
-.workflow-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  min-height: 92px;
-  padding: 16px;
-  border: 1px solid var(--surface-border);
+  margin-bottom: 14px;
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-card);
-  background: var(--bg-elevated);
+  background: var(--bg-card);
   box-shadow: var(--shadow-card);
-  cursor: pointer;
-  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
-
-  &:hover {
-    border-color: var(--primary-light-5);
-    box-shadow: var(--shadow-card-hover);
-    transform: translateY(-1px);
-  }
-
-  .step-index {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    color: var(--primary);
-    background: var(--primary-lighter);
-    font-weight: 800;
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  h3 {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 5px;
-  }
-
-  p {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    line-height: 1.55;
-  }
+  overflow: hidden;
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--spacing);
-  margin-bottom: var(--spacing);
-}
-
-.stat-card {
-  border-radius: var(--radius);
-  padding: 18px;
+.metric-cell {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
-  min-height: 160px;
-  border: 1px solid transparent;
-  box-shadow: var(--shadow-card);
+  gap: 16px;
+  min-height: 86px;
+  padding: 16px 20px;
+  border: 0;
+  border-right: 1px solid var(--border-color-light);
+  background: transparent;
+  text-align: left;
   cursor: pointer;
-  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
+  transition: background-color 0.16s;
+
+  &:last-child {
+    border-right: 0;
+  }
 
   &:hover {
-    border-color: var(--border-color);
-    box-shadow: var(--shadow-card-hover);
-    transform: translateY(-1px);
+    background: var(--bg-hover);
   }
 
-  .stat-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 18px;
-
-    span {
-      color: var(--text-tertiary);
-      font-size: 12px;
-      font-weight: 600;
-    }
+  span {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-tertiary);
+    font-size: 13px;
   }
 
-  &--blue {
-    color: var(--stat-blue-text);
-    background: var(--stat-blue-bg);
-    border-color: var(--stat-blue-border);
-  }
-
-  &--orange {
-    color: var(--stat-orange-text);
-    background: var(--stat-orange-bg);
-    border-color: var(--stat-orange-border);
-  }
-
-  &--green {
-    color: var(--stat-green-text);
-    background: var(--stat-green-bg);
-    border-color: var(--stat-green-border);
-  }
-
-  &--purple {
-    color: var(--stat-coral-text);
-    background: var(--stat-coral-bg);
-    border-color: var(--stat-coral-border);
-  }
-
-  .stat-value {
-    font-size: 34px;
-    font-weight: 800;
-    line-height: 1.2;
+  strong {
+    color: var(--text-primary);
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
     font-variant-numeric: tabular-nums;
   }
 
-  .stat-title {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-top: 4px;
-  }
-
-  .stat-desc {
-    margin-top: 8px;
-    font-size: 12px;
+  small {
     color: var(--text-tertiary);
-    line-height: 1.4;
+    font-size: 12px;
   }
 
-  .stat-icon {
-    width: 42px;
-    height: 42px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius);
-    background: rgba(255, 255, 255, 0.62);
-    box-shadow: var(--shadow-sm);
+  &--warning strong {
+    color: var(--warning);
+  }
+
+  &--danger strong {
+    color: var(--error);
+  }
+
+  &--success strong {
+    color: var(--success);
   }
 }
 
-.workbench-grid {
+.dashboard-board {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.4fr);
-  gap: var(--spacing);
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 14px;
 }
 
-.section-card {
+.status-card,
+.shortcut-card {
   .card-header {
     display: flex;
     align-items: center;
@@ -591,164 +360,125 @@ onMounted(() => {
   }
 
   .card-header-title {
+    color: var(--text-primary);
     font-size: 15px;
     font-weight: 600;
-    color: var(--text-primary);
   }
 }
 
-.todo-list {
+.status-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
-.todo-item {
+.status-head,
+.status-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0 14px 14px;
-  border-bottom: 1px solid var(--border-light);
-  position: relative;
+  gap: 14px;
+}
 
-  &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 19px;
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--primary);
-    box-shadow: 0 0 0 4px var(--primary-lighter);
+.status-head {
+  span {
+    color: var(--text-tertiary);
+    font-size: 13px;
+  }
+
+  strong {
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .is-danger {
+    color: var(--error);
+  }
+
+  .is-warning {
+    color: var(--warning);
+  }
+
+  .is-success {
+    color: var(--success);
+  }
+}
+
+.health-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-color-light);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+  }
+}
+
+.status-foot {
+  justify-content: flex-start;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-color-light);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.16s;
+
+  &:hover {
+    color: var(--primary);
   }
 
   &:last-child {
-    border-bottom: none;
+    border-bottom: 0;
   }
 
-  .todo-info {
+  .el-icon {
+    flex-shrink: 0;
+    color: var(--primary);
+  }
+
+  div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
     min-width: 0;
   }
 
-  h4 {
+  strong {
     font-size: 14px;
     font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
   }
 
-  p {
-    font-size: 12px;
+  span {
     color: var(--text-tertiary);
-    line-height: 1.5;
-  }
-}
-
-.entry-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.entry-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color 0.16s, background-color 0.16s, box-shadow 0.16s, transform 0.16s;
-  border: 1px solid var(--border-light);
-  background: var(--bg-card);
-  position: relative;
-
-  &:hover {
-    background: var(--bg-hover);
-    border-color: var(--primary);
-    box-shadow: var(--shadow-sm);
-    transform: translateY(-1px);
-  }
-
-  &::after {
-    content: '';
-    width: 7px;
-    height: 7px;
-    border-top: 1px solid var(--text-tertiary);
-    border-right: 1px solid var(--text-tertiary);
-    transform: rotate(45deg);
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-
-  .entry-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: var(--radius);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .entry-info {
-    flex: 1;
-    min-width: 0;
-
-    h4 {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 2px;
-    }
-
-    p {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      line-height: 1.4;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+    font-size: 12px;
   }
 }
 
 @media (max-width: 1100px) {
-  .stats-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .workbench-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboard-hero {
-    flex-wrap: wrap;
-
-    &::after {
-      display: none;
-    }
-  }
-
-  .workflow-strip {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-  .dashboard-hero {
-    flex-direction: column;
-    gap: 14px;
-    padding: 18px;
-
-    .hero-status-card {
-      width: 100%;
-    }
-  }
-
-  .stats-row,
-  .entry-grid {
+  .dashboard-board {
     grid-template-columns: 1fr;
   }
 }

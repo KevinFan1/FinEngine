@@ -1,0 +1,37 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="finengine-bg" x1="18" y1="12" x2="108" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#58ACFF" />
+      <stop offset="0.52" stop-color="#1677FF" />
+      <stop offset="1" stop-color="#0B4CC8" />
+    </linearGradient>
+    <linearGradient id="finengine-accent" x1="54" y1="90" x2="94" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8CF7D7" />
+      <stop offset="1" stop-color="#FFFFFF" />
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="112" height="112" rx="32" fill="url(#finengine-bg)" />
+  <rect x="24" y="34" width="42" height="56" rx="14" fill="rgba(255,255,255,0.16)" />
+  <rect
+    x="44"
+    y="28"
+    width="58"
+    height="68"
+    rx="16"
+    fill="rgba(255,255,255,0.10)"
+    stroke="rgba(255,255,255,0.72)"
+    stroke-width="4"
+  />
+  <path d="M58 48H87" stroke="rgba(255,255,255,0.96)" stroke-width="6" stroke-linecap="round" />
+  <path d="M58 63H80" stroke="rgba(255,255,255,0.9)" stroke-width="5.5" stroke-linecap="round" />
+  <path d="M58 78H72" stroke="rgba(255,255,255,0.82)" stroke-width="5" stroke-linecap="round" />
+  <path
+    d="M55 88L70 72L81 79L95 58"
+    stroke="url(#finengine-accent)"
+    stroke-width="7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="95" cy="58" r="6" fill="#DFFBF4" />
+</svg>

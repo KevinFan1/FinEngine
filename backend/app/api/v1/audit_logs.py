@@ -14,6 +14,12 @@ from app.schemas.common import ApiResponse, PageResponse
 router = APIRouter()
 
 
+def split_filter_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 @router.get("", response_model=ApiResponse[PageResponse[AuditLogOut]])
 async def list_audit_logs(
     page: int = Query(1, ge=1),
@@ -40,13 +46,15 @@ async def list_audit_logs(
         stmt = stmt.where(OperationLog.org_id == current_user.org_id)
         count_stmt = count_stmt.where(OperationLog.org_id == current_user.org_id)
 
-    if module:
-        stmt = stmt.where(OperationLog.module == module)
-        count_stmt = count_stmt.where(OperationLog.module == module)
+    module_values = split_filter_values(module)
+    if module_values:
+        stmt = stmt.where(OperationLog.module.in_(module_values))
+        count_stmt = count_stmt.where(OperationLog.module.in_(module_values))
 
-    if action:
-        stmt = stmt.where(OperationLog.action == action)
-        count_stmt = count_stmt.where(OperationLog.action == action)
+    action_values = split_filter_values(action)
+    if action_values:
+        stmt = stmt.where(OperationLog.action.in_(action_values))
+        count_stmt = count_stmt.where(OperationLog.action.in_(action_values))
 
     if user_id is not None:
         stmt = stmt.where(OperationLog.user_id == user_id)

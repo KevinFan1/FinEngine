@@ -1,6 +1,6 @@
 """分类字典管理 API — 超管 CRUD + 文本分类接口"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -54,7 +54,7 @@ async def list_category_dicts(
     )
 
 
-@router.post("", response_model=ApiResponse[CategoryDictOut], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApiResponse[CategoryDictOut])
 async def create_category_dict(
     body: CategoryDictCreate,
     request: Request,
@@ -101,7 +101,7 @@ async def update_category_dict(
     """更新分类字典（超管）。"""
     cd = await CategoryDictService.update_dict(db, dict_id=dict_id, data=body)
     if cd is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="字典不存在")
+        return ApiResponse(code=404, message="字典不存在")
 
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
@@ -135,7 +135,7 @@ async def delete_category_dict(
     """删除分类字典（超管）。"""
     ok = await CategoryDictService.delete_dict(db, dict_id=dict_id)
     if not ok:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="字典不存在")
+        return ApiResponse(code=404, message="字典不存在")
 
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
@@ -175,10 +175,7 @@ async def classify_single(
         type_code=body.type_code,
     )
     if categories is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到 platform_id={body.platform_id} type_code={body.type_code} 的分类字典",
-        )
+        return ApiResponse(code=404, message=f"未找到 platform_id={body.platform_id} type_code={body.type_code} 的分类字典")
 
     result = classify_text(body.text, categories)
     return ApiResponse(
@@ -205,10 +202,7 @@ async def classify_batch_endpoint(
         type_code=body.type_code,
     )
     if categories is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到 platform_id={body.platform_id} type_code={body.type_code} 的分类字典",
-        )
+        return ApiResponse(code=404, message=f"未找到 platform_id={body.platform_id} type_code={body.type_code} 的分类字典")
 
     results = classify_batch(body.texts, categories)
     return ApiResponse(

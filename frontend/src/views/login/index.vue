@@ -9,20 +9,11 @@
         <div class="login-left-content">
           <div class="login-brand-row">
             <div class="login-logo">
-              <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" width="34" height="34">
-                <rect width="28" height="28" rx="6" fill="url(#lg)" />
-                <path d="M8 10h12M8 14h8M8 18h10" stroke="#fff" stroke-width="2" stroke-linecap="round" />
-                <defs>
-                  <linearGradient id="lg" x1="0" y1="0" x2="28" y2="28">
-                    <stop stop-color="#93c5fd" />
-                    <stop offset="1" stop-color="#2563eb" />
-                  </linearGradient>
-                </defs>
-              </svg>
+              <BrandLogo :size="40" />
             </div>
             <div>
               <h1 class="login-brand">FinEngine</h1>
-              <p class="login-brand-desc">财务数据处理系统</p>
+              <p class="login-brand-desc">财务运营平台</p>
             </div>
           </div>
 
@@ -97,7 +88,7 @@
         </div>
 
         <div class="login-footer">
-          <span>&copy; 2025 FinEngine. All rights reserved.</span>
+          <span>&copy; 2025 FinEngine. 财务运营平台</span>
         </div>
       </div>
     </div>
@@ -109,6 +100,7 @@ import { ref, reactive } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
 import { useUserStore } from '@/stores/user'
 import { useThemeStore } from '@/stores/theme'
+import BrandLogo from '@/components/BrandLogo.vue'
 
 const userStore = useUserStore()
 const themeStore = useThemeStore()
@@ -199,14 +191,14 @@ async function handleLogin() {
 }
 
 :global(html.dark) .theme-switch {
-  background: #f8fbff;
-  border-color: #f8fbff;
-  color: #0f172a;
+  background: var(--bg-card);
+  border-color: var(--border-color);
+  color: var(--text-primary);
 
   &:hover {
-    background: #dcecff;
-    border-color: #dcecff;
-    color: #0f172a;
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary);
   }
 }
 
@@ -240,14 +232,15 @@ async function handleLogin() {
     }
 
     .login-logo {
-      width: 48px;
-      height: 48px;
+      width: 56px;
+      height: 56px;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(255, 255, 255, 0.12);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 18px;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
     }
 
     .login-brand {
@@ -294,7 +287,7 @@ async function handleLogin() {
         gap: 12px;
 
         .el-icon {
-          color: #bfdbfe;
+          color: #e6f4ff;
           margin-top: 3px;
           flex-shrink: 0;
         }

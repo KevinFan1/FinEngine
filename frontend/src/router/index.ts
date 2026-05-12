@@ -52,7 +52,7 @@ const routes: RouteRecordRaw[] = [
             },
             {
                 path: "upload",
-                name: "Upload",
+                name: "UploadCenter",
                 component: () => import("@/views/upload/index.vue"),
                 meta: { title: "上传中心", icon: "Upload" },
             },
@@ -66,7 +66,7 @@ const routes: RouteRecordRaw[] = [
                 path: "summaries",
                 name: "Summaries",
                 component: () => import("@/views/summary/index.vue"),
-                meta: { title: "动账明细", icon: "Document" },
+                meta: { title: "汇总明细", icon: "Document" },
             },
             {
                 path: "summary-report",
@@ -111,7 +111,7 @@ router.beforeEach((to, _from, next) => {
     }
 
     // Set page title
-    const title = to.meta.title ? `${to.meta.title} - FinEngine` : "FinEngine";
+    const title = to.meta.title ? `${to.meta.title} - FinEngine 财务运营平台` : "FinEngine 财务运营平台";
     document.title = title as string;
 
     // Public routes (login page)

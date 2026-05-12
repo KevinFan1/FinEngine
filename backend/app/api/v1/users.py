@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -16,7 +16,7 @@ async def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
@@ -40,7 +40,7 @@ async def list_users(
     )
 
 
-@router.post("", response_model=ApiResponse[UserOut], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApiResponse[UserOut])
 async def create_user(
     body: UserCreate,
     request: Request,
@@ -61,7 +61,7 @@ async def create_user(
             user_agent=ua,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        return ApiResponse(code=400, message=str(e))
 
     return ApiResponse(data=UserOut.model_validate(user))
 
@@ -76,7 +76,7 @@ async def get_user(
     """Get user detail."""
     user = await UserService.get_user(db, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+        return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(data=UserOut.model_validate(user))
 
 
@@ -103,10 +103,10 @@ async def update_user(
             user_agent=ua,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        return ApiResponse(code=400, message=str(e))
 
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+        return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(data=UserOut.model_validate(user))
 
 
@@ -132,7 +132,7 @@ async def update_user_status(
         user_agent=ua,
     )
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+        return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(data=UserOut.model_validate(user))
 
 
@@ -158,5 +158,5 @@ async def reset_user_password(
         user_agent=ua,
     )
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+        return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(message="密码已重置")

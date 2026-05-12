@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from zipfile import ZipFile
@@ -129,12 +130,15 @@ def test_kuaishou_gmv_aggregates_financial_fields(tmp_path: Path) -> None:
     assert result["success_rows"] == 2
     assert result["failed_rows"] == 0
     assert result["errors"] == []
+    assert [row["order_no"] for row in result["orders"]] == ["o-1", "o-2"]
+    assert result["orders"][0]["order_created_at"].year == 2026
+    assert result["orders"][0]["order_created_at"].month == 4
 
     agg = result["groups"]["快手店铺|2026|4"]
     assert agg["gmv"] == Decimal("270")
     assert agg["platform_income"] == Decimal("165")
     assert agg["platform_fee"] == Decimal("69")
-    assert agg["return_cost"] == Decimal("0")
+    assert "return_cost" not in agg
     assert agg["commission"] == Decimal("165")
     assert agg["merchant_fee"] == Decimal("0")
     assert agg["promotion_fee"] == Decimal("0")
@@ -144,9 +148,10 @@ def test_kuaishou_gmv_aggregates_financial_fields(tmp_path: Path) -> None:
     assert "bic" not in agg
 
 
-def test_kuaishou_gmv_requires_only_formula_headers(tmp_path: Path) -> None:
+def test_kuaishou_gmv_requires_formula_and_order_headers(tmp_path: Path) -> None:
     file_path = tmp_path / "kuaishou_minimal_gmv.xlsx"
     headers = [
+        "订单号",
         "订单创建时间",
         "订单实付(元)",
         "政府补贴",
@@ -164,18 +169,20 @@ def test_kuaishou_gmv_requires_only_formula_headers(tmp_path: Path) -> None:
     _write_workbook_with_headers(
         file_path,
         headers,
-        [["2026-04-15 10:20:30", "100", "1", "2", "3", "4", "5", "10", "2", "6", "7", "8", "3"]],
+        [["order-1", "2026-04-15 10:20:30", "100", "1", "2", "3", "4", "5", "10", "2", "6", "7", "8", "3"]],
     )
 
     result = kuaishou_processor.process(str(file_path), shop_name="快手店铺", type_code="gmv")
 
     assert result["errors"] == []
     assert result["groups"]["快手店铺|2026|4"]["gmv"] == Decimal("90")
+    assert [row["order_no"] for row in result["orders"]] == ["order-1"]
 
 
 def test_kuaishou_gmv_accepts_half_width_parentheses_headers(tmp_path: Path) -> None:
     file_path = tmp_path / "kuaishou_half_width_headers.csv"
     headers = [
+        "订单号",
         "订单创建时间",
         "订单实付(元)",
         "政府补贴",
@@ -193,13 +200,14 @@ def test_kuaishou_gmv_accepts_half_width_parentheses_headers(tmp_path: Path) -> 
     _write_csv_with_headers(
         file_path,
         headers,
-        [["2026-04-15 10:20:30", "100", "1", "2", "3", "4", "5", "10", "2", "6", "7", "8", "3"]],
+        [["order-1", "2026-04-15 10:20:30", "100", "1", "2", "3", "4", "5", "10", "2", "6", "7", "8", "3"]],
     )
 
     result = kuaishou_processor.process(str(file_path), shop_name="快手店铺", type_code="gmv")
 
     assert result["errors"] == []
     assert result["groups"]["快手店铺|2026|4"]["platform_fee"] == Decimal("7")
+    assert [row["order_no"] for row in result["orders"]] == ["order-1"]
 
 
 def test_kuaishou_year_month_falls_back_to_settlement_time(tmp_path: Path) -> None:
@@ -245,8 +253,8 @@ def test_kuaishou_dongzhang_aggregates_return_cost_only(tmp_path: Path) -> None:
     assert result["errors"] == []
     assert result["groups"] == {}
     assert result["return_cost_rows"] == [
-        {"order_no": "order-1", "return_cost": Decimal("-10.50")},
-        {"order_no": "order-2", "return_cost": Decimal("3.25")},
+        {"order_no": "order-1", "entry_time": datetime(2026, 4, 1, 12, 0, 0), "return_cost": Decimal("-10.50")},
+        {"order_no": "order-2", "entry_time": datetime(2026, 4, 2, 0, 0, 0), "return_cost": Decimal("3.25")},
     ]
 
 
@@ -270,8 +278,8 @@ def test_kuaishou_dongzhang_csv_aggregates_return_cost_only(tmp_path: Path) -> N
 
     assert result["success_rows"] == 2
     assert result["return_cost_rows"] == [
-        {"order_no": "order-1", "return_cost": Decimal("-10.50")},
-        {"order_no": "order-2", "return_cost": Decimal("3.25")},
+        {"order_no": "order-1", "entry_time": datetime(2026, 4, 1, 12, 0, 0), "return_cost": Decimal("-10.50")},
+        {"order_no": "order-2", "entry_time": datetime(2026, 4, 2, 0, 0, 0), "return_cost": Decimal("3.25")},
     ]
 
 
@@ -294,8 +302,8 @@ def test_kuaishou_shipping_insurance_aggregates_insurance_fee(tmp_path: Path) ->
     assert result["errors"] == []
     assert result["groups"] == {}
     assert result["insurance_fee_rows"] == [
-        {"order_no": "order-1", "insurance_fee": Decimal("1.25")},
-        {"order_no": "order-2", "insurance_fee": Decimal("2.50")},
+        {"order_no": "order-1", "effective_time": datetime(2026, 4, 1, 12, 0, 0), "insurance_fee": Decimal("1.25")},
+        {"order_no": "order-2", "effective_time": datetime(2026, 4, 2, 0, 0, 0), "insurance_fee": Decimal("2.50")},
     ]
 
 
@@ -315,8 +323,8 @@ def test_kuaishou_shipping_insurance_reads_bad_xlsx_dimension(tmp_path: Path) ->
 
     assert result["errors"] == []
     assert result["insurance_fee_rows"] == [
-        {"order_no": "order-1", "insurance_fee": Decimal("1.25")},
-        {"order_no": "order-2", "insurance_fee": Decimal("2.50")},
+        {"order_no": "order-1", "effective_time": datetime(2026, 4, 1, 12, 0, 0), "insurance_fee": Decimal("1.25")},
+        {"order_no": "order-2", "effective_time": datetime(2026, 4, 2, 0, 0, 0), "insurance_fee": Decimal("2.50")},
     ]
 
 
@@ -336,8 +344,8 @@ def test_kuaishou_shipping_insurance_csv_aggregates_insurance_fee(tmp_path: Path
 
     assert result["success_rows"] == 2
     assert result["insurance_fee_rows"] == [
-        {"order_no": "order-1", "insurance_fee": Decimal("1.25")},
-        {"order_no": "order-2", "insurance_fee": Decimal("2.50")},
+        {"order_no": "order-1", "effective_time": datetime(2026, 4, 1, 12, 0, 0), "insurance_fee": Decimal("1.25")},
+        {"order_no": "order-2", "effective_time": datetime(2026, 4, 2, 0, 0, 0), "insurance_fee": Decimal("2.50")},
     ]
 
 
@@ -382,6 +390,8 @@ async def test_kuaishou_partial_type_does_not_overwrite_gmv_fields(
         shop_id=1,
         summary_year=2026,
         summary_month=4,
+        source_platform_code="kuaishou",
+        report_platform_code="kuaishou",
         platform_name="kuaishou",
         shop_name="快手店铺",
         gmv=Decimal("270"),
@@ -429,3 +439,65 @@ async def test_kuaishou_partial_type_does_not_overwrite_gmv_fields(
     assert summary.platform_fee == Decimal("69")
     assert summary.commission == Decimal("165")
     assert getattr(summary, expected_field) == expected_value
+
+
+@pytest.mark.asyncio
+async def test_kuaishou_gmv_payload_does_not_overwrite_return_cost() -> None:
+    summary = FinancialSummary(
+        org_id=1,
+        shop_id=1,
+        summary_year=2026,
+        summary_month=4,
+        source_platform_code="kuaishou",
+        report_platform_code="kuaishou",
+        platform_name="kuaishou",
+        shop_name="快手店铺",
+        gmv=Decimal("0"),
+        platform_income=Decimal("0"),
+        platform_fee=Decimal("0"),
+        commission=Decimal("0"),
+        return_cost=Decimal("-7.25"),
+        source_file_ids=[1],
+    )
+    shop = Shop(id=1, org_id=1, platform_name="kuaishou", shop_name="快手店铺")
+
+    class FakeResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, _stmt):
+            self.calls += 1
+            return FakeResult(shop if self.calls == 1 else summary)
+
+        async def flush(self):
+            return None
+
+    await AggregationService.upsert_summary_dict(
+        FakeSession(),
+        org_id=1,
+        shop_id=1,
+        year=2026,
+        month=4,
+        platform_name="kuaishou",
+        shop_name="快手店铺",
+        values={
+            "gmv": Decimal("270"),
+            "platform_income": Decimal("165"),
+            "platform_fee": Decimal("69"),
+            "commission": Decimal("165"),
+        },
+        source_file_id=2,
+    )
+
+    assert summary.gmv == Decimal("270")
+    assert summary.platform_income == Decimal("165")
+    assert summary.platform_fee == Decimal("69")
+    assert summary.commission == Decimal("165")
+    assert summary.return_cost == Decimal("-7.25")

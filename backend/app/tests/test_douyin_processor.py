@@ -92,3 +92,40 @@ def test_douyin_simple_monthly_sum_types(tmp_path: Path) -> None:
 
     assert bic_result["groups"]["抖音店铺|2026|4"]["bic"] == Decimal("12.30")
     assert insurance_result["groups"]["抖音店铺|2026|4"]["insurance_fee"] == Decimal("4.50")
+
+
+def test_douyin_shipping_insurance_supports_discount_header_variant(tmp_path: Path) -> None:
+    headers = [
+        "投保单号",
+        "订单编号",
+        "下单时间",
+        "承保时间",
+        "保险名称",
+        "承保保司",
+        "保费来源",
+        "支付保费",
+        "保费状态",
+        "动账时间",
+        "动账流水号",
+        "保险交易单号",
+        "平台优惠【营销补贴】",
+        "保障额度",
+        "保障状态",
+        "备注",
+        "平台优惠【特殊活动】",
+        "平台优惠",
+    ]
+    file_path = tmp_path / "douyin_insurance_variant.xlsx"
+    _write_workbook(
+        file_path,
+        headers,
+        [
+            _row(headers, 下单时间="2026-04-03", 支付保费="4.50"),
+            _row(headers, 下单时间="2026-04-04", 支付保费="1.20"),
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="运费险")
+
+    assert result["success_rows"] == 2
+    assert result["groups"]["抖音店铺|2026|4"]["insurance_fee"] == Decimal("5.70")

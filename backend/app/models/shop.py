@@ -26,6 +26,7 @@ class Shop(SoftDeleteMixin, Base):
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     platform_name: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码或平台名称")
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称")
+    shop_color: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="店铺展示色")
     entity_name: Mapped[str | None] = mapped_column(String(200), nullable=True, comment="主体名称")
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
     status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态: 1=启用 0=禁用")

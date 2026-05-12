@@ -2,7 +2,12 @@ from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
 
-from app.tasks.celery_app import _group_return_cost_by_order_created_time, _infer_file_type
+from app.tasks.celery_app import (
+    _build_order_or_fallback_time_summary,
+    _group_return_cost_by_order_created_time,
+    _group_money_by_order_or_fallback_time,
+    _infer_file_type,
+)
 
 
 def test_infer_file_type_prefers_filename_over_stored_default() -> None:
@@ -55,6 +60,16 @@ def test_infer_file_type_supports_xlsm_from_filename() -> None:
     assert _infer_file_type(upload_file) == "动账"
 
 
+def test_infer_file_type_supports_xls_from_filename() -> None:
+    upload_file = SimpleNamespace(
+        id=6,
+        original_name="26年02月_动账_抖音旗舰店.xls",
+        parsed_type=None,
+    )
+
+    assert _infer_file_type(upload_file) == "动账"
+
+
 def test_group_return_cost_by_order_created_time_counts_missing_orders() -> None:
     grouped, missing_order_nos = _group_return_cost_by_order_created_time(
         [
@@ -73,3 +88,99 @@ def test_group_return_cost_by_order_created_time_counts_missing_orders() -> None
         (2026, 5): Decimal("3.25"),
     }
     assert missing_order_nos == ["missing"]
+
+
+def test_group_money_by_order_or_fallback_time_falls_back_to_entry_time() -> None:
+    grouped, missing_order_nos, fallback_order_nos = _group_money_by_order_or_fallback_time(
+        [
+            {
+                "order_no": "indexed-order",
+                "entry_time": datetime(2026, 6, 1, 12, 0, 0),
+                "return_cost": Decimal("-10.50"),
+            },
+            {
+                "order_no": "fallback-order",
+                "entry_time": datetime(2026, 5, 2, 12, 0, 0),
+                "return_cost": Decimal("3.25"),
+            },
+            {"order_no": "missing", "entry_time": None, "return_cost": Decimal("-5")},
+        ],
+        order_created_times={
+            "indexed-order": datetime(2026, 4, 1, 12, 0, 0),
+        },
+        amount_key="return_cost",
+        fallback_time_key="entry_time",
+    )
+
+    assert grouped == {
+        (2026, 4): Decimal("-10.50"),
+        (2026, 5): Decimal("3.25"),
+    }
+    assert missing_order_nos == ["missing"]
+    assert fallback_order_nos == ["fallback-order"]
+
+
+def test_group_money_by_order_or_fallback_time_falls_back_to_effective_time() -> None:
+    grouped, missing_order_nos, fallback_order_nos = _group_money_by_order_or_fallback_time(
+        [
+            {
+                "order_no": "indexed-order",
+                "effective_time": datetime(2026, 6, 1, 12, 0, 0),
+                "insurance_fee": Decimal("1.25"),
+            },
+            {
+                "order_no": "fallback-order",
+                "effective_time": datetime(2026, 5, 2, 12, 0, 0),
+                "insurance_fee": Decimal("2.50"),
+            },
+            {"order_no": "missing", "effective_time": None, "insurance_fee": Decimal("3.00")},
+        ],
+        order_created_times={
+            "indexed-order": datetime(2026, 4, 1, 12, 0, 0),
+        },
+        amount_key="insurance_fee",
+        fallback_time_key="effective_time",
+    )
+
+    assert grouped == {
+        (2026, 4): Decimal("1.25"),
+        (2026, 5): Decimal("2.50"),
+    }
+    assert missing_order_nos == ["missing"]
+    assert fallback_order_nos == ["fallback-order"]
+
+
+def test_order_or_fallback_time_summary_reports_fallback_time() -> None:
+    summary = _build_order_or_fallback_time_summary(
+        type_code="运费险",
+        proc_result={"success_rows": 3, "failed_rows": 0, "errors": []},
+        summary_ids=[1, 2],
+        groups=2,
+        missing_order_nos=[],
+        fallback_order_nos=["fallback-order"],
+        fallback_label="生效时间",
+    )
+
+    assert summary["success_rows"] == 3
+    assert summary["failed_rows"] == 0
+    assert summary["fallback_time_label"] == "生效时间"
+    assert summary["fallback_time_count"] == 1
+    assert summary["fallback_time_samples"] == ["fallback-order"]
+    assert summary["errors"] == ["订单索引未命中 1 条，已使用生效时间归属年月；订单号: fallback-order"]
+
+
+def test_order_or_fallback_time_summary_reports_entry_time_compatibility() -> None:
+    summary = _build_order_or_fallback_time_summary(
+        type_code="动账",
+        proc_result={"success_rows": 3, "failed_rows": 0, "errors": []},
+        summary_ids=[1, 2],
+        groups=2,
+        missing_order_nos=[],
+        fallback_order_nos=["fallback-order"],
+        fallback_label="入账时间",
+    )
+
+    assert summary["fallback_time_label"] == "入账时间"
+    assert summary["fallback_time_count"] == 1
+    assert summary["fallback_time_samples"] == ["fallback-order"]
+    assert summary["errors"] == ["订单索引未命中 1 条，已使用入账时间归属年月；订单号: fallback-order"]

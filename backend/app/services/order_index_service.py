@@ -9,6 +9,7 @@ from app.models.order_index import OrderIndex
 
 class OrderIndexService:
     LOOKUP_CHUNK_SIZE = 5000
+    UPSERT_MAX_QUERY_ARGS = 30000
 
     @staticmethod
     async def upsert_order_times(
@@ -31,6 +32,14 @@ class OrderIndexService:
         if not rows:
             return 0
 
+        affected_rows = 0
+        for chunk in OrderIndexService._chunk_rows_for_upsert(rows):
+            affected_rows += await OrderIndexService._execute_upsert_rows(db, chunk)
+        await db.flush()
+        return affected_rows
+
+    @staticmethod
+    async def _execute_upsert_rows(db: AsyncSession, rows: list[dict[str, object]]) -> int:
         stmt = insert(OrderIndex).values(rows)
         excluded = stmt.excluded
         stmt = stmt.on_conflict_do_update(
@@ -49,8 +58,16 @@ class OrderIndexService:
             },
         )
         result = await db.execute(stmt)
-        await db.flush()
         return result.rowcount or 0
+
+    @staticmethod
+    def _chunk_rows_for_upsert(rows: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+        if not rows:
+            return []
+
+        bind_count_per_row = max(len(rows[0]), 1)
+        chunk_size = max(OrderIndexService.UPSERT_MAX_QUERY_ARGS // bind_count_per_row, 1)
+        return [rows[start : start + chunk_size] for start in range(0, len(rows), chunk_size)]
 
     @staticmethod
     async def get_order_created_times(

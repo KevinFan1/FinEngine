@@ -6,6 +6,8 @@ and aggregation logic without relying on the generic rule engine.
 
 from app.tasks.processors.douyin import douyin_processor
 from app.tasks.processors.kuaishou import kuaishou_processor
+from app.tasks.processors.alipay import alipay_processor
+from app.tasks.processors.qianniu import qianniu_processor
 from app.tasks.processors.weixin_video import weixin_video_processor
 from app.tasks.processors.xiaohongshu import xiaohongshu_processor
 
@@ -20,12 +22,18 @@ PLATFORM_PROCESSORS = {
     "weixin_video": weixin_video_processor,
     "微信小店": weixin_video_processor,
     "视频号": weixin_video_processor,
+    "alipay": alipay_processor,
+    "支付宝": alipay_processor,
+    "qianniu": qianniu_processor,
+    "千牛": qianniu_processor,
 }
 
 __all__ = [
     "PLATFORM_PROCESSORS",
+    "alipay_processor",
     "douyin_processor",
     "kuaishou_processor",
+    "qianniu_processor",
     "weixin_video_processor",
     "xiaohongshu_processor",
 ]

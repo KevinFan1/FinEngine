@@ -6,8 +6,10 @@ field formulas.
 """
 
 import csv
+from html.parser import HTMLParser
 import logging
 import re
+from zipfile import BadZipFile
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+from xlrd import XL_CELL_DATE, XL_CELL_NUMBER, XLRDError, open_workbook, xldate_as_datetime
 
 from app.utils.money import ZERO_MONEY, safe_decimal
 
@@ -51,6 +55,13 @@ FINANCIAL_SUMMARY_FIELDS: tuple[str, ...] = (
 CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gb18030")
 HEADER_SCAN_LIMIT = 20
 HEADER_NORMALIZE_PATTERN = re.compile(r"[\s　\uFEFF\u200B-\u200D]+")
+ZIP_SIGNATURES: tuple[bytes, ...] = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+OLE2_SIGNATURE = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+TEXT_SAMPLE_SIZE = 4096
+
+
+class TabularFileOpenError(ValueError):
+    """Raised when an uploaded file cannot be opened as a supported table."""
 
 
 def parse_datetime(value: object) -> datetime | None:
@@ -119,27 +130,160 @@ def detect_csv_dialect(file_path: str, encoding: str) -> type[csv.Dialect] | csv
         return csv.excel
 
 
+def _read_file_signature(file_path: str, size: int = TEXT_SAMPLE_SIZE) -> bytes:
+    path = Path(file_path)
+    with path.open("rb") as file:
+        return file.read(size)
+
+
+def _has_zip_signature(sample: bytes) -> bool:
+    return sample.startswith(ZIP_SIGNATURES)
+
+
+def _has_ole2_signature(sample: bytes) -> bool:
+    return sample.startswith(OLE2_SIGNATURE)
+
+
+def _sample_is_binary(sample: bytes) -> bool:
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    control_bytes = sum(1 for byte in sample if byte < 32 and byte not in b"\t\n\r\f\b")
+    return control_bytes / len(sample) > 0.30
+
+
+class _HtmlTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        _ = attrs
+        if tag.lower() == "tr":
+            self._current_row = []
+        elif tag.lower() in {"td", "th"} and self._current_row is not None:
+            self._current_cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        lower_tag = tag.lower()
+        if lower_tag in {"td", "th"} and self._current_cell is not None and self._current_row is not None:
+            self._current_row.append("".join(self._current_cell).strip())
+            self._current_cell = None
+        elif lower_tag == "tr" and self._current_row is not None:
+            if any(cell for cell in self._current_row):
+                self.rows.append(self._current_row)
+            self._current_row = None
+
+
+def _looks_like_html_table(file_path: str) -> bool:
+    sample = _read_file_signature(file_path, 2048).lstrip().lower()
+    return sample.startswith((b"<html", b"<!doctype html", b"<table")) or b"<table" in sample[:512]
+
+
+def _looks_like_csv_text(file_path: str) -> bool:
+    sample = _read_file_signature(file_path)
+    if not sample or _sample_is_binary(sample):
+        return False
+
+    encoding = detect_csv_encoding(file_path)
+    text = sample.decode(encoding, errors="replace").lstrip("\ufeff")
+    if "<table" in text[:512].lower():
+        return False
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+    first_lines = lines[: min(10, len(lines))]
+    delimiters = (",", "\t", ";")
+    return any(any(delimiter in line for delimiter in delimiters) for line in first_lines)
+
+
+def read_html_table_rows(file_path: str) -> list[list[str]]:
+    encoding = detect_csv_encoding(file_path)
+    path = Path(file_path)
+    with path.open("r", encoding=encoding, errors="replace") as file:
+        content = file.read()
+
+    parser = _HtmlTableParser()
+    parser.feed(content)
+    return parser.rows
+
+
+def iter_xls_rows(file_path: str) -> Iterator[tuple[object, ...]]:
+    workbook = open_workbook(file_path)
+    if workbook.nsheets == 0:
+        return
+    sheet = workbook.sheet_by_index(0)
+    for row_index in range(sheet.nrows):
+        values = []
+        for col_index in range(sheet.ncols):
+            cell = sheet.cell(row_index, col_index)
+            value = cell.value
+            if cell.ctype == XL_CELL_DATE:
+                value = xldate_as_datetime(value, workbook.datemode)
+            elif cell.ctype == XL_CELL_NUMBER and isinstance(value, float) and value.is_integer():
+                value = int(value)
+            values.append(value)
+        yield tuple(values)
+
+
+def _tabular_open_error(file_path: str, reason: str) -> TabularFileOpenError:
+    suffix = Path(file_path).suffix.lower() or "无后缀"
+    return TabularFileOpenError(f"无法打开表格文件：文件内容不是支持的 Excel/CSV 格式（后缀 {suffix}，{reason}）")
+
+
 @contextmanager
 def open_tabular_rows(file_path: str) -> Iterator[Iterable[tuple[object, ...] | list[str]] | None]:
-    """Yield rows from .xlsx/.xlsm or .csv files with the same row shape."""
+    """Yield rows from Excel/CSV files with the same row shape."""
     path = Path(file_path)
-    if path.suffix.lower() == ".csv":
+    suffix = path.suffix.lower()
+    sample = _read_file_signature(file_path)
+
+    if _looks_like_html_table(file_path):
+        yield read_html_table_rows(file_path)
+        return
+
+    if suffix == ".xls" or _has_ole2_signature(sample):
+        try:
+            yield iter_xls_rows(file_path)
+        except XLRDError as exc:
+            raise _tabular_open_error(file_path, "xls 解析失败") from exc
+        return
+
+    if _has_zip_signature(sample):
+        try:
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+        except (BadZipFile, InvalidFileException, OSError) as exc:
+            raise _tabular_open_error(file_path, "xlsx 解析失败") from exc
+        try:
+            ws = wb.active
+            if ws is None:
+                yield None
+                return
+            ws.reset_dimensions()
+            yield ws.iter_rows(values_only=True)
+        finally:
+            wb.close()
+        return
+
+    if suffix == ".csv" or _looks_like_csv_text(file_path):
         encoding = detect_csv_encoding(file_path)
         dialect = detect_csv_dialect(file_path, encoding)
         with path.open("r", encoding=encoding, errors="replace", newline="") as file:
             yield csv.reader(file, dialect=dialect)
         return
 
-    wb = load_workbook(file_path, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        if ws is None:
-            yield None
-            return
-        ws.reset_dimensions()
-        yield ws.iter_rows(values_only=True)
-    finally:
-        wb.close()
+    if suffix in {".xlsx", ".xlsm"}:
+        raise _tabular_open_error(file_path, "不是 xlsx 压缩包")
+
+    raise _tabular_open_error(file_path, "无法识别文件内容")
 
 
 @dataclass(frozen=True)
@@ -183,7 +327,17 @@ class BasePlatformProcessor(ABC):
         handler = self.get_type_processor(normalized_type)
         if handler is None:
             return ProcessingResult.empty(error=f"{self.platform_label}暂不支持 [{type_code}] 类型文件")
-        return handler(file_path=file_path, shop_name=shop_name, category_dict=category_dict)
+        try:
+            return handler(file_path=file_path, shop_name=shop_name, category_dict=category_dict)
+        except TabularFileOpenError as exc:
+            logger.warning(
+                "表格文件打开失败 platform=%s type=%s file=%s error=%s",
+                self.platform_label,
+                normalized_type,
+                file_path,
+                exc,
+            )
+            return ProcessingResult.empty(error=str(exc))
 
     @property
     @abstractmethod

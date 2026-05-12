@@ -2,7 +2,7 @@
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,55 @@ from app.services.summary_service import SummaryService
 router = APIRouter()
 
 
+def resolve_accounting_date_filters(
+    *,
+    accounting_year: int | None = None,
+    accounting_month: int | None = None,
+    source_year: int | None = None,
+    source_month: int | None = None,
+) -> tuple[int | None, int | None]:
+    return (
+        accounting_year if accounting_year is not None else source_year,
+        accounting_month if accounting_month is not None else source_month,
+    )
+
+
+def resolve_accounting_date_range_filters(
+    *,
+    accounting_start_year: int | None = None,
+    accounting_start_month: int | None = None,
+    accounting_end_year: int | None = None,
+    accounting_end_month: int | None = None,
+) -> tuple[int | None, int | None, int | None, int | None]:
+    return accounting_start_year, accounting_start_month, accounting_end_year, accounting_end_month
+
+
+def month_filter_label(
+    *,
+    start_year: int | None = None,
+    start_month: int | None = None,
+    end_year: int | None = None,
+    end_month: int | None = None,
+    year: int | None = None,
+    month: int | None = None,
+) -> str | None:
+    if start_year and start_month and end_year and end_month:
+        start_label = f"{int(start_year)}年{int(start_month):02d}月"
+        end_label = f"{int(end_year)}年{int(end_month):02d}月"
+        return start_label if start_label == end_label else f"{start_label}-{end_label}"
+    if start_year and start_month:
+        return f"{int(start_year)}年{int(start_month):02d}月起"
+    if end_year and end_month:
+        return f"截至{int(end_year)}年{int(end_month):02d}月"
+    if year and month:
+        return f"{int(year)}年{int(month):02d}月"
+    if year:
+        return f"{int(year)}年"
+    if month:
+        return f"{int(month):02d}月"
+    return None
+
+
 @router.get("", response_model=ApiResponse[PageResponse[SummaryOut]])
 async def list_summaries(
     request: Request,
@@ -25,8 +74,10 @@ async def list_summaries(
     source_year: int | None = Query(None),
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
+    report_platform_name: str | None = Query(None),
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
+    keyword: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -43,8 +94,10 @@ async def list_summaries(
         source_year=source_year,
         source_month=source_month,
         platform_name=platform_name,
+        report_platform_name=report_platform_name,
         shop_id=shop_id,
         shop_name=shop_name,
+        keyword=keyword,
         page=page,
         page_size=page_size,
     )
@@ -75,6 +128,12 @@ async def list_summaries(
 
 def to_summary_out(summary) -> SummaryOut:
     """Map database summary fields to API/frontend field names."""
+    shop_color = None
+    if isinstance(summary, dict):
+        shop_color = summary.get("shop_color")
+        summary = summary.get("summary")
+    source_platform_code = getattr(summary, "source_platform_code", None) or summary.platform_name
+    report_platform_code = getattr(summary, "report_platform_code", None) or source_platform_code
     return SummaryOut(
         id=summary.id,
         org_id=summary.org_id,
@@ -85,11 +144,16 @@ def to_summary_out(summary) -> SummaryOut:
         source_year=summary.source_year,
         source_month=summary.source_month,
         source_date=month_date_label(summary.source_year, summary.source_month),
-        platform_name=summary.platform_name,
+        platform_name=source_platform_code,
+        source_platform_code=source_platform_code,
+        report_platform_code=report_platform_code,
         shop_name=summary.shop_name,
+        shop_color=shop_color or getattr(summary, "shop_color", None),
         year=summary.summary_year,
         month=summary.summary_month,
-        platform=summary.platform_name,
+        platform=source_platform_code,
+        source_platform=source_platform_code,
+        report_platform=report_platform_code,
         gmv=float(summary.gmv or 0),
         real_gmv=float(summary.gmv or 0),
         platform_income=float(summary.platform_income or 0),
@@ -122,27 +186,53 @@ def to_summary_out(summary) -> SummaryOut:
 @router.get("/report", response_model=ApiResponse[PageResponse[SummaryReportOut]])
 async def list_report_summaries(
     request: Request,
+    accounting_start_year: int | None = Query(None, description="核算开始年份"),
+    accounting_start_month: int | None = Query(None, description="核算开始月份"),
+    accounting_end_year: int | None = Query(None, description="核算结束年份"),
+    accounting_end_month: int | None = Query(None, description="核算结束月份"),
+    accounting_year: int | None = Query(None, description="核算年份"),
+    accounting_month: int | None = Query(None, description="核算月份"),
     source_year: int | None = Query(None),
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
+    report_platform_name: str | None = Query(None),
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
+    keyword: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Query upload-month aggregated financial reports."""
+    """Query accounting-month aggregated financial reports."""
     org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
+    filter_year, filter_month = resolve_accounting_date_filters(
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        source_year=source_year,
+        source_month=source_month,
+    )
+    range_start_year, range_start_month, range_end_year, range_end_month = resolve_accounting_date_range_filters(
+        accounting_start_year=accounting_start_year,
+        accounting_start_month=accounting_start_month,
+        accounting_end_year=accounting_end_year,
+        accounting_end_month=accounting_end_month,
+    )
 
     rows, total = await SummaryService.list_report_summaries(
         db,
         org_id=org_id,
-        source_year=source_year,
-        source_month=source_month,
+        source_year=filter_year,
+        source_month=filter_month,
+        source_start_year=range_start_year,
+        source_start_month=range_start_month,
+        source_end_year=range_end_year,
+        source_end_month=range_end_month,
         platform_name=platform_name,
+        report_platform_name=report_platform_name,
         shop_id=shop_id,
         shop_name=shop_name,
+        keyword=keyword,
         page=page,
         page_size=page_size,
     )
@@ -161,6 +251,7 @@ def to_summary_report_out(row: dict) -> SummaryReportOut:
     source_year = int(row.get("source_year") or 0)
     source_month = int(row.get("source_month") or 0)
     platform_name = str(row.get("platform_name") or "")
+    report_platform_code = str(row.get("report_platform_code") or platform_name)
     shop_id = int(row.get("shop_id") or 0)
     shop_name = str(row.get("shop_name") or "")
     record_id = f"{source_year}-{source_month}-{platform_name}-{shop_id}"
@@ -172,10 +263,13 @@ def to_summary_report_out(row: dict) -> SummaryReportOut:
         source_month=source_month,
         source_date=month_date_label(source_year, source_month),
         platform_name=platform_name,
+        report_platform_code=report_platform_code,
         shop_name=shop_name,
+        shop_color=row.get("shop_color"),
         year=source_year,
         month=source_month,
         platform=platform_name,
+        report_platform=report_platform_code,
         summary_count=int(row.get("summary_count") or 0),
         original_gmv=float(row.get("original_gmv") or row.get("gmv") or 0),
         gmv_adjustment=float(row.get("gmv_adjustment") or 0),
@@ -214,11 +308,19 @@ def month_date_label(year: int | None, month: int | None) -> str:
 @router.get("/report/export")
 async def export_report_summaries(
     request: Request,
+    accounting_start_year: int | None = Query(None, description="核算开始年份"),
+    accounting_start_month: int | None = Query(None, description="核算开始月份"),
+    accounting_end_year: int | None = Query(None, description="核算结束年份"),
+    accounting_end_month: int | None = Query(None, description="核算结束月份"),
+    accounting_year: int | None = Query(None, description="核算年份"),
+    accounting_month: int | None = Query(None, description="核算月份"),
     source_year: int | None = Query(None),
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
+    report_platform_name: str | None = Query(None),
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
+    keyword: str | None = Query(None),
     scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None, description="Comma-separated report row IDs for selected export"),
     page: int = Query(1, ge=1),
@@ -226,27 +328,51 @@ async def export_report_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Export upload-month aggregated reports to Excel."""
+    """Export accounting-month aggregated reports to Excel."""
     org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
     selected_ids = parse_report_ids(ids) if scope == "selected" else None
+    filter_year, filter_month = resolve_accounting_date_filters(
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        source_year=source_year,
+        source_month=source_month,
+    )
+    range_start_year, range_start_month, range_end_year, range_end_month = resolve_accounting_date_range_filters(
+        accounting_start_year=accounting_start_year,
+        accounting_start_month=accounting_start_month,
+        accounting_end_year=accounting_end_year,
+        accounting_end_month=accounting_end_month,
+    )
     buffer = await SummaryService.export_report_summaries(
         db,
         org_id=org_id,
-        source_year=source_year,
-        source_month=source_month,
+        source_year=filter_year,
+        source_month=filter_month,
+        source_start_year=range_start_year,
+        source_start_month=range_start_month,
+        source_end_year=range_end_year,
+        source_end_month=range_end_month,
         platform_name=platform_name,
+        report_platform_name=report_platform_name,
         shop_id=shop_id,
         shop_name=shop_name,
+        keyword=keyword,
         ids=selected_ids,
         page=page if scope == "current_page" else None,
         page_size=page_size if scope == "current_page" else None,
     )
 
     parts = ["汇总报表"]
-    if source_year:
-        parts.append(f"{source_year}年")
-    if source_month:
-        parts.append(f"{source_month}月")
+    date_label = month_filter_label(
+        start_year=range_start_year,
+        start_month=range_start_month,
+        end_year=range_end_year,
+        end_month=range_end_month,
+        year=filter_year,
+        month=filter_month,
+    )
+    if date_label:
+        parts.append(date_label)
     if platform_name:
         parts.append(platform_name)
     if shop_name:
@@ -274,11 +400,16 @@ async def export_report_summaries(
         ip=ip,
         user_agent=ua,
         extra_data={
-            "source_year": source_year,
-            "source_month": source_month,
+            "accounting_year": filter_year,
+            "accounting_month": filter_month,
+            "accounting_start_year": range_start_year,
+            "accounting_start_month": range_start_month,
+            "accounting_end_year": range_end_year,
+            "accounting_end_month": range_end_month,
             "platform": platform_name,
             "shop_id": shop_id,
             "shop": shop_name,
+            "keyword": keyword,
             "scope": scope,
             "ids": selected_ids,
             "page": page if scope == "current_page" else None,
@@ -301,8 +432,10 @@ async def export_summaries(
     source_year: int | None = Query(None),
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
+    report_platform_name: str | None = Query(None),
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
+    keyword: str | None = Query(None),
     scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None, description="Comma-separated summary IDs for selected export"),
     page: int = Query(1, ge=1),
@@ -322,8 +455,10 @@ async def export_summaries(
         source_year=source_year,
         source_month=source_month,
         platform_name=platform_name,
+        report_platform_name=report_platform_name,
         shop_id=shop_id,
         shop_name=shop_name,
+        keyword=keyword,
         ids=selected_ids,
         page=page if scope == "current_page" else None,
         page_size=page_size if scope == "current_page" else None,
@@ -370,8 +505,10 @@ async def export_summaries(
             "source_year": source_year,
             "source_month": source_month,
             "platform": platform_name,
+            "report_platform": report_platform_name,
             "shop_id": shop_id,
             "shop": shop_name,
+            "keyword": keyword,
             "scope": scope,
             "ids": selected_ids,
             "page": page if scope == "current_page" else None,
@@ -397,7 +534,7 @@ def parse_summary_ids(raw_ids: str | None) -> list[int]:
         try:
             ids.append(int(raw))
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 参数格式错误") from exc
+            raise ValueError("ids 参数格式错误") from exc
     return ids
 
 

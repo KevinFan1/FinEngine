@@ -8,9 +8,11 @@ Platforms:
     kuaishou     — 快手
     xiaohongshu  — 小红书
     weixin_video — 微信小店
+    taobao       — 淘宝
+    alipay       — 支付宝
+    qianniu      — 千牛
     tmall        — 天猫
     miniprogram  — 小程序
-    taobao       — 淘宝
 """
 
 import asyncio
@@ -25,13 +27,15 @@ from sqlalchemy import select
 
 # ── Platform definitions ─────────────────────────────────────────────────────
 PLATFORMS = [
-    {"code": "douyin", "name": "抖音", "sort_order": 1},
-    {"code": "kuaishou", "name": "快手", "sort_order": 2},
-    {"code": "xiaohongshu", "name": "小红书", "sort_order": 3},
-    {"code": "weixin_video", "name": "微信小店", "sort_order": 4},
-    {"code": "tmall", "name": "天猫", "sort_order": 5},
-    {"code": "miniprogram", "name": "小程序", "sort_order": 6},
-    {"code": "taobao", "name": "淘宝", "sort_order": 7},
+    {"code": "douyin", "name": "抖音", "sort_order": 1, "parent_code": "douyin", "processor_code": "douyin", "order_scope_code": "douyin"},
+    {"code": "kuaishou", "name": "快手", "sort_order": 2, "parent_code": "kuaishou", "processor_code": "kuaishou", "order_scope_code": "kuaishou"},
+    {"code": "xiaohongshu", "name": "小红书", "sort_order": 3, "parent_code": "xiaohongshu", "processor_code": "xiaohongshu", "order_scope_code": "xiaohongshu"},
+    {"code": "weixin_video", "name": "微信小店", "sort_order": 4, "parent_code": "weixin_video", "processor_code": "weixin_video", "order_scope_code": "weixin_video"},
+    {"code": "taobao", "name": "淘宝", "sort_order": 5, "parent_code": "taobao", "processor_code": "taobao", "order_scope_code": "taobao"},
+    {"code": "alipay", "name": "支付宝", "sort_order": 6, "parent_code": "taobao", "processor_code": "alipay", "order_scope_code": "taobao"},
+    {"code": "qianniu", "name": "千牛", "sort_order": 7, "parent_code": "taobao", "processor_code": "qianniu", "order_scope_code": "taobao"},
+    {"code": "tmall", "name": "天猫", "sort_order": 8, "parent_code": "taobao", "processor_code": "tmall", "order_scope_code": "taobao"},
+    {"code": "miniprogram", "name": "小程序", "sort_order": 9, "parent_code": "miniprogram", "processor_code": "miniprogram", "order_scope_code": "miniprogram"},
 ]
 
 
@@ -48,6 +52,9 @@ async def seed():
                 platform = Platform(
                     code=p["code"],
                     name=p["name"],
+                    parent_code=p["parent_code"],
+                    processor_code=p["processor_code"],
+                    order_scope_code=p["order_scope_code"],
                     sort_order=p["sort_order"],
                     status=1,
                 )
@@ -57,9 +64,18 @@ async def seed():
                 created += 1
             else:
                 # Update name & sort_order if changed
-                need_update = platform.name != p["name"] or platform.sort_order != p["sort_order"]
+                need_update = (
+                    platform.name != p["name"]
+                    or platform.parent_code != p["parent_code"]
+                    or platform.processor_code != p["processor_code"]
+                    or platform.order_scope_code != p["order_scope_code"]
+                    or platform.sort_order != p["sort_order"]
+                )
                 if need_update:
                     platform.name = p["name"]
+                    platform.parent_code = p["parent_code"]
+                    platform.processor_code = p["processor_code"]
+                    platform.order_scope_code = p["order_scope_code"]
                     platform.sort_order = p["sort_order"]
                     await db.flush()
                     print(f"[~] Updated platform: id={platform.id} code={p['code']} name={p['name']}")

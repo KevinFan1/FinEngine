@@ -3,6 +3,8 @@ import { ref } from "vue";
 
 export interface Tab {
     path: string;
+    fullPath?: string;
+    name?: string;
     title: string;
     closable: boolean;
 }
@@ -10,8 +12,9 @@ export interface Tab {
 export const useAppStore = defineStore("app", () => {
     // State
     const sidebarCollapsed = ref(false);
+    const tagCacheEnabled = ref(localStorage.getItem("tag-cache-enabled") !== "0");
     const visitedTabs = ref<Tab[]>([
-        { path: "/dashboard", title: "首页", closable: false },
+        { path: "/dashboard", name: "Dashboard", title: "首页", closable: false },
     ]);
 
     // Sidebar actions
@@ -23,10 +26,20 @@ export const useAppStore = defineStore("app", () => {
         sidebarCollapsed.value = collapsed;
     }
 
+    function setTagCacheEnabled(enabled: boolean) {
+        tagCacheEnabled.value = enabled;
+        localStorage.setItem("tag-cache-enabled", enabled ? "1" : "0");
+    }
+
     // Tab actions
     function addTab(tab: Tab) {
-        const exists = visitedTabs.value.some((t) => t.path === tab.path);
-        if (!exists) {
+        const existingTab = visitedTabs.value.find((t) => t.path === tab.path);
+        if (existingTab) {
+            existingTab.fullPath = tab.fullPath || tab.path;
+            existingTab.name = tab.name;
+            existingTab.title = tab.title;
+            existingTab.closable = tab.closable;
+        } else {
             visitedTabs.value.push(tab);
         }
     }
@@ -50,9 +63,11 @@ export const useAppStore = defineStore("app", () => {
 
     return {
         sidebarCollapsed,
+        tagCacheEnabled,
         visitedTabs,
         toggleSidebar,
         setSidebarCollapsed,
+        setTagCacheEnabled,
         addTab,
         removeTab,
         closeOtherTabs,

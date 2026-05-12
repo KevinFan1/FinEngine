@@ -8,6 +8,23 @@ from app.schemas.user import UserCreate, UserUpdate
 from app.services.audit_service import AuditService
 
 
+def split_int_filter_values(value: str | int | None) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, int):
+        return [value]
+    values: list[int] = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            values.append(int(item))
+        except ValueError:
+            continue
+    return values
+
+
 class UserService:
     @staticmethod
     async def list_users(
@@ -16,7 +33,7 @@ class UserService:
         page: int = 1,
         page_size: int = 20,
         keyword: str | None = None,
-        org_id: int | None = None,
+        org_id: str | int | None = None,
         operator: User | None = None,
     ) -> tuple[list[User], int]:
         """List users with pagination. Superadmin sees all; org_admin sees own org."""
@@ -28,9 +45,11 @@ class UserService:
             # Non-superadmin only sees their own org
             stmt = stmt.where(User.org_id == operator.org_id)
             count_stmt = count_stmt.where(User.org_id == operator.org_id)
-        elif org_id is not None:
-            stmt = stmt.where(User.org_id == org_id)
-            count_stmt = count_stmt.where(User.org_id == org_id)
+        else:
+            org_ids = split_int_filter_values(org_id)
+            if org_ids:
+                stmt = stmt.where(User.org_id.in_(org_ids))
+                count_stmt = count_stmt.where(User.org_id.in_(org_ids))
 
         if keyword:
             like_pattern = f"%{keyword}%"
@@ -79,6 +98,7 @@ class UserService:
         )
         db.add(user)
         await db.flush()
+        await db.refresh(user)
 
         # Get org name for description
         org_name = ""
@@ -139,6 +159,7 @@ class UserService:
             setattr(user, field, value)
 
         await db.flush()
+        await db.refresh(user)
 
         new_value = {
             "phone": user.phone,
@@ -186,6 +207,7 @@ class UserService:
         old_status = user.status
         user.status = status_val
         await db.flush()
+        await db.refresh(user)
 
         action_desc = "启用" if status_val == 1 else "禁用"
         await AuditService.log(
