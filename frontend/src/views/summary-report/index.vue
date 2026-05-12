@@ -231,7 +231,7 @@
                 </el-table-column>
                 <el-table-column
                     prop="original_gmv"
-                    label="GMV"
+                    label="实收GMV"
                     width="120"
                     align="right"
                     header-align="right"
