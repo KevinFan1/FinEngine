@@ -16,6 +16,8 @@ SENSITIVE_KEYS = {
     "access_key_secret",
     "access_token",
     "authorization",
+    "captcha_code",
+    "captcha_id",
     "new_password",
     "old_password",
     "password",

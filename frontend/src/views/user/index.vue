@@ -417,7 +417,7 @@ const userFormData = reactive<UserForm & { email?: string }>({
 const userFormRules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 50, message: '长度在 3 到 50 个字符', trigger: 'blur' },
+    { min: 2, max: 50, message: '长度在 2 到 50 个字符', trigger: 'blur' },
   ],
   phone: [
     { required: true, message: '请输入手机号', trigger: 'blur' },
@@ -429,6 +429,11 @@ const userFormRules: FormRules = {
   ],
   display_name: [
     { required: true, message: '请输入显示名称', trigger: 'blur' },
+    { max: 100, message: '显示名称最多 100 个字符', trigger: 'blur' },
+  ],
+  email: [
+    { type: 'email', message: '请输入正确的邮箱', trigger: 'blur' },
+    { max: 200, message: '邮箱最多 200 个字符', trigger: 'blur' },
   ],
   role: [
     { required: true, message: '请选择角色', trigger: 'change' },
@@ -561,7 +566,7 @@ async function handleResetPwd() {
 
   resetPwdLoading.value = true
   try {
-    await resetUserPassword(resetPwdTargetId.value)
+    await resetUserPassword(resetPwdTargetId.value, resetPwdForm.password)
     ElMessage.success('密码重置成功')
     userDrawerVisible.value = false
   } catch {

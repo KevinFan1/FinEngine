@@ -7,6 +7,10 @@ from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import AuditService
 
 
+ORG_NAME_DUPLICATE_MESSAGE = "组织名称已存在，请更换后再试"
+ORG_CODE_DUPLICATE_MESSAGE = "组织编码已存在，请更换后再试"
+
+
 class OrgService:
     @staticmethod
     async def list_orgs(
@@ -54,6 +58,24 @@ class OrgService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Organization:
+        existing_name = await db.execute(
+            select(Organization).where(
+                Organization.name == data.name,
+                Organization.is_deleted.is_(False),
+            )
+        )
+        if existing_name.scalar_one_or_none() is not None:
+            raise ValueError(ORG_NAME_DUPLICATE_MESSAGE)
+
+        existing_code = await db.execute(
+            select(Organization).where(
+                Organization.code == data.code,
+                Organization.is_deleted.is_(False),
+            )
+        )
+        if existing_code.scalar_one_or_none() is not None:
+            raise ValueError(ORG_CODE_DUPLICATE_MESSAGE)
+
         org = Organization(
             name=data.name,
             code=data.code,
@@ -99,6 +121,27 @@ class OrgService:
         old_value = {"name": org.name, "code": org.code, "remark": org.remark, "status": org.status}
 
         update_data = data.model_dump(exclude_unset=True)
+        if "name" in update_data and update_data["name"] != org.name:
+            existing_name = await db.execute(
+                select(Organization).where(
+                    Organization.name == update_data["name"],
+                    Organization.id != org.id,
+                    Organization.is_deleted.is_(False),
+                )
+            )
+            if existing_name.scalar_one_or_none() is not None:
+                raise ValueError(ORG_NAME_DUPLICATE_MESSAGE)
+        if "code" in update_data and update_data["code"] != org.code:
+            existing_code = await db.execute(
+                select(Organization).where(
+                    Organization.code == update_data["code"],
+                    Organization.id != org.id,
+                    Organization.is_deleted.is_(False),
+                )
+            )
+            if existing_code.scalar_one_or_none() is not None:
+                raise ValueError(ORG_CODE_DUPLICATE_MESSAGE)
+
         for field, value in update_data.items():
             setattr(org, field, value)
 

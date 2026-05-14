@@ -69,14 +69,17 @@ async def update_shop(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    shop = await ShopService.update_shop(
-        db,
-        shop_id=shop_id,
-        data=data,
-        operator=current_user,
-        ip=request.client.host,
-        user_agent=request.headers.get("user-agent"),
-    )
+    try:
+        shop = await ShopService.update_shop(
+            db,
+            shop_id=shop_id,
+            data=data,
+            operator=current_user,
+            ip=request.client.host,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
     if not shop:
         return ApiResponse(code=404, message="店铺不存在")
     return ApiResponse(data=ShopOut.model_validate(shop))

@@ -74,6 +74,34 @@
               </el-input>
             </el-form-item>
 
+            <el-form-item prop="captcha_code">
+              <div class="captcha-row">
+                <el-input
+                  v-model="loginForm.captcha_code"
+                  placeholder="请输入验证码"
+                  clearable
+                  maxlength="8"
+                >
+                  <template #prefix>
+                    <el-icon><Key /></el-icon>
+                  </template>
+                </el-input>
+                <button class="captcha-image" type="button" @click="loadCaptcha">
+                  <img v-if="captchaImage" :src="captchaImage" alt="验证码" />
+                  <el-icon v-else><RefreshRight /></el-icon>
+                </button>
+              </div>
+            </el-form-item>
+
+            <el-alert
+              v-if="loginError"
+              class="login-error"
+              :title="loginError"
+              type="error"
+              show-icon
+              :closable="false"
+            />
+
             <el-form-item>
               <el-button
                 type="primary"
@@ -96,20 +124,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { onMounted, ref, reactive } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
+import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { useUserStore } from '@/stores/user'
 import { useThemeStore } from '@/stores/theme'
 import BrandLogo from '@/components/BrandLogo.vue'
+import { getCaptcha } from '@/api/auth'
 
 const userStore = useUserStore()
 const themeStore = useThemeStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const captchaImage = ref('')
+const loginError = ref('')
 
 const loginForm = reactive({
   username: '',
   password: '',
+  captcha_id: '',
+  captcha_code: '',
 })
 
 const featureItems = [
@@ -125,9 +159,31 @@ const loginRules: FormRules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
   ],
+  captcha_code: [
+    { required: true, message: '请输入验证码', trigger: 'blur' },
+    { min: 4, message: '验证码至少 4 位', trigger: 'blur' },
+  ],
+}
+
+async function loadCaptcha() {
+  try {
+    const captcha = await getCaptcha()
+    loginForm.captcha_id = captcha.captcha_id
+    loginForm.captcha_code = ''
+    captchaImage.value = captcha.image
+  } catch (error) {
+    loginForm.captcha_id = ''
+    captchaImage.value = ''
+    const message = getLoginErrorMessage(error, '验证码加载失败，请刷新页面重试')
+    loginError.value = message
+    if (!isApiMessageShown(error)) {
+      ElMessage.error(message)
+    }
+  }
 }
 
 async function handleLogin() {
+  loginError.value = ''
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
@@ -136,12 +192,52 @@ async function handleLogin() {
     await userStore.login({
       username: loginForm.username,
       password: loginForm.password,
+      captcha_id: loginForm.captcha_id,
+      captcha_code: loginForm.captcha_code,
     })
-  } catch {
-    // Error handled in store
+  } catch (error) {
+    const message = getLoginErrorMessage(error, '登录失败，请稍后重试')
+    loginError.value = message
+    if (!isApiMessageShown(error)) {
+      ElMessage.error(message)
+    }
+    await loadCaptcha().catch(() => undefined)
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  loadCaptcha().catch(() => undefined)
+})
+
+function isApiMessageShown(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+  )
+}
+
+function getLoginErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    const shownMessage = (error as { __apiMessageText?: unknown }).__apiMessageText
+    if (typeof shownMessage === 'string' && shownMessage.trim()) {
+      return shownMessage
+    }
+
+    const responseMessage = (error as { response?: { data?: { message?: unknown } } }).response?.data?.message
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+
+    const errorMessage = (error as { message?: unknown }).message
+    if (typeof errorMessage === 'string' && errorMessage.trim()) {
+      return errorMessage
+    }
+  }
+
+  return fallback
 }
 </script>
 
@@ -363,6 +459,48 @@ async function handleLogin() {
   border-radius: var(--radius-btn);
 }
 
+.captcha-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  gap: 10px;
+  align-items: center;
+}
+
+.captcha-image {
+  width: 130px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-btn);
+  background: var(--bg-page);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+
+  img {
+    width: 130px;
+    height: 44px;
+    display: block;
+  }
+
+  .el-icon {
+    font-size: 18px;
+    color: var(--text-secondary);
+  }
+
+  &:hover {
+    border-color: var(--primary);
+  }
+}
+
+.login-error {
+  margin-bottom: 18px;
+  border-radius: var(--radius);
+}
+
 @media (max-width: 1024px) {
   .login-card {
     grid-template-columns: 1fr;
@@ -392,6 +530,10 @@ async function handleLogin() {
   .login-left,
   .login-right {
     padding: 32px 22px;
+  }
+
+  .captcha-row {
+    grid-template-columns: 1fr;
   }
 
   .login-left {

@@ -32,3 +32,4 @@ backend/logs/
 # uv (uv.lock should be committed)
 .codex/
 node_modules/
+outputs/

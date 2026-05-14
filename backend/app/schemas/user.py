@@ -19,7 +19,7 @@ class UserUpdate(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=100, description="显示名称")
     email: str | None = Field(None, max_length=200, description="邮箱")
     role: str | None = Field(None, description="角色: superadmin/org_admin/member")
-    status: int | None = Field(None, description="状态: 1=启用 0=禁用")
+    status: int | None = Field(None, ge=0, le=1, description="状态: 1=启用 0=禁用")
 
 
 class UserResetPassword(BaseModel):

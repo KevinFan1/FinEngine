@@ -32,9 +32,10 @@ class AliyunOSSService:
             raise ValueError(f"阿里云 OSS 配置缺失: {', '.join(missing)}")
 
     @staticmethod
-    def normalized_endpoint() -> str:
+    def normalized_endpoint(*, internal: bool = False) -> str:
         """Return a region endpoint suitable for OSS SDK bucket clients."""
-        endpoint = settings.ALIYUN_OSS_ENDPOINT.rstrip("/")
+        internal_endpoint = settings.ALIYUN_OSS_INTERNAL_ENDPOINT.strip()
+        endpoint = (internal_endpoint if internal and internal_endpoint else settings.ALIYUN_OSS_ENDPOINT).rstrip("/")
         parsed = urllib.parse.urlparse(endpoint)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError("ALIYUN_OSS_ENDPOINT 必须包含协议和域名，例如 https://oss-cn-guangzhou.aliyuncs.com")
@@ -43,16 +44,18 @@ class AliyunOSSService:
         host = parsed.netloc
         if host.startswith(bucket_prefix):
             host = host[len(bucket_prefix) :]
-        return f"https://{host}"
+        if internal and not internal_endpoint:
+            host = _internal_oss_host(host)
+        return f"{parsed.scheme}://{host}"
 
-    def _bucket(self) -> oss2.Bucket:
+    def _bucket(self, *, internal: bool = False) -> oss2.Bucket:
         self._require_config()
         auth = oss2.Auth(settings.ALIYUN_ACCESS_KEY_ID, settings.ALIYUN_ACCESS_KEY_SECRET)
-        return oss2.Bucket(auth, self.normalized_endpoint(), settings.ALIYUN_OSS_BUCKET)
+        return oss2.Bucket(auth, self.normalized_endpoint(internal=internal), settings.ALIYUN_OSS_BUCKET)
 
     def download_to_temp(self, oss_key: str, local_path: str, *, chunk_size: int = 1024 * 1024):
         """Stream an OSS object to a local temp path for processing."""
-        result = self._bucket().get_object(oss_key)
+        result = self._bucket(internal=settings.INTERNAL_DOWNLOAD).get_object(oss_key)
         with Path(local_path).open("wb") as f:
             while True:
                 chunk = result.read(chunk_size)
@@ -130,3 +133,12 @@ def assume_sts_role(
 
 # Singletons
 oss_service = AliyunOSSService()
+
+
+def _internal_oss_host(host: str) -> str:
+    if "-internal." in host:
+        return host
+    if ".aliyuncs.com" not in host:
+        return host
+    prefix, suffix = host.split(".aliyuncs.com", maxsplit=1)
+    return f"{prefix}-internal.aliyuncs.com{suffix}"

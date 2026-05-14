@@ -10,6 +10,7 @@ from app.core.database import async_session_factory
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import setup_logging
 from app.middleware.api_logging_middleware import ApiLoggingMiddleware
+from app.middleware.crypto_middleware import ApiCryptoMiddleware
 from app.services.auth_service import AuthService
 
 setup_logging()
@@ -43,10 +44,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-API-Encrypted-Response"],
 )
 
 # API request/response logs
 app.add_middleware(ApiLoggingMiddleware)
+
+# Optional encrypted transport for frontend API payloads
+app.add_middleware(ApiCryptoMiddleware)
 
 # Mount API router
 app.include_router(api_router, prefix="/api/v1")

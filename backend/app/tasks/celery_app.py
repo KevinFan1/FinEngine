@@ -14,7 +14,7 @@ from celery.signals import worker_process_shutdown
 from app.core.config import settings
 from app.tasks.processors.base import safe_str
 
-celery_app = Celery("finengine", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+celery_app = Celery("finengine", broker=settings.CELERY_REDIS_URL, backend=settings.CELERY_REDIS_URL)
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],

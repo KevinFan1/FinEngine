@@ -44,13 +44,16 @@ async def create_organization(
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
-    org = await OrgService.create_org(
-        db,
-        data=body,
-        operator=current_user,
-        ip=ip,
-        user_agent=ua,
-    )
+    try:
+        org = await OrgService.create_org(
+            db,
+            data=body,
+            operator=current_user,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
     return ApiResponse(data=OrganizationOut.model_validate(org))
 
 
@@ -81,14 +84,17 @@ async def update_organization(
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
-    org = await OrgService.update_org(
-        db,
-        org_id=org_id,
-        data=body,
-        operator=current_user,
-        ip=ip,
-        user_agent=ua,
-    )
+    try:
+        org = await OrgService.update_org(
+            db,
+            org_id=org_id,
+            data=body,
+            operator=current_user,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
     if org is None:
         return ApiResponse(code=404, message="组织不存在")
     return ApiResponse(data=OrganizationOut.model_validate(org))

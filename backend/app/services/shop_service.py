@@ -10,6 +10,9 @@ from app.services.shop_color_service import assign_default_shop_color, normalize
 from app.services.platform_profile_service import resolve_platform_profile
 
 
+SHOP_DUPLICATE_MESSAGE = "该平台下已存在同名店铺，请勿重复创建"
+
+
 class ShopService:
     @staticmethod
     def active_filter() -> ColumnElement[bool]:
@@ -64,7 +67,7 @@ class ShopService:
             )
         )
         if existing.scalar_one_or_none():
-            raise ValueError(f"店铺 [{data.platform_name}] [{data.shop_name}] 已存在")
+            raise ValueError(SHOP_DUPLICATE_MESSAGE)
         shop = Shop(
             org_id=org_id,
             platform_name=data.platform_name,
@@ -112,6 +115,20 @@ class ShopService:
         update_data = data.model_dump(exclude_unset=True)
         if "shop_color" in update_data:
             update_data["shop_color"] = normalize_shop_color(update_data["shop_color"])
+        if "platform_name" in update_data or "shop_name" in update_data:
+            next_platform_name = update_data.get("platform_name") or shop.platform_name
+            next_shop_name = update_data.get("shop_name") or shop.shop_name
+            existing = await db.execute(
+                select(Shop).where(
+                    Shop.org_id == shop.org_id,
+                    Shop.platform_name == next_platform_name,
+                    Shop.shop_name == next_shop_name,
+                    Shop.id != shop.id,
+                    ShopService.active_filter(),
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise ValueError(SHOP_DUPLICATE_MESSAGE)
         if not update_data.get("shop_color") and (
             "platform_name" in update_data or "shop_name" in update_data
         ):

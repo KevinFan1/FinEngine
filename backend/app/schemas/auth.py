@@ -4,6 +4,14 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     username: str = Field(..., description="用户名或手机号")
     password: str = Field(..., min_length=6, description="密码")
+    captcha_id: str = Field(..., description="验证码 ID")
+    captcha_code: str = Field(..., min_length=4, max_length=8, description="验证码")
+
+
+class CaptchaResponse(BaseModel):
+    captcha_id: str
+    image: str
+    expires_in: int
 
 
 class TokenResponse(BaseModel):

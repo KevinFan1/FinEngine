@@ -80,11 +80,14 @@ class UserService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> User:
-        """Create a new user. Raises ValueError if phone already exists."""
-        # Check phone uniqueness
-        existing = await db.execute(select(User).where(User.phone == data.phone, User.is_deleted.is_(False)))
-        if existing.scalar_one_or_none() is not None:
+        """Create a new user. Raises ValueError if username or phone already exists."""
+        existing_phone = await db.execute(select(User).where(User.phone == data.phone, User.is_deleted.is_(False)))
+        if existing_phone.scalar_one_or_none() is not None:
             raise ValueError("手机号已被注册")
+
+        existing_username = await db.execute(select(User).where(User.username == data.username, User.is_deleted.is_(False)))
+        if existing_username.scalar_one_or_none() is not None:
+            raise ValueError("用户名已存在，请更换后再试")
 
         user = User(
             org_id=data.org_id,

@@ -5,12 +5,26 @@ from app.core.database import get_async_session
 from app.core.deps import get_current_user
 from app.core.security import create_access_token
 from app.models.user import User
-from app.schemas.auth import LoginRequest, TokenResponse, UserInfo
+from app.schemas.auth import CaptchaResponse, LoginRequest, TokenResponse, UserInfo
 from app.schemas.common import ApiResponse
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
+from app.services.captcha_service import captcha_service
 
 router = APIRouter()
+
+
+@router.get("/captcha", response_model=ApiResponse[CaptchaResponse])
+async def get_captcha():
+    """Create a login captcha challenge."""
+    challenge = await captcha_service.generate()
+    return ApiResponse(
+        data=CaptchaResponse(
+            captcha_id=challenge.captcha_id,
+            image=challenge.image,
+            expires_in=challenge.expires_in,
+        )
+    )
 
 
 @router.post("/login", response_model=ApiResponse[TokenResponse])
@@ -22,6 +36,9 @@ async def login(
     """Login with username or phone + password."""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
+
+    if not await captcha_service.verify(body.captcha_id, body.captcha_code):
+        return ApiResponse(code=status.HTTP_400_BAD_REQUEST, message="验证码错误或已过期")
 
     user = await AuthService.login(
         db,

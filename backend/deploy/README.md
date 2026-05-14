@@ -37,7 +37,8 @@ Edit `.env` and fill at least:
 
 ```env
 DATABASE_URL=
-REDIS_URL=
+REDIS_URL=          # 缓存/验证码/防重放
+CELERY_REDIS_URL=   # Celery 队列和结果，建议使用不同 DB
 SECRET_KEY=
 ```
 

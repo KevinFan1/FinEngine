@@ -5,6 +5,7 @@ import axios, {
 } from "axios";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import router from "@/router";
+import { decryptResponse, encryptRequest } from "@/api/crypto";
 
 // API response wrapper type
 export interface ApiResponse<T = any> {
@@ -16,6 +17,8 @@ export interface ApiResponse<T = any> {
 export class ApiBusinessError extends Error {
     code: number;
     data?: unknown;
+    __apiMessageShown?: boolean;
+    __apiMessageText?: string;
 
     constructor(message: string, code: number, data?: unknown) {
         super(message);
@@ -44,12 +47,17 @@ const service: AxiosInstance = axios.create({
 
 // Request interceptor - inject JWT token
 service.interceptors.request.use(
-    (config: InternalAxiosRequestConfig) => {
+    async (config: InternalAxiosRequestConfig) => {
         const token = localStorage.getItem("token");
         if (token && config.headers) {
             config.headers.Authorization = `Bearer ${token}`;
         }
-        return config;
+        try {
+            return await encryptRequest(config);
+        } catch (error) {
+            showRequestError("请求加密失败，请刷新页面后重试", error);
+            return Promise.reject(error);
+        }
     },
     (error) => {
         return Promise.reject(error);
@@ -58,7 +66,14 @@ service.interceptors.request.use(
 
 // Response interceptor - handle errors
 service.interceptors.response.use(
-    (response: AxiosResponse<ApiResponse>) => {
+    async (rawResponse: AxiosResponse<ApiResponse>) => {
+        let response: AxiosResponse<ApiResponse>;
+        try {
+            response = await decryptResponse(rawResponse);
+        } catch (error) {
+            showRequestError("响应解密失败，请刷新页面后重试", error);
+            return Promise.reject(error);
+        }
         const res = response.data;
 
         // Backend returns HTTP 200 for business errors and exposes the real state in code/message.
@@ -72,18 +87,25 @@ service.interceptors.response.use(
                 router.push("/login");
             }
 
-            return Promise.reject(new ApiBusinessError(message, res.code, res.data));
+            const error = new ApiBusinessError(message, res.code, res.data);
+            markRequestErrorShown(error, message);
+            return Promise.reject(error);
         }
 
         return response;
     },
     (error) => {
+        if (isRequestErrorShown(error)) {
+            return Promise.reject(error);
+        }
+
         if (error.response) {
             const status = error.response.status;
             const data = error.response.data;
 
             const message = data?.message || `请求失败 (${status})`;
             ElMessage.error(message);
+            markRequestErrorShown(error, message);
 
             if (status === 401 || data?.code === 401) {
                 localStorage.removeItem("token");
@@ -91,14 +113,42 @@ service.interceptors.response.use(
                 router.push("/login");
             }
         } else if (error.message?.includes("timeout")) {
-            ElMessage.error("请求超时，请稍后重试");
+            const message = "请求超时，请稍后重试";
+            ElMessage.error(message);
+            markRequestErrorShown(error, message);
         } else {
-            ElMessage.error("网络异常，请检查网络连接");
+            const message = "网络异常，请检查网络连接";
+            ElMessage.error(message);
+            markRequestErrorShown(error, message);
         }
 
         return Promise.reject(error);
     },
 );
+
+function showRequestError(message: string, error: unknown) {
+    ElMessage.error(message);
+    markRequestErrorShown(error, message);
+}
+
+function markRequestErrorShown(error: unknown, message: string) {
+    if (error && typeof error === "object") {
+        const requestError = error as {
+            __apiMessageShown?: boolean;
+            __apiMessageText?: string;
+        };
+        requestError.__apiMessageShown = true;
+        requestError.__apiMessageText = message;
+    }
+}
+
+function isRequestErrorShown(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+    );
+}
 
 /**
  * Generic request method

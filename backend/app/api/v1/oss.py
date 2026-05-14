@@ -1,6 +1,7 @@
 """OSS API — Alibaba Cloud STS temporary credentials for frontend direct upload."""
 
 from fastapi import APIRouter, Depends, Query
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,7 +70,8 @@ async def get_oss_sts(
             duration_seconds=settings.ALIYUN_STS_EXPIRE_SECONDS,
         )
     except Exception as e:
-        return ApiResponse(code=502, message=f"获取 STS 凭证失败: {e}")
+        logger.warning("oss.sts_failed batch_id={} user_id={} error={}", batch_id, current_user.id, e)
+        return ApiResponse(code=502, message="获取 OSS 上传凭证失败，请稍后重试")
 
     return ApiResponse(
         data=StsCredentialOut(

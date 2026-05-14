@@ -121,7 +121,10 @@ cp .env.example .env
 
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/finengine
+# 缓存/验证码/防重放
 REDIS_URL=redis://localhost:6379/0
+# Celery 队列和结果，建议与缓存使用不同 Redis DB
+CELERY_REDIS_URL=redis://localhost:6379/1
 SECRET_KEY=change-this
 ALIYUN_OSS_BUCKET=
 ALIYUN_ACCESS_KEY_ID=

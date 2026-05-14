@@ -58,8 +58,8 @@ export function updateUser(id: number, data: Partial<UserForm>) {
 /**
  * Reset user password
  */
-export function resetUserPassword(id: number) {
-  return post<{ password: string }>(`/users/${id}/reset-pwd`)
+export function resetUserPassword(id: number, newPassword: string) {
+  return post<void>(`/users/${id}/reset-password`, { new_password: newPassword })
 }
 
 /**

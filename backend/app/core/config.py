@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
+    CELERY_REDIS_URL: str = "redis://localhost:6379/1"
 
     # JWT
     SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -33,6 +34,11 @@ class Settings(BaseSettings):
     # Upload
     MAX_UPLOAD_SIZE_MB: int = 1024  # 最大上传文件大小 1024MB
 
+    # API encryption
+    API_CRYPTO_ENABLED: bool = True
+    API_CRYPTO_PRIVATE_KEY: str = ""  # PEM string; empty = generate on process startup
+    API_CRYPTO_REPLAY_WINDOW_SECONDS: int = 300
+
     # Logging
     LOG_DIR: str = str(BACKEND_DIR / "logs")
     LOG_LEVEL: str = "INFO"
@@ -47,6 +53,8 @@ class Settings(BaseSettings):
     ALIYUN_OSS_REGION: str = "cn-hangzhou"
     ALIYUN_OSS_BUCKET: str = ""
     ALIYUN_OSS_ENDPOINT: str = ""  # e.g. https://oss-cn-hangzhou.aliyuncs.com
+    INTERNAL_DOWNLOAD: bool = False
+    ALIYUN_OSS_INTERNAL_ENDPOINT: str = ""  # e.g. https://oss-cn-hangzhou-internal.aliyuncs.com
 
     # Alibaba Cloud STS
     ALIYUN_STS_ROLE_ARN: str = ""

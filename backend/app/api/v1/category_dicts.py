@@ -175,7 +175,7 @@ async def classify_single(
         type_code=body.type_code,
     )
     if categories is None:
-        return ApiResponse(code=404, message=f"未找到 platform_id={body.platform_id} type_code={body.type_code} 的分类字典")
+        return ApiResponse(code=404, message="未找到对应平台和类型的分类字典")
 
     result = classify_text(body.text, categories)
     return ApiResponse(
@@ -202,7 +202,7 @@ async def classify_batch_endpoint(
         type_code=body.type_code,
     )
     if categories is None:
-        return ApiResponse(code=404, message=f"未找到 platform_id={body.platform_id} type_code={body.type_code} 的分类字典")
+        return ApiResponse(code=404, message="未找到对应平台和类型的分类字典")
 
     results = classify_batch(body.texts, categories)
     return ApiResponse(

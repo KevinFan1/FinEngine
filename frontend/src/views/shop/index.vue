@@ -165,20 +165,20 @@
           </el-select>
         </el-form-item>
         <el-form-item label="店铺名称" prop="shop_name">
-          <el-input v-model="form.shop_name" placeholder="输入店铺名称" />
+          <el-input v-model="form.shop_name" placeholder="输入店铺名称" maxlength="200" show-word-limit />
         </el-form-item>
-        <el-form-item label="店铺颜色">
-          <el-input v-model="form.shop_color" placeholder="#F59E0B，留空则自动分配">
+        <el-form-item label="店铺颜色" prop="shop_color">
+          <el-input v-model="form.shop_color" placeholder="#F59E0B，留空则自动分配" maxlength="20">
             <template #prefix>
               <span class="color-input-prefix" :style="shopColorStyle(form.shop_color)"></span>
             </template>
           </el-input>
         </el-form-item>
-        <el-form-item label="主体名称">
-          <el-input v-model="form.entity_name" placeholder="输入主体名称（选填）" />
+        <el-form-item label="主体名称" prop="entity_name">
+          <el-input v-model="form.entity_name" placeholder="输入主体名称（选填）" maxlength="200" show-word-limit />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="备注信息（选填）" />
+        <el-form-item label="备注" prop="remark">
+          <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="备注信息（选填）" maxlength="2000" show-word-limit />
         </el-form-item>
       </el-form>
       <div v-if="drawerMode !== 'detail'" class="drawer-footer">
@@ -244,7 +244,16 @@ const rules: FormRules = {
   ],
   shop_name: [
     { required: true, message: '请输入店铺名称', trigger: 'blur' },
-    { min: 2, max: 100, message: '长度在 2 到 100 个字符', trigger: 'blur' },
+    { min: 2, max: 200, message: '长度在 2 到 200 个字符', trigger: 'blur' },
+  ],
+  shop_color: [
+    { max: 20, message: '店铺颜色最多 20 个字符', trigger: 'blur' },
+  ],
+  entity_name: [
+    { max: 200, message: '主体名称最多 200 个字符', trigger: 'blur' },
+  ],
+  remark: [
+    { max: 2000, message: '备注最多 2000 个字符', trigger: 'blur' },
   ],
 }
 

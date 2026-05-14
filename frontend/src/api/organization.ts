@@ -14,7 +14,7 @@ export interface Organization {
 export interface OrganizationListParams {
     page?: number;
     page_size?: number;
-    name?: string;
+    keyword?: string;
     status?: string;
 }
 

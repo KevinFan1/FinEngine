@@ -3,11 +3,19 @@ import { get, post } from "./index";
 export interface LoginParams {
     username: string;
     password: string;
+    captcha_id: string;
+    captcha_code: string;
 }
 
 export interface LoginResult {
     access_token: string;
     token_type: string;
+}
+
+export interface CaptchaResult {
+    captcha_id: string;
+    image: string;
+    expires_in: number;
 }
 
 export interface UserInfo {
@@ -29,6 +37,13 @@ export interface UserInfo {
  */
 export function login(data: LoginParams) {
     return post<LoginResult>("/auth/login", data);
+}
+
+/**
+ * Get login captcha
+ */
+export function getCaptcha() {
+    return get<CaptchaResult>("/auth/captcha");
 }
 
 /**

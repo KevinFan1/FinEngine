@@ -229,7 +229,11 @@ const formRules: FormRules = {
   ],
   code: [
     { required: true, message: '请输入组织编码', trigger: 'blur' },
+    { min: 1, max: 50, message: '长度在 1 到 50 个字符', trigger: 'blur' },
     { pattern: /^[a-zA-Z0-9_-]+$/, message: '只能包含字母、数字、下划线和横线', trigger: 'blur' },
+  ],
+  remark: [
+    { max: 2000, message: '备注最多 2000 个字符', trigger: 'blur' },
   ],
 }
 
@@ -248,7 +252,7 @@ async function fetchData() {
     const res = await getOrganizationList({
       page: pagination.page,
       page_size: pagination.pageSize,
-      name: searchForm.keyword || undefined,
+      keyword: searchForm.keyword || undefined,
     })
     tableData.value = res.items || []
     pagination.total = res.total || 0
