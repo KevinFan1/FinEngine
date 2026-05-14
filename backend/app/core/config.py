@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # Database
@@ -19,6 +20,17 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_REDIS_URL: str = "redis://localhost:6379/1"
+
+    # Process startup options used by deploy scripts.
+    APP_HOST: str = "127.0.0.1"
+    APP_PORT: int = 8000
+    APP_WORKERS: int = 1
+    APP_FORWARDED_ALLOW_IPS: str = "*"
+    CELERY_LOG_LEVEL: str = "INFO"
+    CELERY_POOL: str = "solo"
+    CELERY_HOSTNAME: str = "finengine@%h"
+    CELERY_QUEUES: str = ""
+    CELERY_CONCURRENCY: int | None = None
 
     # JWT
     SECRET_KEY: str = "your-secret-key-change-in-production"
