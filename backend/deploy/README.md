@@ -108,3 +108,4 @@ supervisorctl restart finengine:*
 - The frontend can be built separately and deployed independently.
 - The API itself does not depend on frontend build artifacts.
 - The application will try to create the default `superadmin` account on API startup.
+- After the single-session login migration is applied, old JWTs without a session id become invalid. Users need to log in again once after deployment.

@@ -180,6 +180,26 @@
             </div>
           </div>
         </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>当前登录设备</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">登录时间</span>
+              <strong>{{ formatDateTime(selectedUser.active_session_at) }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">登录 IP</span>
+              <strong>{{ selectedUser.active_session_ip || '-' }}</strong>
+            </div>
+            <div class="detail-item detail-item--wide">
+              <span class="detail-label">客户端</span>
+              <strong>{{ selectedUser.active_session_user_agent || '-' }}</strong>
+            </div>
+          </div>
+        </section>
       </div>
       <el-form
         v-else-if="drawerMode === 'reset'"

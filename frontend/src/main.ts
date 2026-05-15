@@ -7,6 +7,7 @@ import App from "./App.vue";
 import router from "./router";
 import { useThemeStore } from "./stores/theme";
 import { registerIcons } from "./plugins/icons";
+import { initAuthSessionSync } from "./utils/authSession";
 import "./styles/global.scss";
 
 const app = createApp(App);
@@ -21,5 +22,6 @@ app.use(router);
 // Initialize theme before mounting
 const themeStore = useThemeStore();
 themeStore.applyTheme();
+initAuthSessionSync();
 
 app.mount("#app");

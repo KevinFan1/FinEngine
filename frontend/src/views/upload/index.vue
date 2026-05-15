@@ -50,7 +50,7 @@
                     <div class="reference-heading rule-platforms-heading">
                         <div>
                             <span class="section-kicker">REFERENCE</span>
-                            <h3>平台与文件性质</h3>
+                            <h3>已接入平台与支持性质</h3>
                         </div>
                         <el-icon><InfoFilled /></el-icon>
                     </div>
@@ -842,8 +842,9 @@ const platformUploadRules = [
     {
         platform: "抖音",
         platformCode: "douyin",
-        types: ["动账", "bic", "运费险"],
+        types: ["订单", "动账", "bic", "运费险"],
         examples: [
+            "26年02月_订单_抖音旗舰店.xlsx",
             "26年02月_动账_抖音旗舰店.xlsx",
             "26年2月_BIC_抖音旗舰店.xlsx",
             "26年02月_运费险_抖音旗舰店.xlsx",

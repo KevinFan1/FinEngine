@@ -450,7 +450,7 @@ const visibleGuideSections = computed(() => {
 
 const usageNotes = [
     {
-        title: "平台与文件性质",
+        title: "已接入平台与支持性质",
         desc: "这里展示的是当前系统已经支持的平台和文档类型，上传前先对照确认，不在范围内的文件不要直接上传。",
     },
     {

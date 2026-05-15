@@ -36,6 +36,9 @@ class UserOut(BaseModel):
     role: str
     status: int
     last_login_at: datetime | None
+    active_session_ip: str | None = None
+    active_session_user_agent: str | None = None
+    active_session_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

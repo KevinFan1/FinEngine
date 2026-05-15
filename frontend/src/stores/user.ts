@@ -8,6 +8,7 @@ import {
 import type { LoginParams } from "@/api/auth";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import router from "@/router";
+import { clearAuthStorage, forceLogout, subscribeAuthLogout } from "@/utils/authSession";
 
 export interface UserInfo {
     id: number;
@@ -37,6 +38,10 @@ export const useUserStore = defineStore("user", () => {
     // State
     const token = ref<string | null>(safeGetToken());
     const userInfo = ref<UserInfo | null>(safeGetUserInfo());
+    subscribeAuthLogout(() => {
+        token.value = null;
+        userInfo.value = null;
+    });
 
     // Getters
     const isLoggedIn = computed(() => !!token.value);
@@ -73,8 +78,7 @@ export const useUserStore = defineStore("user", () => {
             // Clean up on failure
             token.value = null;
             userInfo.value = null;
-            localStorage.removeItem("token");
-            localStorage.removeItem("userInfo");
+            clearAuthStorage();
             throw error;
         }
     }
@@ -87,9 +91,7 @@ export const useUserStore = defineStore("user", () => {
         } finally {
             token.value = null;
             userInfo.value = null;
-            localStorage.removeItem("token");
-            localStorage.removeItem("userInfo");
-            router.push("/login");
+            forceLogout({ redirect: true, notify: false });
         }
     }
 
@@ -101,8 +103,7 @@ export const useUserStore = defineStore("user", () => {
     function clearAuth() {
         token.value = null;
         userInfo.value = null;
-        localStorage.removeItem("token");
-        localStorage.removeItem("userInfo");
+        clearAuthStorage();
     }
 
     return {

@@ -18,12 +18,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(subject: int, expires_delta: timedelta | None = None) -> str:
+def create_access_token(subject: int, expires_delta: timedelta | None = None, session_id: str | None = None) -> str:
     """Create a JWT access token with the user id as subject."""
     if expires_delta is None:
         expires_delta = timedelta(hours=settings.ACCESS_TOKEN_EXPIRE_HOURS)
     expire = datetime.now(timezone.utc) + expires_delta
     to_encode = {"sub": str(subject), "exp": expire}
+    if session_id:
+        to_encode["sid"] = session_id
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 

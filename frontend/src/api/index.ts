@@ -4,8 +4,8 @@ import axios, {
     type InternalAxiosRequestConfig,
 } from "axios";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
-import router from "@/router";
 import { decryptResponse, encryptRequest } from "@/api/crypto";
+import { forceLogout } from "@/utils/authSession";
 
 // API response wrapper type
 export interface ApiResponse<T = any> {
@@ -78,13 +78,12 @@ service.interceptors.response.use(
 
         // Backend returns HTTP 200 for business errors and exposes the real state in code/message.
         if (res.code !== undefined && res.code !== 200) {
-            const message = res.message || "请求失败";
-            ElMessage.error(message);
+            const message = authExpiredMessage(res.code, res.message || "请求失败");
 
             if (res.code === 401) {
-                localStorage.removeItem("token");
-                localStorage.removeItem("userInfo");
-                router.push("/login");
+                forceLogout({ message });
+            } else {
+                ElMessage.error(message);
             }
 
             const error = new ApiBusinessError(message, res.code, res.data);
@@ -103,14 +102,13 @@ service.interceptors.response.use(
             const status = error.response.status;
             const data = error.response.data;
 
-            const message = data?.message || `请求失败 (${status})`;
-            ElMessage.error(message);
+            const message = authExpiredMessage(status, data?.message || `请求失败 (${status})`);
             markRequestErrorShown(error, message);
 
             if (status === 401 || data?.code === 401) {
-                localStorage.removeItem("token");
-                localStorage.removeItem("userInfo");
-                router.push("/login");
+                forceLogout({ message });
+            } else {
+                ElMessage.error(message);
             }
         } else if (error.message?.includes("timeout")) {
             const message = "请求超时，请稍后重试";
@@ -129,6 +127,13 @@ service.interceptors.response.use(
 function showRequestError(message: string, error: unknown) {
     ElMessage.error(message);
     markRequestErrorShown(error, message);
+}
+
+function authExpiredMessage(code: number, message: string) {
+    if (code === 401 && message.includes("其他端登录")) {
+        return "账号已在其他端登录，请重新登录";
+    }
+    return message;
 }
 
 function markRequestErrorShown(error: unknown, message: string) {

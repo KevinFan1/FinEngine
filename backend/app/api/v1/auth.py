@@ -50,7 +50,7 @@ async def login(
     if user is None:
         return ApiResponse(code=status.HTTP_401_UNAUTHORIZED, message="用户名/手机号或密码错误")
 
-    token = create_access_token(subject=user.id)
+    token = create_access_token(subject=user.id, session_id=user.active_session_id)
     return ApiResponse(data=TokenResponse(access_token=token))
 
 
@@ -76,6 +76,11 @@ async def logout(
         ip=ip,
         user_agent=ua,
     )
+    current_user.active_session_id = None
+    current_user.active_session_ip = None
+    current_user.active_session_user_agent = None
+    current_user.active_session_at = None
+    await db.flush()
     return ApiResponse(message="已退出登录")
 
 

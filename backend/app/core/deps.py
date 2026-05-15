@@ -33,6 +33,9 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     if user.status != 1:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="用户已被禁用")
+    token_session_id = payload.get("sid")
+    if not token_session_id or token_session_id != user.active_session_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号已在其他端登录，请重新登录")
 
     return user
 

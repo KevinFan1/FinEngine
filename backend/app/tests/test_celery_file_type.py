@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
+
+from oss2.exceptions import NoSuchKey
 
 from app.tasks.celery_app import (
     _build_order_or_fallback_time_summary,
@@ -8,6 +11,7 @@ from app.tasks.celery_app import (
     _group_money_by_order_or_fallback_time,
     _infer_file_type,
 )
+from app.tasks import celery_app as celery_module
 
 
 def test_infer_file_type_prefers_filename_over_stored_default() -> None:
@@ -184,3 +188,16 @@ def test_order_or_fallback_time_summary_reports_entry_time_compatibility() -> No
     assert summary["fallback_time_count"] == 1
     assert summary["fallback_time_samples"] == ["fallback-order"]
     assert summary["errors"] == ["订单索引未命中 1 条，已使用入账时间归属年月；订单号: fallback-order"]
+
+
+def test_mark_task_failed_sets_task_and_upload_file_state() -> None:
+    task = SimpleNamespace(status="running", error_message=None, finished_at=None)
+    upload_file = SimpleNamespace(status="processing", error_message=None)
+
+    celery_module._mark_task_failed(task, upload_file, "OSS文件不存在")
+
+    assert task.status == "failed"
+    assert task.error_message == "OSS文件不存在"
+    assert task.finished_at is not None
+    assert upload_file.status == "failed"
+    assert upload_file.error_message == "OSS文件不存在"

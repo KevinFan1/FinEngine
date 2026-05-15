@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -6,6 +7,7 @@ from openpyxl import Workbook
 from app.tasks.processors.douyin import (
     DOUYIN_BIC_HEADERS,
     DOUYIN_DONGZHANG_HEADERS,
+    DOUYIN_ORDER_HEADERS,
     DOUYIN_SHIPPING_INSURANCE_HEADERS,
     douyin_processor,
 )
@@ -129,3 +131,30 @@ def test_douyin_shipping_insurance_supports_discount_header_variant(tmp_path: Pa
 
     assert result["success_rows"] == 2
     assert result["groups"]["抖音店铺|2026|4"]["insurance_fee"] == Decimal("5.70")
+
+
+def test_douyin_order_extracts_sub_order_time_and_parent_order(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_order.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_ORDER_HEADERS,
+        [
+            _row(
+                DOUYIN_ORDER_HEADERS,
+                主订单编号="P20260515001",
+                子订单编号="S20260515001-1",
+                订单提交时间="2026-05-14 10:20:30",
+            )
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="订单")
+
+    assert result["success_rows"] == 1
+    assert result["orders"] == [
+        {
+            "order_no": "S20260515001-1",
+            "order_created_at": datetime(2026, 5, 14, 10, 20, 30),
+            "extra_data": {"主订单编号": "P20260515001"},
+        }
+    ]

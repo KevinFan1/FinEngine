@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +20,11 @@ class AuthService:
         user_agent: str | None = None,
     ) -> User | None:
         """Authenticate user by username or phone. Returns User on success, None on failure."""
-        stmt = select(User).where(or_(User.username == username, User.phone == username), User.is_deleted.is_(False))
+        stmt = (
+            select(User)
+            .where(or_(User.username == username, User.phone == username), User.is_deleted.is_(False))
+            .with_for_update()
+        )
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
@@ -32,8 +37,13 @@ class AuthService:
         if user.status != 1:
             return None
 
-        # Update last login time
-        user.last_login_at = datetime.now(timezone.utc)
+        login_at = datetime.now(timezone.utc)
+        # A new login invalidates all older JWTs for the same account.
+        user.last_login_at = login_at
+        user.active_session_id = uuid4().hex
+        user.active_session_ip = ip
+        user.active_session_user_agent = user_agent[:500] if user_agent else None
+        user.active_session_at = login_at
         await db.flush()
 
         # Log login

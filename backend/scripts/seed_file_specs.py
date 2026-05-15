@@ -14,7 +14,7 @@ from app.core.database import async_session_factory
 from app.models.file_spec import FileSpec
 from app.models.platform import Platform
 from app.tasks.processors.alipay import ALIPAY_DONGZHANG_HEADERS
-from app.tasks.processors.douyin import DOUYIN_SHIPPING_INSURANCE_HEADERS
+from app.tasks.processors.douyin import DOUYIN_ORDER_HEADERS, DOUYIN_SHIPPING_INSURANCE_HEADERS
 from app.tasks.processors.qianniu import QIANNIU_DONGZHANG_HEADERS, QIANNIU_ORDER_HEADERS
 from app.tasks.processors.weixin_video import WEIXIN_VIDEO_BIC_HEADERS, WEIXIN_VIDEO_DONGZHANG_HEADERS, WEIXIN_VIDEO_ORDER_HEADERS
 from app.tasks.processors.xiaohongshu import (
@@ -40,6 +40,13 @@ PLATFORMS = [
 
 # ── File spec definitions ────────────────────────────────────────────────────
 FILE_SPECS = [
+    {
+        "platform_code": "douyin",
+        "type_code": "订单",
+        "name": "抖音订单",
+        "match_threshold": 5,
+        "headers": DOUYIN_ORDER_HEADERS,
+    },
     {
         "platform_code": "douyin",
         "type_code": "动账",

@@ -1,5 +1,6 @@
 import pytest
 
+from app.core.security import create_access_token, decode_access_token
 from app.services.captcha_service import CaptchaService
 from app.services.crypto_service import ApiReplayGuard, api_crypto_service, replay_aad
 from app.services.oss_service import _internal_oss_host
@@ -59,3 +60,12 @@ async def test_replay_guard_rejects_duplicate_nonce() -> None:
 def test_internal_oss_host_is_derived_from_public_endpoint() -> None:
     assert _internal_oss_host("oss-cn-guangzhou.aliyuncs.com") == "oss-cn-guangzhou-internal.aliyuncs.com"
     assert _internal_oss_host("oss-cn-guangzhou-internal.aliyuncs.com") == "oss-cn-guangzhou-internal.aliyuncs.com"
+
+
+def test_access_token_carries_session_id() -> None:
+    token = create_access_token(subject=123, session_id="session-abc")
+    payload = decode_access_token(token)
+
+    assert payload is not None
+    assert payload["sub"] == "123"
+    assert payload["sid"] == "session-abc"

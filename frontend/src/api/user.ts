@@ -12,6 +12,9 @@ export interface User {
   org_name?: string
   status: string
   last_login_at: string | null
+  active_session_ip?: string | null
+  active_session_user_agent?: string | null
+  active_session_at?: string | null
   created_at: string
 }
 

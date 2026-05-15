@@ -55,6 +55,15 @@ def _run_async_in_worker(coro):
     return loop.run_until_complete(coro)
 
 
+def _mark_task_failed(task, upload_file, error_message: str) -> None:
+    task.status = "failed"
+    task.error_message = error_message
+    task.finished_at = datetime.now(timezone.utc)
+    if upload_file:
+        upload_file.status = "failed"
+        upload_file.error_message = error_message
+
+
 def _json_safe(value):
     """Convert processor internals to JSON-safe values for task.result_summary."""
     if isinstance(value, Decimal):
@@ -1029,11 +1038,7 @@ async def _process_file_platform_async(
                     await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
 
         except Exception as e:
-            task.status = "failed"
-            task.error_message = str(e)
-            task.finished_at = datetime.now(timezone.utc)
-            if upload_file:
-                upload_file.status = "failed"
-                upload_file.error_message = str(e)
+            _mark_task_failed(task, upload_file, str(e))
             await db.commit()
+            logger.exception("任务处理失败 file_id=%s oss_key=%s", file_id, oss_key)
             raise
