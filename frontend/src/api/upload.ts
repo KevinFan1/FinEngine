@@ -63,6 +63,7 @@ export function getBatchDetail(id: number) {
  */
 export function createBatch(data: {
     file_count: number;
+    total_bytes?: number;
     org_id?: number;
     remark?: string;
 }) {

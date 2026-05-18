@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.upload import UploadBatchCreate, UploadFileCallback
 from app.services.audit_service import AuditService
 from app.services.platform_profile_service import resolve_platform_profile
+from app.services.quota_service import QuotaService
 from app.services.shop_service import ShopService
 
 
@@ -30,6 +31,15 @@ class UploadService:
         org_result = await db.execute(select(Organization).where(Organization.id == org_id, Organization.status == 1, Organization.is_deleted.is_(False)))
         if org_result.scalar_one_or_none() is None:
             raise ValueError("组织不存在或已禁用")
+
+        if data.total_bytes > 0:
+            can_upload, quota_msg = await QuotaService.check_storage_quota(
+                db,
+                org_id=org_id,
+                additional_bytes=data.total_bytes,
+            )
+            if not can_upload:
+                raise ValueError(quota_msg)
 
         batch = UploadBatch(
             org_id=org_id,
@@ -55,7 +65,7 @@ class UploadService:
             target_id=batch.id,
             ip=ip,
             user_agent=user_agent,
-            extra_data={"file_count": data.file_count},
+            extra_data={"file_count": data.file_count, "total_bytes": data.total_bytes},
         )
 
         return batch
@@ -84,6 +94,15 @@ class UploadService:
         batch = await UploadService.get_batch_for_user(db, batch_id=batch_id, user=user)
         if batch is None:
             raise ValueError("上传批次不存在或无权访问")
+
+        # Check storage quota
+        can_upload, quota_msg = await QuotaService.check_storage_quota(
+            db,
+            org_id=batch.org_id,
+            additional_bytes=data.file_size
+        )
+        if not can_upload:
+            raise ValueError(quota_msg)
 
         shop = None
         platform_profile = None
@@ -149,6 +168,9 @@ class UploadService:
             extra_data={"file_size": data.file_size, "task_id": task.id},
         )
 
+        # Update storage usage
+        await QuotaService.update_storage_usage(db, batch.org_id, data.file_size)
+
         # Dispatch Celery task — use hardcoded platform processor
         from app.tasks.processors import PLATFORM_PROCESSORS
 
@@ -156,7 +178,7 @@ class UploadService:
         if data.detected_platform and processor_code in PLATFORM_PROCESSORS:
             from app.tasks.celery_app import process_file_platform
 
-            process_file_platform.delay(
+            async_result = process_file_platform.delay(
                 file_id=upload_file.id,
                 oss_key=data.oss_key,
                 org_id=batch.org_id,
@@ -164,6 +186,7 @@ class UploadService:
                 shop_id=shop.id if shop else None,
                 shop_name=data.parsed_shop or "",
             )
+            task.celery_task_id = async_result.id
         else:
             # No processor found — mark task as failed
             task.status = "failed"

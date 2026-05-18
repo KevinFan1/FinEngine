@@ -50,7 +50,7 @@
                     <div class="reference-heading rule-platforms-heading">
                         <div>
                             <span class="section-kicker">REFERENCE</span>
-                            <h3>已接入平台与支持性质</h3>
+                            <h3>已接入平台与支持类型</h3>
                         </div>
                         <el-icon><InfoFilled /></el-icon>
                     </div>
@@ -193,7 +193,7 @@
                                 </p>
                                 <p class="drop-zone-hint">
                                     支持 .xlsx / .xlsm / .xls / .csv，单文件最大
-                                    1024MB
+                                    1024MB，上传前会检查本月上传额度是否充足
                                 </p>
                             </div>
                         </div>
@@ -762,7 +762,7 @@ import {
     InfoFilled,
     Shop,
 } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus/es/components/message/index.mjs";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { parseFileName, type ParsedFileName } from "@/utils/format";
 import { getFileSpecs, type FileSpec } from "@/api/file_spec";
 import {
@@ -773,6 +773,7 @@ import {
 } from "@/api/upload";
 import { getOrganizationList, type Organization } from "@/api/organization";
 import { getShopList, type Shop as ShopRecord } from "@/api/shop";
+import { checkUploadQuota } from "@/api/quota";
 import { useUserStore } from "@/stores/user";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
@@ -1117,6 +1118,10 @@ const canUpload = computed(() => {
         !isUploading.value
     );
 });
+
+function totalFileBytes(items: FileItem[]): number {
+    return items.reduce((sum, item) => sum + item.file.size, 0);
+}
 
 // Load file specs on mount for platform auto-detection
 async function loadFileSpecs() {
@@ -1755,6 +1760,7 @@ async function createUploadContext(
 ): Promise<UploadBatchContext> {
     const batch = await createBatch({
         file_count: itemsToUpload.length,
+        total_bytes: totalFileBytes(itemsToUpload),
         org_id: userStore.isSuperAdmin ? targetOrgId.value : undefined,
     });
     const sts = await getOssSts(batch.id);
@@ -1847,6 +1853,35 @@ async function runUploadQueue(itemsToUpload: FileItem[]) {
 
 async function startUpload() {
     if (!canUpload.value) return;
+
+    // 计算总文件大小
+    const totalBytes = totalFileBytes(readyUploadItems.value);
+    const totalMB = (totalBytes / (1024 * 1024)).toFixed(2);
+
+    // 检查本月上传额度。超级管理员代上传时，后端会按目标组织在创建批次前再次校验。
+    if (!userStore.isSuperAdmin) {
+      try {
+          const result = await checkUploadQuota(totalBytes);
+          if (!result.can_upload) {
+              await ElMessageBox.alert(
+                  `${result.message}\n\n本次上传文件总大小：${totalMB} MB`,
+                  '本月上传额度不足',
+                  {
+                      appendTo: 'body',
+                      confirmButtonText: '我知道了',
+                      customClass: 'upload-quota-limit-message-box',
+                      modalClass: 'upload-quota-limit-message-box__mask',
+                      type: 'warning',
+                  }
+              );
+              return;
+          }
+      } catch (error: any) {
+          ElMessage.error('检查本月上传额度失败：' + (error.message || '未知错误'));
+          return;
+      }
+    }
+
     await runUploadQueue(orderUploadItems(readyUploadItems.value));
 }
 

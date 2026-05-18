@@ -117,6 +117,11 @@
             {{ row.display_name || row.username }}
           </template>
         </el-table-column>
+        <el-table-column prop="org_name" label="组织" width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ getOrgName(row) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="module" label="模块" width="90" align="center">
           <template #default="{ row }">
             <el-tag class="audit-type-pill" size="small">{{ moduleLabel(row.module) }}</el-tag>
@@ -177,6 +182,7 @@
           <div>
             <span class="detail-kicker">{{ formatDateTime(selectedLog.created_at) }}</span>
             <h3>{{ selectedLog.display_name || selectedLog.username || '-' }}</h3>
+            <p v-if="isSuperAdmin && selectedLog.org_id">{{ getOrgName(selectedLog) }}</p>
             <p>{{ selectedLog.ip || selectedLog.ip_address || '-' }}</p>
           </div>
           <div class="detail-badge-row">
@@ -216,10 +222,14 @@
 <script setup lang="ts">
 defineOptions({ name: 'AuditLogs' })
 
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { getAuditLogList, type AuditLog } from '@/api/audit'
 import { formatDateTime } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
+const isSuperAdmin = computed(() => userStore.isSuperAdmin)
 
 // Search
 const searchForm = reactive({
@@ -281,6 +291,12 @@ function moduleLabel(val: string): string {
 
 function actionLabel(val: string): string {
   return actionMap[val] || val
+}
+
+function getOrgName(row: AuditLog): string {
+  if (row.org_name) return row.org_name
+  if (!row.org_id) return '-'
+  return `组织#${row.org_id}`
 }
 
 async function fetchData() {

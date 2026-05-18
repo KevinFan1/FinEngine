@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: finengine-postgres
+    environment:
+      POSTGRES_DB: finengine
+      POSTGRES_USER: finengine
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-finengine_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finengine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finengine-network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: finengine-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finengine-network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finengine-api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://finengine:${DB_PASSWORD:-finengine_password}@postgres:5432/finengine
+      REDIS_URL: redis://redis:6379/0
+      CELERY_REDIS_URL: redis://redis:6379/1
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - finengine-network
+    restart: unless-stopped
+
+  # Celery Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: finengine-worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://finengine:${DB_PASSWORD:-finengine_password}@postgres:5432/finengine
+      REDIS_URL: redis://redis:6379/0
+      CELERY_REDIS_URL: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - finengine-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  finengine-network:
+    driver: bridge

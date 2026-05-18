@@ -1,0 +1,129 @@
+"""Add performance indexes
+
+Revision ID: add_performance_indexes
+Revises:
+Create Date: 2026-05-16
+
+This migration adds indexes to improve query performance.
+"""
+from alembic import op
+
+
+# revision identifiers, used by Alembic.
+revision = 'add_performance_indexes'
+down_revision = None  # Update this to the latest migration
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    """Add performance indexes."""
+
+    # Users table indexes
+    op.create_index(
+        'idx_users_org_status',
+        'users',
+        ['org_id', 'status', 'is_deleted'],
+        postgresql_where='is_deleted = false'
+    )
+    op.create_index(
+        'idx_users_username',
+        'users',
+        ['username'],
+        unique=True,
+        postgresql_where='is_deleted = false'
+    )
+    op.create_index(
+        'idx_users_phone',
+        'users',
+        ['phone'],
+        unique=True,
+        postgresql_where='is_deleted = false'
+    )
+
+    # Upload files table indexes
+    op.create_index(
+        'idx_upload_files_org_created',
+        'upload_files',
+        ['org_id', 'created_at', 'is_deleted']
+    )
+    op.create_index(
+        'idx_upload_files_status',
+        'upload_files',
+        ['status', 'is_deleted']
+    )
+    op.create_index(
+        'idx_upload_files_platform',
+        'upload_files',
+        ['platform_id', 'is_deleted']
+    )
+
+    # Processing tasks table indexes
+    op.create_index(
+        'idx_processing_tasks_file_status',
+        'processing_tasks',
+        ['file_id', 'status']
+    )
+    op.create_index(
+        'idx_processing_tasks_created',
+        'processing_tasks',
+        ['created_at']
+    )
+
+    # Summaries table indexes
+    op.create_index(
+        'idx_summaries_org_date',
+        'summaries',
+        ['org_id', 'date', 'is_deleted']
+    )
+    op.create_index(
+        'idx_summaries_platform_date',
+        'summaries',
+        ['platform_id', 'date', 'is_deleted']
+    )
+    op.create_index(
+        'idx_summaries_shop_date',
+        'summaries',
+        ['shop_id', 'date', 'is_deleted']
+    )
+
+    # Audit logs table indexes
+    op.create_index(
+        'idx_audit_logs_user_created',
+        'audit_logs',
+        ['user_id', 'created_at']
+    )
+    op.create_index(
+        'idx_audit_logs_org_created',
+        'audit_logs',
+        ['org_id', 'created_at']
+    )
+    op.create_index(
+        'idx_audit_logs_module_action',
+        'audit_logs',
+        ['module', 'action', 'created_at']
+    )
+
+
+def downgrade():
+    """Remove performance indexes."""
+
+    # Drop all indexes in reverse order
+    op.drop_index('idx_audit_logs_module_action')
+    op.drop_index('idx_audit_logs_org_created')
+    op.drop_index('idx_audit_logs_user_created')
+
+    op.drop_index('idx_summaries_shop_date')
+    op.drop_index('idx_summaries_platform_date')
+    op.drop_index('idx_summaries_org_date')
+
+    op.drop_index('idx_processing_tasks_created')
+    op.drop_index('idx_processing_tasks_file_status')
+
+    op.drop_index('idx_upload_files_platform')
+    op.drop_index('idx_upload_files_status')
+    op.drop_index('idx_upload_files_org_created')
+
+    op.drop_index('idx_users_phone')
+    op.drop_index('idx_users_username')
+    op.drop_index('idx_users_org_status')

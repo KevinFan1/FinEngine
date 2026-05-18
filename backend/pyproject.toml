@@ -23,11 +23,15 @@ dependencies = [
     "oss2>=2.19.1",
     "xlrd==2.0.1",
     "loguru>=0.7.3",
+    "slowapi>=0.1.9",
+    "sentry-sdk[fastapi]>=2.60.0",
+    "prometheus-client>=0.25.0",
 ]
 
 [project.scripts]
 dev = "app.cli.commands:dev"
 worker = "app.cli.commands:worker"
+recover-queued-tasks = "app.cli.commands:recover_queued_tasks"
 debug-worker = "app.cli.debug_worker:main"
 seed-all = "app.cli.commands:seed_all"
 seed-platforms = "app.cli.commands:seed_platforms"

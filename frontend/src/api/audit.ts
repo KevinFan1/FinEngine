@@ -5,6 +5,7 @@ export interface AuditLog {
   id: number
   user_id: number
   org_id?: number
+  org_name?: string
   username: string
   display_name?: string
   module: string

@@ -53,14 +53,43 @@ class AliyunOSSService:
         auth = oss2.Auth(settings.ALIYUN_ACCESS_KEY_ID, settings.ALIYUN_ACCESS_KEY_SECRET)
         return oss2.Bucket(auth, self.normalized_endpoint(internal=internal), settings.ALIYUN_OSS_BUCKET)
 
-    def download_to_temp(self, oss_key: str, local_path: str, *, chunk_size: int = 1024 * 1024):
-        """Stream an OSS object to a local temp path for processing."""
+    def download_to_temp(
+        self,
+        oss_key: str,
+        local_path: str,
+        *,
+        chunk_size: int = 1024 * 1024,
+        max_size: int = 1024 * 1024 * 1024,  # 1GB default limit
+    ):
+        """Stream an OSS object to a local temp path for processing.
+
+        Args:
+            oss_key: OSS object key
+            local_path: Local file path to save
+            chunk_size: Download chunk size in bytes
+            max_size: Maximum file size in bytes (default 1GB)
+
+        Raises:
+            ValueError: If file size exceeds max_size
+        """
         result = self._bucket(internal=settings.INTERNAL_DOWNLOAD).get_object(oss_key)
+
+        # Check content length if available
+        content_length = result.content_length
+        if content_length and content_length > max_size:
+            raise ValueError(f"文件过大: {content_length} bytes (最大 {max_size} bytes)")
+
+        downloaded = 0
         with Path(local_path).open("wb") as f:
             while True:
                 chunk = result.read(chunk_size)
                 if not chunk:
                     break
+                downloaded += len(chunk)
+                if downloaded > max_size:
+                    # Clean up partial file
+                    Path(local_path).unlink(missing_ok=True)
+                    raise ValueError(f"下载超过大小限制: {max_size} bytes")
                 f.write(chunk)
 
 

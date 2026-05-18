@@ -24,6 +24,7 @@ SENSITIVE_KEYS = {
     "security_token",
     "token",
 }
+REQUEST_ID_HEADER = b"x-request-id"
 
 
 class ApiLoggingMiddleware:
@@ -36,9 +37,11 @@ class ApiLoggingMiddleware:
             await self.app(scope, receive, send)
             return
 
-        request_id = str(uuid.uuid4())
         start = time.perf_counter()
-        request_headers = scope.get("headers") or []
+        request_scope = dict(scope)
+        request_headers = list(scope.get("headers") or [])
+        request_id = _ensure_request_id(request_headers)
+        request_scope["headers"] = request_headers
         request_content_type = _header_value(request_headers, b"content-type")
         request_body = bytearray()
         request_body_truncated = False
@@ -68,43 +71,89 @@ class ApiLoggingMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive_wrapper, send_wrapper)
+            await self.app(request_scope, receive_wrapper, send_wrapper)
         except Exception:
             duration_ms = (time.perf_counter() - start) * 1000
+            method = str(request_scope.get("method") or "-")
+            path = str(request_scope.get("path") or "-")
+            query = _query_string(request_scope)
+            client_ip = _client_ip(request_scope, request_headers)
             logger.bind(
                 event="api.exception",
                 request_id=request_id,
-                method=scope.get("method"),
-                path=scope.get("path"),
-                query=_query_string(scope),
+                method=method,
+                path=path,
+                query=query,
                 duration_ms=round(duration_ms, 1),
-                client_ip=_client_ip(scope, request_headers),
+                client_ip=client_ip,
                 user_agent=_header_value(request_headers, b"user-agent") or "-",
                 request_content_type=request_content_type or "-",
                 request_body=_format_body(bytes(request_body), request_content_type, request_body_truncated),
-            ).exception("api.exception")
+            ).exception(
+                _request_log_message(
+                    event="api.exception",
+                    method=method,
+                    path=path,
+                    query=query,
+                    http_status=500,
+                    api_code="-",
+                    api_message="unhandled exception",
+                    duration_ms=duration_ms,
+                    client_ip=client_ip,
+                    request_id=request_id,
+                )
+            )
             raise
         finally:
             if response_headers:
                 duration_ms = (time.perf_counter() - start) * 1000
                 response_content_type = _header_value(response_headers, b"content-type")
                 api_code, api_message = _api_code_message(response_body, response_content_type)
-                logger.bind(
+                method = str(request_scope.get("method") or "-")
+                path = str(request_scope.get("path") or "-")
+                query = _query_string(request_scope)
+                client_ip = _client_ip(request_scope, request_headers)
+                log = logger.bind(
                     event="api.request",
                     request_id=request_id,
-                    method=scope.get("method"),
-                    path=scope.get("path"),
-                    query=_query_string(scope),
+                    method=method,
+                    path=path,
+                    query=query,
                     http_status=response_status,
                     api_code=api_code,
                     api_message=api_message,
                     duration_ms=round(duration_ms, 1),
-                    client_ip=_client_ip(scope, request_headers),
+                    client_ip=client_ip,
                     user_agent=_header_value(request_headers, b"user-agent") or "-",
                     request_content_type=request_content_type or "-",
                     response_content_type=response_content_type or "-",
                     request_body=_format_body(bytes(request_body), request_content_type, request_body_truncated),
-                ).info("api.request")
+                )
+                log.log(
+                    _request_log_level(response_status, api_code),
+                    _request_log_message(
+                        event="api.request",
+                        method=method,
+                        path=path,
+                        query=query,
+                        http_status=response_status,
+                        api_code=api_code,
+                        api_message=api_message,
+                        duration_ms=duration_ms,
+                        client_ip=client_ip,
+                        request_id=request_id,
+                    ),
+                )
+
+
+def _ensure_request_id(headers: list[tuple[bytes, bytes]]) -> str:
+    request_id = _header_value(headers, REQUEST_ID_HEADER).strip()
+    if request_id:
+        return request_id
+
+    request_id = str(uuid.uuid4())
+    headers.append((REQUEST_ID_HEADER, request_id.encode("ascii")))
+    return request_id
 
 
 def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> str:
@@ -118,6 +167,45 @@ def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> str:
 def _query_string(scope: Scope) -> str:
     query = scope.get("query_string") or b""
     return query.decode("latin-1") if query else "-"
+
+
+def _request_log_message(
+    *,
+    event: str,
+    method: str,
+    path: str,
+    query: str,
+    http_status: int,
+    api_code: str,
+    api_message: str,
+    duration_ms: float,
+    client_ip: str,
+    request_id: str,
+) -> str:
+    target = f"{path}?{query}" if query and query != "-" else path
+    code_part = f" code={api_code}" if api_code and api_code != "-" else ""
+    message_part = f" message={api_message}" if api_message and api_message != "-" else ""
+    return (
+        f"{event} {method} {target} status={http_status}{code_part}{message_part} "
+        f"duration={duration_ms:.1f}ms client={client_ip} request_id={request_id}"
+    )
+
+
+def _request_log_level(http_status: int, api_code: str) -> str:
+    business_code = _safe_int(api_code)
+    effective_code = business_code if business_code is not None and business_code != 200 else http_status
+    if effective_code >= 500:
+        return "ERROR"
+    if effective_code >= 400:
+        return "WARNING"
+    return "INFO"
+
+
+def _safe_int(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _client_ip(scope: Scope, headers: list[tuple[bytes, bytes]]) -> str:

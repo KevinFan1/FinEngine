@@ -34,8 +34,25 @@ export function getOrganizationList(params: OrganizationListParams) {
 /**
  * Get all organizations (for dropdowns)
  */
-export function getAllOrganizations() {
-    return get<Organization[]>("/organizations", {});
+export async function getAllOrganizations(): Promise<Organization[]> {
+    const pageSize = 100;
+    const organizations: Organization[] = [];
+    let page = 1;
+    let total = 0;
+
+    do {
+        const res = await get<PaginatedData<Organization>>("/organizations", { page, page_size: pageSize });
+        const items = res.items || [];
+        total = res.total || 0;
+        organizations.push(...items);
+
+        if (items.length < pageSize) {
+            break;
+        }
+        page += 1;
+    } while (organizations.length < total);
+
+    return organizations;
 }
 
 /**

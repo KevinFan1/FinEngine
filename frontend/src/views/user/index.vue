@@ -308,9 +308,7 @@
 defineOptions({ name: 'Users' })
 
 import { ref, reactive, computed, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
-import { ElMessage } from 'element-plus/es/components/message/index.mjs'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import {
   getUserList,
@@ -395,9 +393,7 @@ async function fetchData() {
 
 async function fetchOrgOptions() {
   try {
-    const res = await getAllOrganizations()
-    const data = res as any
-    orgOptions.value = Array.isArray(data) ? data : (data?.items || [])
+    orgOptions.value = await getAllOrganizations()
   } catch {
     // Ignore
   }

@@ -5,9 +5,11 @@ from app.api.v1 import (
     auth,
     category_dicts,
     file_specs,
+    health,
     organizations,
     oss,
     platforms,
+    quota,
     shops,
     summary_adjustments,
     summaries,
@@ -18,9 +20,11 @@ from app.api.v1 import (
 
 api_router = APIRouter()
 
+api_router.include_router(health.router, tags=["健康检查"])
 api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["组织管理"])
 api_router.include_router(users.router, prefix="/users", tags=["用户管理"])
+api_router.include_router(quota.router, tags=["配额管理"])
 api_router.include_router(uploads.router, prefix="/uploads", tags=["上传中心"])
 api_router.include_router(oss.router, prefix="/oss", tags=["OSS 存储"])
 api_router.include_router(file_specs.router, prefix="/file-specs", tags=["文件规格"])

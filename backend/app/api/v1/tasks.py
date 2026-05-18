@@ -279,7 +279,7 @@ async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db:
 
     from app.tasks.celery_app import process_file_platform
 
-    process_file_platform.delay(
+    async_result = process_file_platform.delay(
         file_id=upload_file.id,
         oss_key=upload_file.oss_key,
         org_id=task.org_id,
@@ -287,6 +287,9 @@ async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db:
         shop_name=upload_file.parsed_shop or "",
         shop_id=upload_file.shop_id,
     )
+    task.celery_task_id = async_result.id
+    await db.commit()
+    await db.refresh(task)
 
 
 async def _batch_task_action(

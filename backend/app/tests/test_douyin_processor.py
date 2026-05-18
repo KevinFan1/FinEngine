@@ -38,7 +38,7 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
             _row(
                 DOUYIN_DONGZHANG_HEADERS,
                 动账时间="2026-05-01 00:00:00",
-                备注="售后单仲裁申诉通过打款",
+                备注="仲裁申诉通过打款",
                 动账金额="3",
                 订单实付应结="100",
                 订单退款="-20",

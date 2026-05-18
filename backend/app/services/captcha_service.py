@@ -37,13 +37,23 @@ class CaptchaChallenge:
 
 
 class CaptchaService:
-    def __init__(self, *, ttl_seconds: int = 300) -> None:
+    def __init__(self, *, ttl_seconds: int = 300, max_memory_store: int = 1000) -> None:
         self.ttl_seconds = ttl_seconds
+        self.max_memory_store = max_memory_store
         self._store: dict[str, tuple[str, float]] = {}
         self._redis: redis.Redis | None = None
 
     async def generate(self) -> CaptchaChallenge:
         self._cleanup()
+
+        # Prevent memory leak: limit in-memory store size
+        if len(self._store) >= self.max_memory_store:
+            from loguru import logger
+            logger.warning(f"Memory captcha store full ({self.max_memory_store}), clearing old entries")
+            # Keep only the most recent entries
+            sorted_items = sorted(self._store.items(), key=lambda x: x[1][1], reverse=True)
+            self._store = dict(sorted_items[:self.max_memory_store // 2])
+
         captcha_id = uuid.uuid4().hex
         code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(4))
         if not await self._save_to_redis(captcha_id, code):

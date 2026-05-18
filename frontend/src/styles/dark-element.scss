@@ -45,7 +45,12 @@ html.dark {
 
   .el-dialog,
   .el-message-box,
-  .el-drawer,
+  .el-drawer {
+    background: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+
   .el-popover.el-popper,
   .el-popper.is-light {
     background: var(--bg-elevated) !important;
@@ -56,8 +61,12 @@ html.dark {
   .el-card__header,
   .el-dialog__header,
   .el-dialog__footer,
-  .el-drawer__header {
+  .el-message-box__header,
+  .el-message-box__btns,
+  .el-drawer__header,
+  .el-drawer__footer {
     border-color: var(--border-color) !important;
+    background: var(--bg-elevated) !important;
   }
 
   .el-dialog__title,
@@ -67,7 +76,11 @@ html.dark {
   }
 
   .el-dialog__body,
-  .el-message-box__message,
+  .el-message-box__content,
+  .el-message-box__message {
+    color: var(--text-secondary) !important;
+  }
+
   .el-form-item__label {
     color: var(--text-primary) !important;
   }

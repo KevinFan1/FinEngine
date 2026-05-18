@@ -333,10 +333,62 @@ def process_file_platform(
     )
 
 
+@celery_app.task(name="app.tasks.scan_due_sync_tasks", ignore_result=True)
+def scan_due_sync_tasks() -> int:
+    """Compatibility shim for stale Celery beat messages from older builds.
+
+    Current FinEngine processing is dispatched explicitly through
+    process_file_platform; keeping this task registered lets workers consume
+    already queued legacy messages instead of crashing with an unknown task.
+    """
+    logger.warning("忽略旧版 Celery 定时任务: app.tasks.scan_due_sync_tasks")
+    return 0
+
+
 def requeue_order_dependent_tasks_after_order_upload(
     order_file_id: int,
 ) -> None:
     _run_async_in_worker(_requeue_order_dependent_tasks_after_order_upload_async(order_file_id))
+
+
+def recover_queued_processing_tasks(limit: int = 100) -> int:
+    return _run_async_in_worker(_recover_queued_processing_tasks_async(limit=limit))
+
+
+async def _recover_queued_processing_tasks_async(limit: int = 100) -> int:
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.task import ProcessingTask
+    from app.models.upload import UploadFile
+
+    async with async_session_factory() as db:
+        task_rows = await db.execute(
+            select(ProcessingTask, UploadFile)
+            .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
+            .where(
+                ProcessingTask.status == "queued",
+                ProcessingTask.is_deleted.is_(False),
+                UploadFile.is_deleted.is_(False),
+            )
+            .order_by(ProcessingTask.id.asc())
+            .limit(limit)
+        )
+        rows = task_rows.all()
+        dispatched = 0
+        for task, upload_file in rows:
+            async_result = process_file_platform.delay(
+                file_id=upload_file.id,
+                oss_key=upload_file.oss_key,
+                org_id=task.org_id,
+                platform_code=upload_file.detected_platform or "",
+                shop_name=upload_file.parsed_shop or "",
+                shop_id=upload_file.shop_id,
+            )
+            task.celery_task_id = async_result.id
+            dispatched += 1
+        await db.commit()
+        return dispatched
 
 
 async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id: int) -> int:
@@ -378,7 +430,7 @@ async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id:
         await db.commit()
 
         for task, upload_file in rows:
-            process_file_platform.delay(
+            async_result = process_file_platform.delay(
                 file_id=upload_file.id,
                 oss_key=upload_file.oss_key,
                 org_id=task.org_id,
@@ -386,6 +438,8 @@ async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id:
                 shop_name=upload_file.parsed_shop or "",
                 shop_id=upload_file.shop_id,
             )
+            task.celery_task_id = async_result.id
+        await db.commit()
         return len(rows)
 
 
@@ -644,7 +698,7 @@ async def _process_file_platform_async(
                     task.progress = 80
                     await db.commit()
 
-                    print(proc_result)
+                    logger.debug(f"Processor result: {proc_result}")
 
                     contribution_rows = proc_result.get("return_cost_contribution_rows", [])
                     if not contribution_rows:

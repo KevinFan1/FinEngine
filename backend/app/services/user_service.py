@@ -1,11 +1,13 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.password_validator import PasswordValidator
 from app.core.security import hash_password
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.services.audit_service import AuditService
+from app.services.quota_service import QuotaService
 
 
 def split_int_filter_values(value: str | int | None) -> list[int]:
@@ -81,6 +83,17 @@ class UserService:
         user_agent: str | None = None,
     ) -> User:
         """Create a new user. Raises ValueError if username or phone already exists."""
+        # Validate password strength
+        is_valid, error_msg = PasswordValidator.validate(data.password, strict=False)
+        if not is_valid:
+            raise ValueError(error_msg)
+
+        # Check user quota (skip for superadmin)
+        if data.org_id and operator.role != "superadmin":
+            can_create, quota_msg = await QuotaService.check_user_quota(db, data.org_id)
+            if not can_create:
+                raise ValueError(quota_msg)
+
         existing_phone = await db.execute(select(User).where(User.phone == data.phone, User.is_deleted.is_(False)))
         if existing_phone.scalar_one_or_none() is not None:
             raise ValueError("手机号已被注册")
@@ -246,6 +259,11 @@ class UserService:
         user = await UserService.get_user(db, user_id)
         if user is None:
             return None
+
+        # Validate password strength
+        is_valid, error_msg = PasswordValidator.validate(new_password, strict=False)
+        if not is_valid:
+            raise ValueError(error_msg)
 
         user.password_hash = hash_password(new_password)
         await db.flush()

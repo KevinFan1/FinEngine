@@ -33,6 +33,17 @@ def worker() -> None:
     celery_app.worker_main(["worker", *args])
 
 
+def recover_queued_tasks() -> None:
+    parser = argparse.ArgumentParser(description="Re-dispatch queued processing tasks to Celery.")
+    parser.add_argument("--limit", type=int, default=100)
+    args = parser.parse_args()
+
+    from app.tasks.celery_app import recover_queued_processing_tasks
+
+    count = recover_queued_processing_tasks(limit=args.limit)
+    print(f"已重新投递排队任务 {count} 个")
+
+
 def migrate_generate() -> None:
     parser = argparse.ArgumentParser(description="Generate an Alembic migration.")
     parser.add_argument("message", help="Migration message")

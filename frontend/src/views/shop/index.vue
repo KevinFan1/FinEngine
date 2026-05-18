@@ -193,9 +193,7 @@
 defineOptions({ name: 'Shops' })
 
 import { ref, reactive, computed, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
-import { ElMessage } from 'element-plus/es/components/message/index.mjs'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { getShopList, createShop, updateShop, deleteShop, type Shop } from '@/api/shop'
 import { getPlatformList, type Platform } from '@/api/platform'
 import { formatDateTime } from '@/utils/format'

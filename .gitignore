@@ -33,3 +33,10 @@ backend/logs/
 .codex/
 node_modules/
 outputs/
+.claude/
+claude/
+
+CLAUDE.md
+*.rtk
+uv.lock
+.rtk/

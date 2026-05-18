@@ -15,6 +15,7 @@ class AuditLogOut(BaseModel):
     id: int
     user_id: int
     org_id: int | None
+    org_name: str | None = None
     username: str
     display_name: str | None
     module: str

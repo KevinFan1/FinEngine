@@ -104,46 +104,63 @@
     <el-drawer
       v-model="drawerVisible"
       :title="drawerTitle"
-      size="480px"
+      :size="drawerMode === 'detail' ? '600px' : '480px'"
       append-to-body
       destroy-on-close
       :close-on-click-modal="false"
     >
       <div v-if="drawerMode === 'detail' && selectedOrg" class="detail-panel">
-        <div class="detail-row">
-          <span class="detail-label">组织名称</span>
-          <strong>{{ selectedOrg.name }}</strong>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">组织编码</span>
-          <span>{{ selectedOrg.code }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">状态</span>
-          <el-tag :type="isActive(selectedOrg) ? 'success' : 'danger'" size="small">
-            {{ isActive(selectedOrg) ? '启用' : '禁用' }}
-          </el-tag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">创建时间</span>
-          <span>{{ formatDateTime(selectedOrg.created_at) }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">更新时间</span>
-          <span>{{ formatDateTime(selectedOrg.updated_at) }}</span>
-        </div>
-        <div class="detail-row is-block">
-          <span class="detail-label">备注</span>
-          <p>{{ selectedOrg.remark || '-' }}</p>
-        </div>
+        <section class="detail-hero-card">
+          <div>
+            <span class="detail-kicker">ORG #{{ selectedOrg.id }}</span>
+            <h3>{{ selectedOrg.name }}</h3>
+            <p>{{ selectedOrg.code }}</p>
+          </div>
+          <div class="detail-badge-row">
+            <el-tag :type="isActive(selectedOrg) ? 'success' : 'danger'" size="small">
+              {{ isActive(selectedOrg) ? '启用' : '禁用' }}
+            </el-tag>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>基础信息</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">组织编码</span>
+              <strong>{{ selectedOrg.code }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">创建时间</span>
+              <strong>{{ formatDateTime(selectedOrg.created_at) }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">更新时间</span>
+              <strong>{{ formatDateTime(selectedOrg.updated_at) }}</strong>
+            </div>
+            <div class="detail-item detail-item--wide" v-if="selectedOrg.remark">
+              <span class="detail-label">备注</span>
+              <p>{{ selectedOrg.remark }}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 配额管理 -->
+        <QuotaManagement
+          :org-id="selectedOrg.id"
+          :is-super-admin="userStore.isSuperAdmin"
+        />
       </div>
       <el-form
         v-else
         ref="formRef"
         :model="formData"
         :rules="formRules"
-        label-width="90px"
+        label-width="120px"
       >
+        <el-divider content-position="left">基础信息</el-divider>
         <el-form-item label="组织名称" prop="name">
           <el-input v-model="formData.name" placeholder="请输入组织名称" maxlength="100" show-word-limit />
         </el-form-item>
@@ -165,6 +182,47 @@
             show-word-limit
           />
         </el-form-item>
+
+        <!-- 配额设置（仅编辑时显示，且仅超级管理员可见） -->
+        <template v-if="isEdit && userStore.isSuperAdmin">
+          <el-divider content-position="left">配额设置</el-divider>
+          <el-form-item label="套餐类型" prop="plan_type">
+            <el-select v-model="formData.plan_type" placeholder="请选择套餐类型">
+              <el-option label="免费版" value="free" />
+              <el-option label="基础版" value="basic" />
+              <el-option label="专业版" value="professional" />
+              <el-option label="企业版" value="enterprise" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="到期时间" prop="plan_expires_at">
+            <el-date-picker
+              v-model="formData.plan_expires_at"
+              type="datetime"
+              placeholder="选择到期时间"
+              format="YYYY-MM-DD HH:mm:ss"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="最大用户数" prop="max_users">
+            <el-input-number
+              v-model="formData.max_users"
+              :min="1"
+              :max="10000"
+              :step="1"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="每月上传额度(GB)" prop="max_storage_gb">
+            <el-input-number
+              v-model="formData.max_storage_gb"
+              :min="0.01"
+              :max="10000"
+              :step="0.1"
+              :precision="2"
+              style="width: 100%"
+            />
+          </el-form-item>
+        </template>
       </el-form>
       <div v-if="drawerMode !== 'detail'" class="drawer-footer">
         <el-button @click="drawerVisible = false">取消</el-button>
@@ -180,9 +238,7 @@
 defineOptions({ name: 'Organizations' })
 
 import { ref, reactive, computed, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus/es/components/form/index.mjs'
-import { ElMessage } from 'element-plus/es/components/message/index.mjs'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   getOrganizationList,
   createOrganization,
@@ -190,8 +246,13 @@ import {
   toggleOrganizationStatus,
   type Organization,
 } from '@/api/organization'
+import { getOrgQuota, updateQuota } from '@/api/quota'
 import { formatDateTime } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
+import { useUserStore } from '@/stores/user'
+import QuotaManagement from '@/components/QuotaManagement.vue'
+
+const userStore = useUserStore()
 
 // Search
 const searchForm = reactive({
@@ -220,6 +281,11 @@ const formData = reactive({
   name: '',
   code: '',
   remark: '',
+  // 配额字段（仅编辑时使用）
+  plan_type: 'free',
+  plan_expires_at: null as Date | string | null,
+  max_users: 5,
+  max_storage_gb: 1,
 })
 
 const formRules: FormRules = {
@@ -280,7 +346,7 @@ function openDetailDrawer(row: Organization) {
   drawerVisible.value = true
 }
 
-function openFormDrawer(row?: Organization) {
+async function openFormDrawer(row?: Organization) {
   drawerMode.value = row ? 'edit' : 'create'
   selectedOrg.value = row || null
   if (row) {
@@ -289,12 +355,31 @@ function openFormDrawer(row?: Organization) {
     formData.name = row.name
     formData.code = row.code
     formData.remark = row.remark || ''
+
+    // 加载配额数据（仅超级管理员）
+    if (userStore.isSuperAdmin) {
+      try {
+        const quotaInfo = await getOrgQuota(row.id)
+        formData.plan_type = quotaInfo.plan_type
+        formData.plan_expires_at = quotaInfo.plan_expires_at
+          ? new Date(quotaInfo.plan_expires_at)
+          : null
+        formData.max_users = quotaInfo.users.max
+        formData.max_storage_gb = quotaInfo.storage.max_gb
+      } catch (error) {
+        console.error('加载配额信息失败:', error)
+      }
+    }
   } else {
     isEdit.value = false
     editId.value = null
     formData.name = ''
     formData.code = ''
     formData.remark = ''
+    formData.plan_type = 'free'
+    formData.plan_expires_at = null
+    formData.max_users = 5
+    formData.max_storage_gb = 1
   }
   drawerVisible.value = true
 }
@@ -306,11 +391,25 @@ async function handleSubmit() {
   submitLoading.value = true
   try {
     if (isEdit.value && editId.value) {
+      // 更新组织基本信息
       await updateOrganization(editId.value, {
         name: formData.name,
         code: formData.code,
         remark: formData.remark,
       })
+
+      // 更新配额信息（仅超级管理员）
+      if (userStore.isSuperAdmin) {
+        await updateQuota(editId.value, {
+          plan_type: formData.plan_type,
+          plan_expires_at: formData.plan_expires_at
+            ? new Date(formData.plan_expires_at).toISOString()
+            : null,
+          max_users: formData.max_users,
+          max_storage_gb: formData.max_storage_gb,
+        })
+      }
+
       ElMessage.success('更新成功')
     } else {
       await createOrganization({
@@ -388,27 +487,104 @@ onMounted(() => {
   gap: 14px;
 }
 
-.detail-row {
-  display: grid;
-  grid-template-columns: 90px 1fr;
-  gap: 12px;
-  align-items: center;
-  color: var(--text-primary);
-  line-height: 1.7;
+.detail-hero-card,
+.detail-card {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+}
 
-  &.is-block {
-    align-items: flex-start;
+.detail-hero-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+
+  h3 {
+    margin: 4px 0;
+    color: var(--text-primary);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.4;
   }
 
   p {
     margin: 0;
     color: var(--text-secondary);
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+  }
+}
+
+.detail-kicker {
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.detail-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.detail-card-header {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color-light);
+  border-radius: calc(var(--radius-card) - 2px);
+  background: var(--bg-elevated);
+
+  strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
     word-break: break-word;
   }
 }
 
+.detail-item--wide {
+  grid-column: 1 / -1;
+}
+
 .detail-label {
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

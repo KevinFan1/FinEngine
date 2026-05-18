@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user, require_org_admin_or_above
+from app.models.organization import Organization
 from app.models.operation_log import OperationLog
 from app.models.user import User
 from app.schemas.audit import AuditLogOut
@@ -39,7 +40,11 @@ async def list_audit_logs(
     Superadmin can see all logs. Organization admins only see logs in their
     own organization.
     """
-    stmt = select(OperationLog).order_by(OperationLog.id.desc())
+    stmt = (
+        select(OperationLog, Organization.name.label("org_name"))
+        .outerjoin(Organization, Organization.id == OperationLog.org_id)
+        .order_by(OperationLog.id.desc())
+    )
     count_stmt = select(func.count()).select_from(OperationLog)
 
     if current_user.role != "superadmin":
@@ -78,11 +83,14 @@ async def list_audit_logs(
 
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
-    logs = list(result.scalars().all())
+    rows = result.all()
 
     return ApiResponse(
         data=PageResponse(
-            items=[AuditLogOut.model_validate(l) for l in logs],
+            items=[
+                AuditLogOut.model_validate(log).model_copy(update={"org_name": org_name})
+                for log, org_name in rows
+            ],
             total=total,
             page=page,
             page_size=page_size,

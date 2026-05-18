@@ -27,7 +27,6 @@ FIELD_LABELS = {
     "status_val": "状态",
     "org_id": "组织",
     "orgIds": "组织",
-    "org_id": "组织",
     "name": "名称",
     "code": "编码",
     "remark": "备注",

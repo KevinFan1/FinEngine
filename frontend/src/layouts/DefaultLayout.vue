@@ -97,6 +97,8 @@
                     </el-breadcrumb>
                 </div>
                 <div class="header-right">
+                    <QuotaWarning />
+
                     <!-- Theme toggle button -->
                     <el-tooltip
                         :content="
@@ -208,8 +210,9 @@
                 <p class="guide-kicker">推荐流程</p>
                 <h3>先维护基础信息，再上传文件核对结果</h3>
                 <p class="guide-hero-desc">
-                    当前账号角色：{{ currentRoleLabel }}。系统主流程以
-                    “上传中心 -> 任务列表 -> 汇总明细 / 汇总报表” 为主，基础资料只需先配置一次，后续按月重复上传即可。
+                    当前账号角色：{{ currentRoleLabel }}。系统主流程以 “上传中心
+                    -> 任务列表 -> 汇总明细 / 汇总报表”
+                    为主，基础资料只需先配置一次，后续按月重复上传即可。
                 </p>
             </section>
 
@@ -292,6 +295,7 @@ import { useAppStore, type Tab } from "@/stores/app";
 import { useUserStore } from "@/stores/user";
 import { useThemeStore } from "@/stores/theme";
 import BrandLogo from "@/components/BrandLogo.vue";
+import QuotaWarning from "@/components/QuotaWarning.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -450,7 +454,7 @@ const visibleGuideSections = computed(() => {
 
 const usageNotes = [
     {
-        title: "已接入平台与支持性质",
+        title: "已接入平台与支持类型",
         desc: "这里展示的是当前系统已经支持的平台和文档类型，上传前先对照确认，不在范围内的文件不要直接上传。",
     },
     {
@@ -789,6 +793,8 @@ function handleCommand(command: string) {
     .header-right {
         display: flex;
         align-items: center;
+        gap: 14px;
+        flex-shrink: 0;
 
         .theme-toggle {
             height: 32px;
@@ -809,7 +815,6 @@ function handleCommand(command: string) {
                 border-color 0.12s,
                 background-color 0.12s,
                 color 0.12s;
-            margin-right: 8px;
 
             .el-icon {
                 font-size: 16px;
@@ -1093,7 +1098,11 @@ function handleCommand(command: string) {
     padding: 14px;
     border-color: rgba(250, 173, 20, 0.32);
     background:
-        linear-gradient(180deg, rgba(250, 173, 20, 0.12), rgba(250, 173, 20, 0.06)),
+        linear-gradient(
+            180deg,
+            rgba(250, 173, 20, 0.12),
+            rgba(250, 173, 20, 0.06)
+        ),
         var(--bg-card);
 
     &:first-child,
@@ -1101,7 +1110,11 @@ function handleCommand(command: string) {
     &:nth-child(3) {
         border-color: rgba(255, 77, 79, 0.32);
         background:
-            linear-gradient(180deg, rgba(255, 77, 79, 0.12), rgba(255, 77, 79, 0.06)),
+            linear-gradient(
+                180deg,
+                rgba(255, 77, 79, 0.12),
+                rgba(255, 77, 79, 0.06)
+            ),
             var(--bg-card);
     }
 }

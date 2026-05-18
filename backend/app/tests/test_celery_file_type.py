@@ -1,9 +1,6 @@
 from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
-from types import SimpleNamespace
-
-from oss2.exceptions import NoSuchKey
 
 from app.tasks.celery_app import (
     _build_order_or_fallback_time_summary,

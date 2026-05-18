@@ -467,43 +467,309 @@ html.dark .el-tag.platform-tag--miniprogram {
     color: var(--text-primary) !important;
 }
 
-// Dialog
-.el-dialog {
-    border-radius: var(--radius-lg) !important;
+// Modal surfaces — keep dialogs, drawers, and MessageBox visually consistent
+.el-overlay {
+    background-color: var(--bg-mask) !important;
+    backdrop-filter: blur(2px);
+}
+
+.el-overlay.is-message-box {
+    position: fixed !important;
+    inset: 0 !important;
+}
+
+.is-message-box .el-overlay-message-box {
+    position: fixed !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    padding: 24px;
+    overflow: auto;
+    text-align: left;
+
+    &::after {
+        display: none !important;
+    }
+}
+
+.el-dialog,
+.el-message-box,
+.el-drawer {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+    border-radius: 8px !important;
+    box-shadow:
+        0 18px 48px rgba(15, 23, 42, 0.16),
+        0 3px 12px rgba(15, 23, 42, 0.08) !important;
+    color: var(--text-primary);
     overflow: hidden;
-    box-shadow: var(--shadow-dropdown) !important;
-    border: 1px solid var(--border-light);
+}
+
+.el-dialog,
+.el-message-box {
+    position: relative;
+    max-width: calc(100vw - 32px);
+
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 3px;
+        background: linear-gradient(90deg, var(--primary), var(--accent));
+    }
+}
+
+.el-dialog {
+    --el-dialog-padding-primary: 18px;
+    margin-top: 8vh !important;
 
     &__header {
+        margin: 0 !important;
+        padding: 18px 48px 14px 20px !important;
         border-bottom: 1px solid var(--border-light);
-        padding-bottom: 16px !important;
-        margin-right: 0;
+        background: var(--bg-elevated);
+    }
+
+    &__title {
+        color: var(--text-primary) !important;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.5;
+        letter-spacing: 0;
+    }
+
+    &__headerbtn {
+        top: 10px !important;
+        right: 10px !important;
+        width: 34px !important;
+        height: 34px !important;
+        border-radius: 6px;
+        transition:
+            background-color 0.14s,
+            color 0.14s;
+
+        &:hover,
+        &:focus-visible {
+            background: var(--bg-hover);
+        }
+
+        .el-dialog__close {
+            color: var(--text-tertiary) !important;
+        }
+
+        &:hover .el-dialog__close,
+        &:focus-visible .el-dialog__close {
+            color: var(--primary) !important;
+        }
+    }
+
+    &__body {
+        padding: 18px 20px !important;
+        color: var(--text-secondary) !important;
+        background: var(--bg-card);
     }
 
     &__footer {
+        padding: 14px 20px 18px !important;
         border-top: 1px solid var(--border-light);
-        padding-top: 16px;
+        background: var(--bg-elevated);
+    }
+}
+
+.el-message-box {
+    width: min(430px, calc(100vw - 32px)) !important;
+    max-width: calc(100vw - 32px) !important;
+    padding: 0 !important;
+    vertical-align: initial;
+
+    &__header {
+        margin: 0 !important;
+        padding: 18px 48px 12px 18px !important;
+        border-bottom: 1px solid var(--border-light);
+        background: var(--bg-elevated);
+
+        &.show-close {
+            padding-right: 48px !important;
+        }
+    }
+
+    &__title {
+        display: block;
+        color: var(--text-primary) !important;
+        font-size: 16px !important;
+        font-weight: 700;
+        line-height: 1.5 !important;
+        letter-spacing: 0;
+    }
+
+    &__headerbtn {
+        top: 10px !important;
+        right: 10px !important;
+        width: 34px !important;
+        height: 34px !important;
+        border-radius: 6px;
+        transition:
+            background-color 0.14s,
+            color 0.14s;
+
+        &:hover,
+        &:focus-visible {
+            background: var(--bg-hover);
+        }
+
+        .el-message-box__close {
+            color: var(--text-tertiary) !important;
+        }
+
+        &:hover .el-message-box__close,
+        &:focus-visible .el-message-box__close {
+            color: var(--primary) !important;
+        }
+    }
+
+    &__content {
+        padding: 18px 18px 10px !important;
+        color: var(--text-secondary) !important;
+        font-size: 14px;
+        background: var(--bg-card);
+    }
+
+    &__container {
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    &__status {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        margin-top: 1px;
+        border-radius: 8px;
+        font-size: 20px !important;
+        background: var(--info-light);
+
+        &.el-message-box-icon--success {
+            background: var(--success-light);
+        }
+
+        &.el-message-box-icon--warning {
+            background: var(--warning-light);
+        }
+
+        &.el-message-box-icon--error {
+            background: var(--error-light);
+        }
+
+        &.el-message-box-icon--info,
+        &.el-message-box-icon--primary {
+            background: var(--info-light);
+        }
+    }
+
+    &__message {
+        color: var(--text-secondary) !important;
+        line-height: 1.7;
+
+        p {
+            margin: 0;
+            line-height: 1.7 !important;
+            white-space: pre-line;
+        }
+    }
+
+    &__input {
+        padding: 12px 18px 0 !important;
+    }
+
+    &__btns {
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 14px 18px 18px !important;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-elevated);
+
+        .el-button {
+            min-width: 80px;
+            margin-left: 0 !important;
+        }
     }
 }
 
 .el-drawer {
-    background: var(--bg-card) !important;
-    box-shadow: var(--shadow-dropdown) !important;
+    &.rtl {
+        border-radius: 8px 0 0 8px !important;
+    }
+
+    &.ltr {
+        border-radius: 0 8px 8px 0 !important;
+    }
+
+    &.ttb {
+        border-radius: 0 0 8px 8px !important;
+    }
+
+    &.btt {
+        border-radius: 8px 8px 0 0 !important;
+    }
 
     &__header {
-        margin-bottom: 0 !important;
+        align-items: center;
+        min-height: 58px;
+        margin: 0 !important;
         padding: 16px 20px !important;
         border-bottom: 1px solid var(--border-light);
+        background: var(--bg-elevated);
         color: var(--text-primary) !important;
     }
 
+    &__title {
+        color: var(--text-primary) !important;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.5;
+        letter-spacing: 0;
+    }
+
+    &__close-btn {
+        width: 34px;
+        height: 34px;
+        border-radius: 6px;
+        color: var(--text-tertiary) !important;
+        transition:
+            background-color 0.14s,
+            color 0.14s;
+
+        &:hover,
+        &:focus-visible {
+            background: var(--bg-hover);
+            color: var(--primary) !important;
+        }
+    }
+
     &__body {
-        padding: 16px 20px !important;
+        padding: 18px 20px !important;
+        background: var(--bg-card);
+        color: var(--text-primary);
     }
 
     &__footer {
-        padding: 12px 20px !important;
+        padding: 14px 20px !important;
         border-top: 1px solid var(--border-light);
+        background: var(--bg-elevated);
+    }
+}
+
+.el-message-box__btns .el-button,
+.el-dialog__footer .el-button,
+.el-drawer__footer .el-button {
+    min-width: 80px;
+}
+
+.upload-quota-limit-message-box {
+    .el-message-box__status {
+        background: var(--warning-light);
     }
 }
 

@@ -253,8 +253,8 @@ def test_kuaishou_dongzhang_aggregates_return_cost_only(tmp_path: Path) -> None:
     assert result["errors"] == []
     assert result["groups"] == {}
     assert result["return_cost_rows"] == [
-        {"order_no": "order-1", "entry_time": datetime(2026, 4, 1, 12, 0, 0), "return_cost": Decimal("-10.50")},
-        {"order_no": "order-2", "entry_time": datetime(2026, 4, 2, 0, 0, 0), "return_cost": Decimal("3.25")},
+        {"order_no": "order-1", "entry_time": datetime(2026, 4, 1, 12, 0, 0), "return_cost": Decimal("10.50")},
+        {"order_no": "order-2", "entry_time": datetime(2026, 4, 2, 0, 0, 0), "return_cost": Decimal("-3.25")},
     ]
 
 
@@ -278,8 +278,8 @@ def test_kuaishou_dongzhang_csv_aggregates_return_cost_only(tmp_path: Path) -> N
 
     assert result["success_rows"] == 2
     assert result["return_cost_rows"] == [
-        {"order_no": "order-1", "entry_time": datetime(2026, 4, 1, 12, 0, 0), "return_cost": Decimal("-10.50")},
-        {"order_no": "order-2", "entry_time": datetime(2026, 4, 2, 0, 0, 0), "return_cost": Decimal("3.25")},
+        {"order_no": "order-1", "entry_time": datetime(2026, 4, 1, 12, 0, 0), "return_cost": Decimal("10.50")},
+        {"order_no": "order-2", "entry_time": datetime(2026, 4, 2, 0, 0, 0), "return_cost": Decimal("-3.25")},
     ]
 
 
