@@ -53,15 +53,15 @@
         </div>
       </template>
 
-      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%" height="calc(100vh - 278px)">
+      <el-table class="summary-table roomy-table user-table" :data="tableData" v-loading="loading" stripe border style="width: 100%" height="calc(100vh - 278px)">
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
           </template>
         </el-table-column>
-        <el-table-column prop="display_name" label="姓名" width="120" show-overflow-tooltip />
-        <el-table-column prop="phone" label="手机号" width="140" />
-        <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="所属组织" min-width="160" show-overflow-tooltip>
+        <el-table-column prop="display_name" label="姓名" min-width="170" show-overflow-tooltip />
+        <el-table-column prop="phone" label="手机号" min-width="180" />
+        <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="所属组织" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.org_name || '-' }}
           </template>
@@ -80,7 +80,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="last_login_at" label="最后登录" width="180">
+        <el-table-column prop="last_login_at" label="最后登录" min-width="220">
           <template #default="{ row }">
             <span class="text-tertiary">{{ formatDateTime(row.last_login_at) }}</span>
           </template>

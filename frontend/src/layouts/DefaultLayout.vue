@@ -401,7 +401,7 @@ const menuItems: MenuItem[] = [
     { path: "/shops", title: "店铺管理", icon: Shop },
     {
         path: "/order-accounting",
-        title: "订单核算",
+        title: "动账核算",
         icon: Money,
         children: [
             { path: "/upload", title: "上传中心", icon: Upload },
@@ -412,7 +412,7 @@ const menuItems: MenuItem[] = [
     },
     {
         path: "/transaction-accounting",
-        title: "动账核算",
+        title: "动账资金核算",
         icon: Wallet,
         children: [
             { path: "/transaction-upload", title: "上传中心", icon: Upload },
