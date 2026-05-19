@@ -57,11 +57,6 @@ class Settings(BaseSettings):
     LOG_RETENTION_DAYS: int = 15
     LOG_ROTATION_TIME: str = "00:00"
 
-    # Sentry error tracking
-    SENTRY_DSN: str = ""  # Set this to enable Sentry error tracking
-    SENTRY_ENVIRONMENT: str = "production"  # production, staging, development
-    SENTRY_TRACES_SAMPLE_RATE: float = 0.1  # 10% of transactions for performance monitoring
-
     # Alibaba Cloud credentials
     ALIYUN_ACCESS_KEY_ID: str = ""
     ALIYUN_ACCESS_KEY_SECRET: str = ""

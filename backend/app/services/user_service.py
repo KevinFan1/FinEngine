@@ -29,6 +29,33 @@ def split_int_filter_values(value: str | int | None) -> list[int]:
 
 class UserService:
     @staticmethod
+    def validate_create_scope(*, data: UserCreate, operator: User) -> None:
+        if operator.role == "superadmin":
+            return
+        if data.org_id != operator.org_id:
+            raise ValueError("无权管理其他组织的用户")
+        if data.role == "superadmin":
+            raise ValueError("无权创建超级管理员")
+
+    @staticmethod
+    def validate_target_scope(*, user: User, operator: User) -> None:
+        if operator.role == "superadmin":
+            return
+        if user.org_id != operator.org_id:
+            raise ValueError("用户不存在")
+
+    @staticmethod
+    def validate_update_scope(*, user: User, data: UserUpdate, operator: User) -> None:
+        UserService.validate_target_scope(user=user, operator=operator)
+        if operator.role == "superadmin":
+            return
+        update_data = data.model_dump(exclude_unset=True)
+        if "org_id" in update_data and update_data["org_id"] != user.org_id:
+            raise ValueError("无权变更用户所属组织")
+        if update_data.get("role") == "superadmin":
+            raise ValueError("无权授予超级管理员")
+
+    @staticmethod
     async def list_users(
         db: AsyncSession,
         *,
@@ -74,6 +101,14 @@ class UserService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_user_for_operator(db: AsyncSession, user_id: int, operator: User) -> User | None:
+        user = await UserService.get_user(db, user_id)
+        if user is None:
+            return None
+        UserService.validate_target_scope(user=user, operator=operator)
+        return user
+
+    @staticmethod
     async def create_user(
         db: AsyncSession,
         *,
@@ -83,6 +118,8 @@ class UserService:
         user_agent: str | None = None,
     ) -> User:
         """Create a new user. Raises ValueError if username or phone already exists."""
+        UserService.validate_create_scope(data=data, operator=operator)
+
         # Validate password strength
         is_valid, error_msg = PasswordValidator.validate(data.password, strict=False)
         if not is_valid:
@@ -153,6 +190,7 @@ class UserService:
         user = await UserService.get_user(db, user_id)
         if user is None:
             return None
+        UserService.validate_update_scope(user=user, data=data, operator=operator)
 
         old_value = {
             "phone": user.phone,
@@ -219,6 +257,7 @@ class UserService:
         user = await UserService.get_user(db, user_id)
         if user is None:
             return None
+        UserService.validate_target_scope(user=user, operator=operator)
 
         old_status = user.status
         user.status = status_val
@@ -259,6 +298,7 @@ class UserService:
         user = await UserService.get_user(db, user_id)
         if user is None:
             return None
+        UserService.validate_target_scope(user=user, operator=operator)
 
         # Validate password strength
         is_valid, error_msg = PasswordValidator.validate(new_password, strict=False)

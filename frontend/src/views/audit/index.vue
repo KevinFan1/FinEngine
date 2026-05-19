@@ -117,7 +117,7 @@
             {{ row.display_name || row.username }}
           </template>
         </el-table-column>
-        <el-table-column prop="org_name" label="组织" width="160" show-overflow-tooltip>
+        <el-table-column v-if="isSuperAdmin" prop="org_name" label="组织" width="160" show-overflow-tooltip>
           <template #default="{ row }">
             {{ getOrgName(row) }}
           </template>
@@ -182,7 +182,7 @@
           <div>
             <span class="detail-kicker">{{ formatDateTime(selectedLog.created_at) }}</span>
             <h3>{{ selectedLog.display_name || selectedLog.username || '-' }}</h3>
-            <p v-if="isSuperAdmin && selectedLog.org_id">{{ getOrgName(selectedLog) }}</p>
+            <p v-if="isSuperAdmin">{{ getOrgName(selectedLog) }}</p>
             <p>{{ selectedLog.ip || selectedLog.ip_address || '-' }}</p>
           </div>
           <div class="detail-badge-row">
@@ -386,10 +386,6 @@ onMounted(() => {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
-}
-
-.audit-filter-form {
-  row-gap: 6px;
 }
 
 .table-card {

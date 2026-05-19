@@ -67,8 +67,16 @@ export interface SummaryListParams {
     page_size?: number;
     summary_year?: number;
     summary_month?: number;
+    summary_start_year?: number;
+    summary_start_month?: number;
+    summary_end_year?: number;
+    summary_end_month?: number;
     source_year?: number;
     source_month?: number;
+    source_start_year?: number;
+    source_start_month?: number;
+    source_end_year?: number;
+    source_end_month?: number;
     accounting_year?: number;
     accounting_month?: number;
     accounting_start_year?: number;
@@ -102,8 +110,16 @@ export function getSummaryReportList(params: SummaryListParams) {
 export async function exportSummaryExcel(params: {
     summary_year?: number;
     summary_month?: number;
+    summary_start_year?: number;
+    summary_start_month?: number;
+    summary_end_year?: number;
+    summary_end_month?: number;
     source_year?: number;
     source_month?: number;
+    source_start_year?: number;
+    source_start_month?: number;
+    source_end_year?: number;
+    source_end_month?: number;
     platform_name?: string;
     report_platform_name?: string;
     shop_name?: string;

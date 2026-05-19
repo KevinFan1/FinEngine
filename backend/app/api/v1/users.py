@@ -74,7 +74,10 @@ async def get_user(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get user detail."""
-    user = await UserService.get_user(db, user_id)
+    try:
+        user = await UserService.get_user_for_operator(db, user_id, current_user)
+    except ValueError as e:
+        return ApiResponse(code=404, message=str(e))
     if user is None:
         return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(data=UserOut.model_validate(user))
@@ -123,14 +126,17 @@ async def update_user_status(
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent") if request else None
 
-    user = await UserService.update_user_status(
-        db,
-        user_id=user_id,
-        status_val=status_val,
-        operator=current_user,
-        ip=ip,
-        user_agent=ua,
-    )
+    try:
+        user = await UserService.update_user_status(
+            db,
+            user_id=user_id,
+            status_val=status_val,
+            operator=current_user,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
     if user is None:
         return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(data=UserOut.model_validate(user))
@@ -149,14 +155,17 @@ async def reset_user_password(
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
-    user = await UserService.reset_password(
-        db,
-        user_id=user_id,
-        new_password=body.new_password,
-        operator=current_user,
-        ip=ip,
-        user_agent=ua,
-    )
+    try:
+        user = await UserService.reset_password(
+            db,
+            user_id=user_id,
+            new_password=body.new_password,
+            operator=current_user,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
     if user is None:
         return ApiResponse(code=404, message="用户不存在")
     return ApiResponse(message="密码已重置")

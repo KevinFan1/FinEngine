@@ -876,27 +876,87 @@ html.dark .el-tag.platform-tag--miniprogram {
     }
 
     .search-card {
+        --search-control-height: 36px;
+        --search-control-radius: 9px;
+        --search-control-bg: var(--bg-elevated);
+        --search-control-border: var(--border-color);
+
         margin-bottom: 14px;
 
         .el-card__body {
-            padding: 14px 18px 2px;
+            padding: 14px 18px 4px;
         }
 
         .el-form {
             display: flex;
             align-items: center;
             flex-wrap: wrap;
-            gap: 0;
+            column-gap: 8px;
+            row-gap: 10px;
         }
 
         .el-form-item {
-            margin-bottom: 12px;
+            align-items: center;
+            margin: 0 0 10px;
+        }
+
+        .el-form-item__label {
+            height: var(--search-control-height);
+            line-height: var(--search-control-height);
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
         }
 
         .el-input,
         .el-select,
-        .el-date-editor {
+        .el-date-editor,
+        .el-button {
+            --el-component-size: var(--search-control-height);
+            height: var(--search-control-height);
             vertical-align: middle;
+        }
+
+        .el-input__wrapper,
+        .el-select__wrapper,
+        .el-date-editor.el-input__wrapper,
+        .el-date-editor.el-range-editor {
+            min-height: var(--search-control-height);
+            border-radius: var(--search-control-radius) !important;
+            background: var(--search-control-bg) !important;
+            box-shadow: 0 0 0 1px var(--search-control-border) inset !important;
+        }
+
+        .el-input__wrapper:hover,
+        .el-select__wrapper.is-hovering,
+        .el-date-editor.el-input__wrapper:hover,
+        .el-date-editor.el-range-editor:hover {
+            box-shadow: 0 0 0 1px var(--input-hover-border) inset !important;
+        }
+
+        .el-input__wrapper.is-focus,
+        .el-select__wrapper.is-focused,
+        .el-date-editor.el-input__wrapper.is-focus,
+        .el-date-editor.el-range-editor.is-active {
+            box-shadow:
+                0 0 0 1px var(--primary) inset,
+                var(--focus-ring) !important;
+        }
+
+        .el-input__inner,
+        .el-select__placeholder,
+        .el-range-input,
+        .el-range-separator {
+            font-size: 13px;
+        }
+
+        .el-range-separator {
+            color: var(--text-tertiary);
+        }
+
+        .el-button {
+            border-radius: var(--search-control-radius);
+            font-weight: 600;
         }
     }
 

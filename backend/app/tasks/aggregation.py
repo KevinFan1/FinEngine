@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
-from app.services.shop_color_service import assign_default_shop_color
+from app.services.shop_service import ShopService
 from app.utils.money import ZERO_MONEY, safe_decimal
 
 
@@ -401,23 +401,10 @@ class AggregationService:
         )
         shop = result.scalar_one_or_none()
         if shop is None:
-            shop = Shop(
+            shop = await ShopService.get_or_create_shop(
+                db,
                 org_id=org_id,
                 platform_name=platform_name,
                 shop_name=shop_name,
-                shop_color=assign_default_shop_color(
-                    org_id=org_id,
-                    platform_name=platform_name,
-                    shop_name=shop_name,
-                ),
             )
-            db.add(shop)
-            await db.flush()
-        elif not shop.shop_color:
-            shop.shop_color = assign_default_shop_color(
-                org_id=org_id,
-                platform_name=shop.platform_name,
-                shop_name=shop.shop_name,
-            )
-            await db.flush()
         return shop

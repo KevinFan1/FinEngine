@@ -13,7 +13,6 @@ from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.metrics import get_metrics
 from app.core.rate_limit import limiter
-from app.core.sentry import init_sentry
 from app.middleware.api_logging_middleware import ApiLoggingMiddleware
 from app.middleware.crypto_middleware import ApiCryptoMiddleware
 from app.middleware.metrics_middleware import MetricsMiddleware
@@ -21,7 +20,6 @@ from app.middleware.request_id_middleware import RequestIDMiddleware
 from app.services.auth_service import AuthService
 
 setup_logging()
-init_sentry()  # Initialize Sentry error tracking
 
 
 @asynccontextmanager

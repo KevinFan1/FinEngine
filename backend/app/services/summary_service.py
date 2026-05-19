@@ -79,6 +79,24 @@ def month_period_value(year: int | None, month: int | None) -> int | None:
     return int(year) * 100 + int(month)
 
 
+def build_month_range_filters(
+    period_expr,
+    *,
+    start_year: int | None = None,
+    start_month: int | None = None,
+    end_year: int | None = None,
+    end_month: int | None = None,
+) -> list:
+    filters = []
+    start_period = month_period_value(start_year, start_month)
+    end_period = month_period_value(end_year, end_month)
+    if start_period is not None:
+        filters.append(period_expr >= start_period)
+    if end_period is not None:
+        filters.append(period_expr <= end_period)
+    return filters
+
+
 PLATFORM_LABELS = {
     "douyin": "抖音",
     "抖店": "抖音",
@@ -110,8 +128,16 @@ class SummaryService:
         org_id: int,
         summary_year: int | None = None,
         summary_month: int | None = None,
+        summary_start_year: int | None = None,
+        summary_start_month: int | None = None,
+        summary_end_year: int | None = None,
+        summary_end_month: int | None = None,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_start_year: int | None = None,
+        source_start_month: int | None = None,
+        source_end_year: int | None = None,
+        source_end_month: int | None = None,
         platform_name: str | None = None,
         report_platform_name: str | None = None,
         shop_id: int | None = None,
@@ -143,6 +169,28 @@ class SummaryService:
         if source_month is not None:
             stmt = stmt.where(FinancialSummary.source_month == source_month)
             count_stmt = count_stmt.where(FinancialSummary.source_month == source_month)
+
+        summary_period = FinancialSummary.summary_year * 100 + FinancialSummary.summary_month
+        for period_filter in build_month_range_filters(
+            summary_period,
+            start_year=summary_start_year,
+            start_month=summary_start_month,
+            end_year=summary_end_year,
+            end_month=summary_end_month,
+        ):
+            stmt = stmt.where(period_filter)
+            count_stmt = count_stmt.where(period_filter)
+
+        source_period = FinancialSummary.source_year * 100 + FinancialSummary.source_month
+        for period_filter in build_month_range_filters(
+            source_period,
+            start_year=source_start_year,
+            start_month=source_start_month,
+            end_year=source_end_year,
+            end_month=source_end_month,
+        ):
+            stmt = stmt.where(period_filter)
+            count_stmt = count_stmt.where(period_filter)
 
         platform_names = split_filter_values(platform_name)
         if platform_names:
@@ -204,8 +252,16 @@ class SummaryService:
         org_id: int,
         summary_year: int | None = None,
         summary_month: int | None = None,
+        summary_start_year: int | None = None,
+        summary_start_month: int | None = None,
+        summary_end_year: int | None = None,
+        summary_end_month: int | None = None,
         source_year: int | None = None,
         source_month: int | None = None,
+        source_start_year: int | None = None,
+        source_start_month: int | None = None,
+        source_end_year: int | None = None,
+        source_end_month: int | None = None,
         platform_name: str | None = None,
         report_platform_name: str | None = None,
         shop_id: int | None = None,
@@ -233,6 +289,24 @@ class SummaryService:
             stmt = stmt.where(FinancialSummary.source_year == source_year)
         if source_month is not None:
             stmt = stmt.where(FinancialSummary.source_month == source_month)
+        summary_period = FinancialSummary.summary_year * 100 + FinancialSummary.summary_month
+        for period_filter in build_month_range_filters(
+            summary_period,
+            start_year=summary_start_year,
+            start_month=summary_start_month,
+            end_year=summary_end_year,
+            end_month=summary_end_month,
+        ):
+            stmt = stmt.where(period_filter)
+        source_period = FinancialSummary.source_year * 100 + FinancialSummary.source_month
+        for period_filter in build_month_range_filters(
+            source_period,
+            start_year=source_start_year,
+            start_month=source_start_month,
+            end_year=source_end_year,
+            end_month=source_end_month,
+        ):
+            stmt = stmt.where(period_filter)
         platform_names = split_filter_values(platform_name)
         if platform_names:
             stmt = stmt.where(FinancialSummary.source_platform_code.in_(platform_names))
@@ -628,12 +702,15 @@ class SummaryService:
         if source_month is not None:
             filters.append(FinancialSummary.source_month == source_month)
         source_period = FinancialSummary.source_year * 100 + FinancialSummary.source_month
-        source_start_period = month_period_value(source_start_year, source_start_month)
-        source_end_period = month_period_value(source_end_year, source_end_month)
-        if source_start_period is not None:
-            filters.append(source_period >= source_start_period)
-        if source_end_period is not None:
-            filters.append(source_period <= source_end_period)
+        filters.extend(
+            build_month_range_filters(
+                source_period,
+                start_year=source_start_year,
+                start_month=source_start_month,
+                end_year=source_end_year,
+                end_month=source_end_month,
+            )
+        )
         platform_names = split_filter_values(platform_name)
         if platform_names:
             filters.append(FinancialSummary.report_platform_code.in_(platform_names))

@@ -69,6 +69,14 @@ def month_filter_label(
 @router.get("", response_model=ApiResponse[PageResponse[SummaryOut]])
 async def list_summaries(
     request: Request,
+    summary_start_year: int | None = Query(None, description="业务开始年份"),
+    summary_start_month: int | None = Query(None, description="业务开始月份"),
+    summary_end_year: int | None = Query(None, description="业务结束年份"),
+    summary_end_month: int | None = Query(None, description="业务结束月份"),
+    source_start_year: int | None = Query(None, description="核算开始年份"),
+    source_start_month: int | None = Query(None, description="核算开始月份"),
+    source_end_year: int | None = Query(None, description="核算结束年份"),
+    source_end_month: int | None = Query(None, description="核算结束月份"),
     summary_year: int | None = Query(None),
     summary_month: int | None = Query(None),
     source_year: int | None = Query(None),
@@ -91,8 +99,16 @@ async def list_summaries(
         org_id=org_id,
         summary_year=summary_year,
         summary_month=summary_month,
+        summary_start_year=summary_start_year,
+        summary_start_month=summary_start_month,
+        summary_end_year=summary_end_year,
+        summary_end_month=summary_end_month,
         source_year=source_year,
         source_month=source_month,
+        source_start_year=source_start_year,
+        source_start_month=source_start_month,
+        source_end_year=source_end_year,
+        source_end_month=source_end_month,
         platform_name=platform_name,
         report_platform_name=report_platform_name,
         shop_id=shop_id,
@@ -427,6 +443,14 @@ async def export_report_summaries(
 @router.get("/export")
 async def export_summaries(
     request: Request,
+    summary_start_year: int | None = Query(None, description="业务开始年份"),
+    summary_start_month: int | None = Query(None, description="业务开始月份"),
+    summary_end_year: int | None = Query(None, description="业务结束年份"),
+    summary_end_month: int | None = Query(None, description="业务结束月份"),
+    source_start_year: int | None = Query(None, description="核算开始年份"),
+    source_start_month: int | None = Query(None, description="核算开始月份"),
+    source_end_year: int | None = Query(None, description="核算结束年份"),
+    source_end_month: int | None = Query(None, description="核算结束月份"),
     summary_year: int | None = Query(None),
     summary_month: int | None = Query(None),
     source_year: int | None = Query(None),
@@ -452,8 +476,16 @@ async def export_summaries(
         org_id=org_id,
         summary_year=summary_year,
         summary_month=summary_month,
+        summary_start_year=summary_start_year,
+        summary_start_month=summary_start_month,
+        summary_end_year=summary_end_year,
+        summary_end_month=summary_end_month,
         source_year=source_year,
         source_month=source_month,
+        source_start_year=source_start_year,
+        source_start_month=source_start_month,
+        source_end_year=source_end_year,
+        source_end_month=source_end_month,
         platform_name=platform_name,
         report_platform_name=report_platform_name,
         shop_id=shop_id,
@@ -466,12 +498,26 @@ async def export_summaries(
 
     # Build filename
     parts = ["财务汇总"]
-    if summary_year:
-        parts.append(f"{summary_year}年")
-    if summary_month:
-        parts.append(f"{summary_month}月")
-    if source_year or source_month:
-        parts.append(f"上传{source_year or '全部'}年{source_month or '全部'}月")
+    summary_label = month_filter_label(
+        start_year=summary_start_year,
+        start_month=summary_start_month,
+        end_year=summary_end_year,
+        end_month=summary_end_month,
+        year=summary_year,
+        month=summary_month,
+    )
+    source_label = month_filter_label(
+        start_year=source_start_year,
+        start_month=source_start_month,
+        end_year=source_end_year,
+        end_month=source_end_month,
+        year=source_year,
+        month=source_month,
+    )
+    if summary_label:
+        parts.append(summary_label)
+    if source_label:
+        parts.append(f"核算{source_label}")
     if platform_name:
         parts.append(platform_name)
     if shop_name:
@@ -502,8 +548,16 @@ async def export_summaries(
         extra_data={
             "year": summary_year,
             "month": summary_month,
+            "summary_start_year": summary_start_year,
+            "summary_start_month": summary_start_month,
+            "summary_end_year": summary_end_year,
+            "summary_end_month": summary_end_month,
             "source_year": source_year,
             "source_month": source_month,
+            "source_start_year": source_start_year,
+            "source_start_month": source_start_month,
+            "source_end_year": source_end_year,
+            "source_end_month": source_end_month,
             "platform": platform_name,
             "report_platform": report_platform_name,
             "shop_id": shop_id,

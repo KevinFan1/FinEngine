@@ -61,7 +61,7 @@
         </el-table-column>
         <el-table-column prop="display_name" label="姓名" width="120" show-overflow-tooltip />
         <el-table-column prop="phone" label="手机号" width="140" />
-        <el-table-column prop="org_name" label="所属组织" min-width="160" show-overflow-tooltip>
+        <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="所属组织" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.org_name || '-' }}
           </template>
@@ -158,7 +158,7 @@
               <span class="detail-label">邮箱</span>
               <strong>{{ selectedUser.email || '-' }}</strong>
             </div>
-            <div class="detail-item detail-item--wide">
+            <div v-if="userStore.isSuperAdmin" class="detail-item detail-item--wide">
               <span class="detail-label">所属组织</span>
               <strong>{{ selectedUser.org_name || '-' }}</strong>
             </div>
@@ -269,7 +269,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="所属组织" prop="org_id">
+        <el-form-item v-if="userStore.isSuperAdmin" label="所属组织" prop="org_id">
           <el-select
             v-model="userFormData.org_id"
             placeholder="请选择组织"
@@ -507,7 +507,9 @@ async function handleUserSubmit() {
         phone: userFormData.phone,
         email: userFormData.email,
         role: userFormData.role,
-        org_id: userFormData.org_id,
+      }
+      if (userStore.isSuperAdmin) {
+        updateData.org_id = userFormData.org_id
       }
       if (userFormData.password) {
         updateData.password = userFormData.password
@@ -522,7 +524,7 @@ async function handleUserSubmit() {
         display_name: userFormData.display_name,
         email: userFormData.email,
         role: userFormData.role,
-        org_id: userFormData.org_id,
+        org_id: userStore.isSuperAdmin ? userFormData.org_id : userStore.userInfo?.org_id || null,
       })
       ElMessage.success('创建成功')
     }
@@ -611,7 +613,9 @@ async function handleToggleStatus(row: User) {
 
 onMounted(() => {
   fetchData()
-  fetchOrgOptions()
+  if (userStore.isSuperAdmin) {
+    fetchOrgOptions()
+  }
 })
 </script>
 

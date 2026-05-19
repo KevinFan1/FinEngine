@@ -24,7 +24,6 @@ dependencies = [
     "xlrd==2.0.1",
     "loguru>=0.7.3",
     "slowapi>=0.1.9",
-    "sentry-sdk[fastapi]>=2.60.0",
     "prometheus-client>=0.25.0",
 ]
 

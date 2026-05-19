@@ -75,6 +75,30 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "汇总报表", icon: "DataAnalysis" },
             },
             {
+                path: "transaction-upload",
+                name: "TransactionUploadCenter",
+                component: () => import("@/views/transaction-placeholder/index.vue"),
+                meta: { title: "动账上传中心", icon: "Upload" },
+            },
+            {
+                path: "transaction-tasks",
+                name: "TransactionTasks",
+                component: () => import("@/views/transaction-placeholder/index.vue"),
+                meta: { title: "动账任务列表", icon: "List" },
+            },
+            {
+                path: "transaction-summaries",
+                name: "TransactionSummaries",
+                component: () => import("@/views/transaction-placeholder/index.vue"),
+                meta: { title: "动账汇总明细", icon: "Document" },
+            },
+            {
+                path: "transaction-summary-report",
+                name: "TransactionSummaryReport",
+                component: () => import("@/views/transaction-placeholder/index.vue"),
+                meta: { title: "动账汇总报表", icon: "DataAnalysis" },
+            },
+            {
                 path: "audit-logs",
                 name: "AuditLogs",
                 component: () => import("@/views/audit/index.vue"),

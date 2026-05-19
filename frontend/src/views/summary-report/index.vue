@@ -862,10 +862,6 @@ onMounted(async () => {
     font-weight: 500;
 }
 
-.summary-filter-form {
-    row-gap: 6px;
-}
-
 .active-filters {
     display: flex;
     align-items: center;

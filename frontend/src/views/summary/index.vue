@@ -17,22 +17,26 @@
             <el-form :model="searchForm" inline class="summary-filter-form">
                 <el-form-item label="业务年月">
                     <el-date-picker
-                        v-model="searchForm.summaryMonth"
-                        type="month"
-                        placeholder="选择业务年月"
+                        v-model="searchForm.summaryMonthRange"
+                        type="monthrange"
+                        start-placeholder="开始年月"
+                        end-placeholder="结束年月"
+                        range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 150px"
+                        style="width: 230px"
                     />
                 </el-form-item>
                 <el-form-item label="核算年月">
                     <el-date-picker
-                        v-model="searchForm.sourceMonth"
-                        type="month"
-                        placeholder="选择核算年月"
+                        v-model="searchForm.sourceMonthRange"
+                        type="monthrange"
+                        start-placeholder="开始年月"
+                        end-placeholder="结束年月"
+                        range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 150px"
+                        style="width: 230px"
                     />
                 </el-form-item>
                 <el-form-item label="来源平台">
@@ -494,8 +498,8 @@ const route = useRoute();
 
 interface FilterTag {
     key:
-        | "summaryMonth"
-        | "sourceMonth"
+        | "summaryMonthRange"
+        | "sourceMonthRange"
         | "platforms"
         | "reportPlatforms"
         | "shops"
@@ -512,8 +516,8 @@ interface SummaryTableInstance {
 
 // Search
 const searchForm = reactive({
-    summaryMonth: "",
-    sourceMonth: "",
+    summaryMonthRange: [] as string[],
+    sourceMonthRange: [] as string[],
     platforms: [] as string[],
     reportPlatforms: [] as string[],
     shops: [] as string[],
@@ -544,29 +548,38 @@ const pagination = reactive({
     total: 0,
 });
 
-const selectedSummaryYear = computed(() => {
-    if (!searchForm.summaryMonth) return undefined;
-    const [year] = searchForm.summaryMonth.split("-");
-    return Number(year) || undefined;
-});
+function parseMonthValue(value: string | undefined) {
+    if (!value) return { year: undefined, month: undefined };
+    const [year, month] = value.split("-");
+    return {
+        year: Number(year) || undefined,
+        month: Number(month) || undefined,
+    };
+}
 
-const selectedSummaryMonth = computed(() => {
-    if (!searchForm.summaryMonth) return undefined;
-    const [, month] = searchForm.summaryMonth.split("-");
-    return Number(month) || undefined;
-});
+function formatMonthRangeLabel(range: string[]) {
+    const [start, end] = range;
+    if (!start && !end) return "";
+    if (start && end && start !== end) return `${start} 至 ${end}`;
+    return start || end || "";
+}
 
-const selectedSourceYear = computed(() => {
-    if (!searchForm.sourceMonth) return undefined;
-    const [year] = searchForm.sourceMonth.split("-");
-    return Number(year) || undefined;
-});
-
-const selectedSourceMonth = computed(() => {
-    if (!searchForm.sourceMonth) return undefined;
-    const [, month] = searchForm.sourceMonth.split("-");
-    return Number(month) || undefined;
-});
+const selectedSummaryStart = computed(() =>
+    parseMonthValue(searchForm.summaryMonthRange[0]),
+);
+const selectedSummaryEnd = computed(() =>
+    parseMonthValue(
+        searchForm.summaryMonthRange[1] || searchForm.summaryMonthRange[0],
+    ),
+);
+const selectedSourceStart = computed(() =>
+    parseMonthValue(searchForm.sourceMonthRange[0]),
+);
+const selectedSourceEnd = computed(() =>
+    parseMonthValue(
+        searchForm.sourceMonthRange[1] || searchForm.sourceMonthRange[0],
+    ),
+);
 
 const filteredShopOptions = computed(() => {
     const selectedReportPlatforms = selectedReportPlatformSet.value;
@@ -604,18 +617,18 @@ const selectedCount = computed(() => selectedRowMap.value.size);
 const activeFilterTags = computed<FilterTag[]>(() => {
     const tags: FilterTag[] = [];
 
-    if (searchForm.summaryMonth) {
+    if (searchForm.summaryMonthRange.length) {
         tags.push({
-            key: "summaryMonth",
+            key: "summaryMonthRange",
             label: "业务年月",
-            value: searchForm.summaryMonth,
+            value: formatMonthRangeLabel(searchForm.summaryMonthRange),
         });
     }
-    if (searchForm.sourceMonth) {
+    if (searchForm.sourceMonthRange.length) {
         tags.push({
-            key: "sourceMonth",
+            key: "sourceMonthRange",
             label: "核算年月",
-            value: searchForm.sourceMonth,
+            value: formatMonthRangeLabel(searchForm.sourceMonthRange),
         });
     }
     searchForm.platforms.forEach((value) => {
@@ -693,10 +706,14 @@ async function fetchData() {
         const res = await getSummaryList({
             page: pagination.page,
             page_size: pagination.pageSize,
-            summary_year: selectedSummaryYear.value,
-            summary_month: selectedSummaryMonth.value,
-            source_year: selectedSourceYear.value,
-            source_month: selectedSourceMonth.value,
+            summary_start_year: selectedSummaryStart.value.year,
+            summary_start_month: selectedSummaryStart.value.month,
+            summary_end_year: selectedSummaryEnd.value.year,
+            summary_end_month: selectedSummaryEnd.value.month,
+            source_start_year: selectedSourceStart.value.year,
+            source_start_month: selectedSourceStart.value.month,
+            source_end_year: selectedSourceEnd.value.year,
+            source_end_month: selectedSourceEnd.value.month,
             platform_name: selectedSourcePlatformsParam.value,
             report_platform_name: selectedReportPlatformsParam.value,
             shop_name: selectedShopsParam.value,
@@ -770,8 +787,8 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.summaryMonth = "";
-    searchForm.sourceMonth = "";
+    searchForm.summaryMonthRange = [];
+    searchForm.sourceMonthRange = [];
     searchForm.platforms = [];
     searchForm.reportPlatforms = [];
     searchForm.shops = [];
@@ -814,10 +831,10 @@ function clearSelectedRows(clearTable = true) {
 }
 
 function removeFilterTag(tag: FilterTag) {
-    if (tag.key === "summaryMonth") {
-        searchForm.summaryMonth = "";
-    } else if (tag.key === "sourceMonth") {
-        searchForm.sourceMonth = "";
+    if (tag.key === "summaryMonthRange") {
+        searchForm.summaryMonthRange = [];
+    } else if (tag.key === "sourceMonthRange") {
+        searchForm.sourceMonthRange = [];
     } else if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter(
             (item) => getPlatformLabel(item) !== tag.value,
@@ -875,10 +892,14 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
     loadingRef.value = true;
     try {
         const blob = await exportSummaryExcel({
-            summary_year: selectedSummaryYear.value,
-            summary_month: selectedSummaryMonth.value,
-            source_year: selectedSourceYear.value,
-            source_month: selectedSourceMonth.value,
+            summary_start_year: selectedSummaryStart.value.year,
+            summary_start_month: selectedSummaryStart.value.month,
+            summary_end_year: selectedSummaryEnd.value.year,
+            summary_end_month: selectedSummaryEnd.value.month,
+            source_start_year: selectedSourceStart.value.year,
+            source_start_month: selectedSourceStart.value.month,
+            source_end_year: selectedSourceEnd.value.year,
+            source_end_month: selectedSourceEnd.value.month,
             platform_name: selectedSourcePlatformsParam.value,
             report_platform_name: selectedReportPlatformsParam.value,
             shop_name: selectedShopsParam.value,
@@ -901,7 +922,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        link.download = `汇总明细_${searchForm.summaryMonth || "全部业务年月"}_${searchForm.sourceMonth || "全部核算年月"}_${scopeLabel}.xlsx`;
+        link.download = `汇总明细_${formatMonthRangeLabel(searchForm.summaryMonthRange) || "全部业务年月"}_${formatMonthRangeLabel(searchForm.sourceMonthRange) || "全部核算年月"}_${scopeLabel}.xlsx`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -936,8 +957,9 @@ function splitQueryList(value: unknown): string[] {
 function applyRouteQuery() {
     const sourceMonth = queryString(route.query.sourceMonth);
     const summaryMonth = queryString(route.query.summaryMonth);
-    if (sourceMonth) searchForm.sourceMonth = sourceMonth;
-    if (summaryMonth) searchForm.summaryMonth = summaryMonth;
+    if (sourceMonth) searchForm.sourceMonthRange = [sourceMonth, sourceMonth];
+    if (summaryMonth)
+        searchForm.summaryMonthRange = [summaryMonth, summaryMonth];
     searchForm.platforms = splitQueryList(route.query.platforms);
     searchForm.reportPlatforms = splitQueryList(route.query.reportPlatforms);
     searchForm.shops = splitQueryList(route.query.shops);
@@ -984,10 +1006,6 @@ function applyRouteQuery() {
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 500;
-}
-
-.summary-filter-form {
-    row-gap: 6px;
 }
 
 .active-filters {

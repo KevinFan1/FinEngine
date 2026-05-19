@@ -13,7 +13,6 @@ from starlette.responses import JSONResponse
 
 from app.schemas.common import ApiResponse
 
-
 FIELD_LABELS = {
     "username": "用户名",
     "password": "密码",
@@ -205,6 +204,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(IntegrityError)
     async def integrity_error_exception_handler(request: Request, exc: IntegrityError) -> JSONResponse:
         logger.warning("api.integrity_error path={} message={}", request.url.path, exc)
+
+        print(exc)
+
         return api_json_response(code=status.HTTP_400_BAD_REQUEST, message="数据已存在或不符合唯一性要求，请检查后重试")
 
     @app.exception_handler(DataError)

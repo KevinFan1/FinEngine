@@ -12,7 +12,6 @@ cp .env.example .env
 # - ALIYUN_ACCESS_KEY_ID
 # - ALIYUN_ACCESS_KEY_SECRET
 # - ALIYUN_OSS_BUCKET
-# - SENTRY_DSN (可选)
 ```
 
 ### 2. 构建并启动服务

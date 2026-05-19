@@ -210,6 +210,30 @@ html.dark {
     }
   }
 
+  .sidebar-sub-menu-popper.el-popper,
+  .sidebar-sub-menu-popper.el-popper.is-light {
+    background-color: var(--sidebar-bg) !important;
+    border-color: var(--sidebar-border) !important;
+    box-shadow: var(--shadow-dropdown) !important;
+  }
+
+  .sidebar-sub-menu-popper .el-menu {
+    background-color: var(--sidebar-bg) !important;
+  }
+
+  .sidebar-sub-menu-popper .el-menu-item {
+    color: var(--sidebar-text) !important;
+
+    &:hover {
+      background-color: var(--sidebar-hover-bg) !important;
+    }
+
+    &.is-active {
+      color: var(--sidebar-active-text) !important;
+      background-color: var(--sidebar-active-bg) !important;
+    }
+  }
+
   .el-breadcrumb__inner {
     color: var(--text-secondary) !important;
   }

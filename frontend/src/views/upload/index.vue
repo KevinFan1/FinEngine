@@ -1988,7 +1988,7 @@ function exportFailedList() {
 
 .rule-board-main {
     display: grid;
-    align-content: center;
+    align-content: start;
     gap: 12px;
     min-width: 0;
     padding: 14px;

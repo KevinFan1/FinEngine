@@ -16,6 +16,13 @@ from app.services.shop_service import ShopService
 
 class UploadService:
     @staticmethod
+    def validate_batch_scope(*, batch: UploadBatch, user: User) -> None:
+        if user.role == "superadmin":
+            return
+        if batch.org_id != user.org_id:
+            raise ValueError("批次不存在")
+
+    @staticmethod
     async def create_batch(
         db: AsyncSession,
         *,
@@ -76,7 +83,9 @@ class UploadService:
         batch = result.scalar_one_or_none()
         if batch is None:
             return None
-        if user.role != "superadmin" and batch.org_id != user.org_id:
+        try:
+            UploadService.validate_batch_scope(batch=batch, user=user)
+        except ValueError:
             return None
         return batch
 
@@ -223,11 +232,22 @@ class UploadService:
         return batches, total
 
     @staticmethod
-    async def get_batch_detail(db: AsyncSession, batch_id: int) -> UploadBatch | None:
+    async def get_batch_detail(db: AsyncSession, batch_id: int, user: User | None = None) -> UploadBatch | None:
         result = await db.execute(select(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.is_deleted.is_(False)))
-        return result.scalar_one_or_none()
+        batch = result.scalar_one_or_none()
+        if batch is None:
+            return None
+        if user is not None:
+            try:
+                UploadService.validate_batch_scope(batch=batch, user=user)
+            except ValueError:
+                return None
+        return batch
 
     @staticmethod
-    async def get_batch_files(db: AsyncSession, batch_id: int) -> list[UploadFile]:
-        result = await db.execute(select(UploadFile).where(UploadFile.batch_id == batch_id, UploadFile.is_deleted.is_(False)).order_by(UploadFile.id))
+    async def get_batch_files(db: AsyncSession, batch_id: int, user: User | None = None) -> list[UploadFile]:
+        stmt = select(UploadFile).where(UploadFile.batch_id == batch_id, UploadFile.is_deleted.is_(False)).order_by(UploadFile.id)
+        if user is not None and user.role != "superadmin":
+            stmt = stmt.where(UploadFile.org_id == user.org_id)
+        result = await db.execute(stmt)
         return list(result.scalars().all())

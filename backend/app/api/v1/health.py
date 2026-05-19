@@ -37,7 +37,7 @@ async def detailed_health_check():
 
     # Check Redis connection
     try:
-        redis_client = captcha_service.redis
+        redis_client = captcha_service._redis_client()
         await redis_client.ping()
         checks["redis"] = "ok"
     except Exception as e:
@@ -62,7 +62,7 @@ async def readiness_check():
             await session.execute(text("SELECT 1"))
 
         # Check Redis
-        redis_client = captcha_service.redis
+        redis_client = captcha_service._redis_client()
         await redis_client.ping()
 
         return ApiResponse(data={"status": "ready"})

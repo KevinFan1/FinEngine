@@ -20,6 +20,7 @@
             <el-scrollbar class="menu-scrollbar">
                 <el-menu
                     :default-active="activeMenu"
+                    :default-openeds="openedMenuPaths"
                     :collapse="appStore.sidebarCollapsed"
                     :collapse-transition="false"
                     background-color="var(--sidebar-bg)"
@@ -27,16 +28,39 @@
                     active-text-color="var(--sidebar-active-text)"
                     router
                 >
-                    <el-menu-item
+                    <template
                         v-for="item in filteredMenuItems"
                         :key="item.path"
-                        :index="item.path"
                     >
-                        <el-icon class="menu-icon"
-                            ><component :is="item.icon"
-                        /></el-icon>
-                        <template #title>{{ item.title }}</template>
-                    </el-menu-item>
+                        <el-sub-menu
+                            v-if="item.children?.length"
+                            :index="item.path"
+                            popper-class="sidebar-sub-menu-popper"
+                        >
+                            <template #title>
+                                <el-icon class="menu-icon"
+                                    ><component :is="item.icon"
+                                /></el-icon>
+                                <span>{{ item.title }}</span>
+                            </template>
+                            <el-menu-item
+                                v-for="child in item.children"
+                                :key="child.path"
+                                :index="child.path"
+                            >
+                                <el-icon class="menu-icon"
+                                    ><component :is="child.icon"
+                                /></el-icon>
+                                <template #title>{{ child.title }}</template>
+                            </el-menu-item>
+                        </el-sub-menu>
+                        <el-menu-item v-else :index="item.path">
+                            <el-icon class="menu-icon"
+                                ><component :is="item.icon"
+                            /></el-icon>
+                            <template #title>{{ item.title }}</template>
+                        </el-menu-item>
+                    </template>
                 </el-menu>
             </el-scrollbar>
 
@@ -157,7 +181,7 @@
             </header>
 
             <!-- Tab Bar -->
-            <div class="tab-bar">
+            <div class="tab-bar" @click="hideTabContextMenu">
                 <div class="tab-scroll">
                     <div
                         v-for="tab in appStore.visitedTabs"
@@ -165,6 +189,7 @@
                         class="tab-item"
                         :class="{ active: tab.path === route.path }"
                         @click="openTab(tab)"
+                        @contextmenu.prevent="openTabContextMenu($event, tab)"
                     >
                         <span>{{ tab.title }}</span>
                         <el-icon
@@ -188,8 +213,41 @@
                 </div>
             </div>
 
+            <div
+                v-if="tabContextMenu.visible"
+                class="tab-context-menu"
+                :style="{
+                    left: `${tabContextMenu.x}px`,
+                    top: `${tabContextMenu.y}px`,
+                }"
+                @click.stop
+            >
+                <button
+                    type="button"
+                    class="tab-context-menu__item"
+                    :disabled="!tabContextMenu.tab?.closable"
+                    @click="closeContextTab"
+                >
+                    关闭当前
+                </button>
+                <button
+                    type="button"
+                    class="tab-context-menu__item"
+                    @click="closeOtherContextTabs"
+                >
+                    关闭其他
+                </button>
+                <button
+                    type="button"
+                    class="tab-context-menu__item"
+                    @click="closeAllContextTabs"
+                >
+                    关闭全部
+                </button>
+            </div>
+
             <!-- Content -->
-            <main class="content">
+            <main class="content" @click="hideTabContextMenu">
                 <router-view v-slot="{ Component }">
                     <keep-alive :include="cachedRouteNames">
                         <component :is="Component" />
@@ -285,11 +343,13 @@ import {
     Document,
     House,
     List,
+    Money,
     OfficeBuilding,
     QuestionFilled,
     Shop,
     Upload,
     User,
+    Wallet,
 } from "@element-plus/icons-vue";
 import { useAppStore, type Tab } from "@/stores/app";
 import { useUserStore } from "@/stores/user";
@@ -304,11 +364,24 @@ const userStore = useUserStore();
 const themeStore = useThemeStore();
 const guideDrawerVisible = ref(false);
 
+const tabContextMenu = ref<{
+    visible: boolean;
+    x: number;
+    y: number;
+    tab: Tab | null;
+}>({
+    visible: false,
+    x: 0,
+    y: 0,
+    tab: null,
+});
+
 interface MenuItem {
     path: string;
     title: string;
     icon: Component;
     roles?: string[];
+    children?: MenuItem[];
 }
 
 const menuItems: MenuItem[] = [
@@ -326,10 +399,36 @@ const menuItems: MenuItem[] = [
         roles: ["superadmin", "org_admin"],
     },
     { path: "/shops", title: "店铺管理", icon: Shop },
-    { path: "/upload", title: "上传中心", icon: Upload },
-    { path: "/tasks", title: "任务列表", icon: List },
-    { path: "/summaries", title: "汇总明细", icon: Document },
-    { path: "/summary-report", title: "汇总报表", icon: DataAnalysis },
+    {
+        path: "/order-accounting",
+        title: "订单核算",
+        icon: Money,
+        children: [
+            { path: "/upload", title: "上传中心", icon: Upload },
+            { path: "/tasks", title: "任务列表", icon: List },
+            { path: "/summaries", title: "汇总明细", icon: Document },
+            { path: "/summary-report", title: "汇总报表", icon: DataAnalysis },
+        ],
+    },
+    {
+        path: "/transaction-accounting",
+        title: "动账核算",
+        icon: Wallet,
+        children: [
+            { path: "/transaction-upload", title: "上传中心", icon: Upload },
+            { path: "/transaction-tasks", title: "任务列表", icon: List },
+            {
+                path: "/transaction-summaries",
+                title: "汇总明细",
+                icon: Document,
+            },
+            {
+                path: "/transaction-summary-report",
+                title: "汇总报表",
+                icon: DataAnalysis,
+            },
+        ],
+    },
     {
         path: "/audit-logs",
         title: "操作日志",
@@ -340,13 +439,25 @@ const menuItems: MenuItem[] = [
 
 const filteredMenuItems = computed(() => {
     const userRole = userStore.userRole;
-    return menuItems.filter((item) => {
-        if (!item.roles) return true;
-        return item.roles.includes(userRole);
+    return menuItems.flatMap((item) => {
+        if (item.roles && !item.roles.includes(userRole)) return [];
+        if (!item.children?.length) return [item];
+        const children = item.children.filter((child) => {
+            if (!child.roles) return true;
+            return child.roles.includes(userRole);
+        });
+        return children.length ? [{ ...item, children }] : [];
     });
 });
 
 const activeMenu = computed(() => route.path);
+
+const openedMenuPaths = computed(() => {
+    const matched = menuItems.find((item) =>
+        item.children?.some((child) => child.path === route.path),
+    );
+    return matched ? [matched.path] : [];
+});
 
 const currentRouteTitle = computed(() => (route.meta.title as string) || "");
 
@@ -490,6 +601,7 @@ watch(
 );
 
 function openTab(tab: Tab) {
+    hideTabContextMenu();
     if (tab.path === route.path) return;
     router.push(tab.fullPath || tab.path);
 }
@@ -506,6 +618,46 @@ function closeTab(tab: Tab) {
             router.push("/dashboard");
         }
     }
+}
+
+function openTabContextMenu(event: MouseEvent, tab: Tab) {
+    const menuWidth = 128;
+    const menuHeight = 118;
+    tabContextMenu.value = {
+        visible: true,
+        x: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+        y: Math.min(event.clientY, window.innerHeight - menuHeight - 8),
+        tab,
+    };
+}
+
+function hideTabContextMenu() {
+    tabContextMenu.value.visible = false;
+}
+
+function closeContextTab() {
+    const tab = tabContextMenu.value.tab;
+    if (!tab?.closable) return;
+    closeTab(tab);
+    hideTabContextMenu();
+}
+
+function closeOtherContextTabs() {
+    const tab = tabContextMenu.value.tab;
+    if (!tab) return;
+    appStore.closeOtherTabs(tab.path);
+    if (route.path !== tab.path) {
+        router.push(tab.fullPath || tab.path);
+    }
+    hideTabContextMenu();
+}
+
+function closeAllContextTabs() {
+    appStore.closeAllTabs();
+    if (route.path !== "/dashboard") {
+        router.push("/dashboard");
+    }
+    hideTabContextMenu();
 }
 
 function handleTagCacheToggle(value: string | number | boolean) {
@@ -611,6 +763,7 @@ function handleCommand(command: string) {
     .el-menu {
         border-right: none;
 
+        :deep(.el-sub-menu__title),
         :deep(.el-menu-item) {
             height: 40px;
             line-height: 40px;
@@ -625,6 +778,38 @@ function handleCommand(command: string) {
                 background: var(--sidebar-hover-bg) !important;
             }
 
+            .el-icon {
+                font-size: 18px;
+            }
+
+            .menu-icon {
+                color: inherit;
+                flex-shrink: 0;
+            }
+        }
+
+        :deep(.el-sub-menu) {
+            &.is-active > .el-sub-menu__title {
+                color: var(--sidebar-active-text) !important;
+                background: rgba(255, 255, 255, 0.08) !important;
+                font-weight: 600;
+            }
+
+            .el-menu {
+                background: transparent !important;
+            }
+        }
+
+        :deep(.el-sub-menu .el-menu-item) {
+            height: 36px;
+            line-height: 36px;
+            margin: 2px 10px 2px 22px;
+            padding-left: 18px !important;
+            font-size: 13px;
+            border-radius: 9px;
+        }
+
+        :deep(.el-menu-item) {
             &.is-active {
                 background: var(--sidebar-active-bg) !important;
                 color: var(--sidebar-active-text) !important;
@@ -644,25 +829,22 @@ function handleCommand(command: string) {
                     border-radius: 0 2px 2px 0;
                 }
             }
-
-            .el-icon {
-                font-size: 18px;
-            }
-
-            .menu-icon {
-                color: inherit;
-                flex-shrink: 0;
-            }
         }
 
         &.el-menu--collapse {
+            :deep(.el-sub-menu__title),
             :deep(.el-menu-item) {
                 margin: 2px 8px;
                 padding: 0 !important;
+                justify-content: center;
 
                 &.is-active::before {
                     display: none;
                 }
+            }
+
+            :deep(.el-sub-menu__title .el-sub-menu__icon-arrow) {
+                display: none;
             }
         }
     }
@@ -936,6 +1118,46 @@ function handleCommand(command: string) {
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 600;
+}
+
+.tab-context-menu {
+    position: fixed;
+    z-index: 2200;
+    min-width: 128px;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-dropdown);
+}
+
+.tab-context-menu__item {
+    width: 100%;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    text-align: left;
+    transition:
+        background-color 0.14s,
+        color 0.14s;
+
+    &:hover:not(:disabled) {
+        color: var(--primary);
+        background: var(--primary-lighter);
+    }
+
+    &:disabled {
+        color: var(--text-disabled);
+        cursor: not-allowed;
+    }
 }
 
 // ==============================

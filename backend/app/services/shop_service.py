@@ -1,4 +1,5 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -17,6 +18,13 @@ class ShopService:
     @staticmethod
     def active_filter() -> ColumnElement[bool]:
         return Shop.is_deleted.is_(False)
+
+    @staticmethod
+    def validate_shop_scope(*, shop: Shop, operator: User) -> None:
+        if operator.role == "superadmin":
+            return
+        if shop.org_id != operator.org_id:
+            raise ValueError("店铺不存在")
 
     @staticmethod
     async def list_shops(
@@ -105,6 +113,7 @@ class ShopService:
         shop = await ShopService.get_shop(db, shop_id)
         if not shop:
             return None
+        ShopService.validate_shop_scope(shop=shop, operator=operator)
         old = {
             "platform_name": shop.platform_name,
             "shop_name": shop.shop_name,
@@ -167,6 +176,7 @@ class ShopService:
         shop = await ShopService.get_shop(db, shop_id)
         if not shop:
             return False
+        ShopService.validate_shop_scope(shop=shop, operator=operator)
         from datetime import datetime, timezone
 
         shop.is_deleted = True
@@ -193,20 +203,44 @@ class ShopService:
     @staticmethod
     async def get_or_create_shop(db: AsyncSession, *, org_id: int, platform_name: str, shop_name: str) -> Shop:
         """Get existing shop or create new one. Used during upload callback."""
-        stmt = select(Shop).where(Shop.org_id == org_id, Shop.platform_name == platform_name, Shop.shop_name == shop_name, ShopService.active_filter())
-        result = await db.execute(stmt)
-        shop = result.scalar_one_or_none()
-        if shop is None:
-            shop = Shop(
+        shop_color = assign_default_shop_color(
+            org_id=org_id,
+            platform_name=platform_name,
+            shop_name=shop_name,
+        )
+        stmt = (
+            insert(Shop)
+            .values(
                 org_id=org_id,
                 platform_name=platform_name,
                 shop_name=shop_name,
-                shop_color=assign_default_shop_color(
-                    org_id=org_id,
-                    platform_name=platform_name,
-                    shop_name=shop_name,
-                ),
+                shop_color=shop_color,
+                is_deleted=False,
+                deleted_at=None,
             )
-            db.add(shop)
+            .on_conflict_do_nothing(
+                index_elements=[Shop.org_id, Shop.platform_name, Shop.shop_name],
+                index_where=text("is_deleted = false"),
+            )
+            .returning(Shop)
+        )
+        result = await db.execute(stmt)
+        shop = result.scalar_one_or_none()
+        if shop is not None:
+            return shop
+
+        result = await db.execute(
+            select(Shop).where(
+                Shop.org_id == org_id,
+                Shop.platform_name == platform_name,
+                Shop.shop_name == shop_name,
+                ShopService.active_filter(),
+            )
+        )
+        shop = result.scalar_one_or_none()
+        if shop is None:
+            raise ValueError("店铺创建失败，请稍后重试")
+        if not shop.shop_color:
+            shop.shop_color = shop_color
             await db.flush()
         return shop

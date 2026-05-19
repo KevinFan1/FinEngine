@@ -93,11 +93,11 @@ async def get_upload_batch_detail(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get upload batch detail with file list."""
-    batch = await UploadService.get_batch_detail(db, batch_id)
+    batch = await UploadService.get_batch_detail(db, batch_id, user=current_user)
     if batch is None:
         return ApiResponse(code=404, message="批次不存在")
 
-    files = await UploadService.get_batch_files(db, batch_id)
+    files = await UploadService.get_batch_files(db, batch_id, user=current_user)
 
     batch_data = UploadBatchDetail.model_validate(batch)
     batch_data.files = [UploadFileOut.model_validate(f) for f in files]
