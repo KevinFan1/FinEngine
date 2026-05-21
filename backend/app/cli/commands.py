@@ -34,14 +34,22 @@ def worker() -> None:
 
 
 def recover_queued_tasks() -> None:
-    parser = argparse.ArgumentParser(description="Re-dispatch queued processing tasks to Celery.")
+    parser = argparse.ArgumentParser(description="Re-dispatch queued tasks to Celery.")
     parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
 
     from app.tasks.celery_app import recover_queued_processing_tasks
+    from app.tasks.bic_accounting import recover_queued_bic_tasks
+    from app.tasks.transaction_accounting import recover_queued_transaction_tasks
 
-    count = recover_queued_processing_tasks(limit=args.limit)
-    print(f"已重新投递排队任务 {count} 个")
+    processing_count = recover_queued_processing_tasks(limit=args.limit)
+    bic_count = recover_queued_bic_tasks(limit=args.limit)
+    transaction_count = recover_queued_transaction_tasks(limit=args.limit)
+    total = processing_count + bic_count + transaction_count
+    print(
+        "已重新投递排队任务 "
+        f"{total} 个（通用 {processing_count}，BIC {bic_count}，动账 {transaction_count}）"
+    )
 
 
 def migrate_generate() -> None:

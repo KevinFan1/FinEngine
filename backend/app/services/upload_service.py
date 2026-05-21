@@ -3,6 +3,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import register_after_commit
 from app.models.organization import Organization
 from app.models.task import ProcessingTask
 from app.models.upload import UploadBatch, UploadFile
@@ -187,17 +188,14 @@ class UploadService:
 
         processor_code = platform_profile.processor_code if platform_profile else data.detected_platform
         if data.detected_platform and processor_code in PLATFORM_PROCESSORS:
-            from app.tasks.celery_app import process_file_platform
-
-            async_result = process_file_platform.delay(
-                file_id=upload_file.id,
-                oss_key=data.oss_key,
-                org_id=batch.org_id,
+            UploadService.dispatch_processing_task_after_commit(
+                db,
+                task=task,
+                upload_file=upload_file,
                 platform_code=data.detected_platform,
                 shop_id=shop.id if shop else None,
                 shop_name=data.parsed_shop or "",
             )
-            task.celery_task_id = async_result.id
         else:
             # No processor found — mark task as failed
             task.status = "failed"
@@ -216,6 +214,38 @@ class UploadService:
         await db.flush()
         await db.refresh(upload_file)
         return upload_file
+
+    @staticmethod
+    def dispatch_processing_task_after_commit(
+        db: AsyncSession,
+        *,
+        task: ProcessingTask,
+        upload_file: UploadFile,
+        platform_code: str,
+        shop_id: int | None,
+        shop_name: str,
+    ) -> None:
+        async def dispatch() -> None:
+            try:
+                from app.tasks.celery_app import process_file_platform
+
+                async_result = process_file_platform.delay(
+                    file_id=upload_file.id,
+                    oss_key=upload_file.oss_key,
+                    org_id=task.org_id,
+                    platform_code=platform_code,
+                    shop_id=shop_id,
+                    shop_name=shop_name,
+                )
+                task.celery_task_id = async_result.id
+            except Exception as exc:
+                task.status = "failed"
+                task.error_message = f"文件处理任务投递失败: {exc}"
+                upload_file.status = "failed"
+                upload_file.error_message = task.error_message
+            await db.flush()
+
+        register_after_commit(db, dispatch)
 
     @staticmethod
     async def dispatch_independent_tasks(

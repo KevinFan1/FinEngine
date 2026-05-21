@@ -5,9 +5,19 @@ from app.services.transaction_accounting_service import TransactionAccountingSer
 from app.tasks.celery_app import _run_async_in_worker, celery_app
 
 
-@celery_app.task(name="app.tasks.transaction_accounting.run_transaction_accounting_task")
-def run_transaction_accounting_task(task_id: int) -> dict:
-    return _run_async_in_worker(_run_transaction_accounting_task(task_id))
+@celery_app.task(
+    bind=True,
+    name="app.tasks.transaction_accounting.run_transaction_accounting_task",
+    max_retries=5,
+)
+def run_transaction_accounting_task(self, task_id: int) -> dict:
+    try:
+        return _run_async_in_worker(_run_transaction_accounting_task(task_id))
+    except ValueError as exc:
+        if str(exc) == "动账核算任务不存在":
+            countdown = min(2 ** self.request.retries, 30)
+            raise self.retry(exc=exc, countdown=countdown)
+        raise
 
 
 async def _run_transaction_accounting_task(task_id: int) -> dict:
@@ -22,3 +32,32 @@ async def _run_transaction_accounting_task(task_id: int) -> dict:
             "unmatched_rows": task.unmatched_rows,
             "failed_rows": task.failed_rows,
         }
+
+
+def recover_queued_transaction_tasks(limit: int = 100) -> int:
+    return _run_async_in_worker(_recover_queued_transaction_tasks_async(limit=limit))
+
+
+async def _recover_queued_transaction_tasks_async(limit: int = 100) -> int:
+    from sqlalchemy import select
+
+    from app.models.transaction_accounting import TransactionTask
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(TransactionTask)
+            .where(
+                TransactionTask.status == "queued",
+                TransactionTask.is_deleted.is_(False),
+            )
+            .order_by(TransactionTask.id.asc())
+            .limit(limit)
+        )
+        tasks = result.scalars().all()
+        dispatched = 0
+        for task in tasks:
+            async_result = run_transaction_accounting_task.delay(task.id)
+            task.celery_task_id = async_result.id
+            dispatched += 1
+        await db.commit()
+        return dispatched

@@ -14,6 +14,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.database import register_after_commit
 from app.models.cash_flow import CashFlowItem
 from app.models.transaction_accounting import (
     TransactionCategory,
@@ -37,6 +38,7 @@ from app.schemas.transaction_accounting import (
 )
 from app.services.audit_service import AuditService
 from app.services.oss_service import oss_service
+from app.services.shop_service import ShopService
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
@@ -85,6 +87,8 @@ TRANSACTION_PLATFORM_LABELS = {
     "快手": "快手",
 }
 
+TRANSACTION_RESULT_TASK_STATUSES = ("success", "partial_success")
+
 
 @dataclass(frozen=True)
 class PageResult:
@@ -98,6 +102,7 @@ class TransactionSummaryReportRow:
     task_id: int
     file_id: int
     org_id: int
+    shop_id: int | None
     subject_id: int
     category_id: int
     subject_name: str
@@ -174,11 +179,24 @@ class TransactionAccountingService:
         if source_platform != "douyin":
             raise ValueError("动账资金核算 v1 仅支持抖音动账")
 
+        shop_id = upload_file.shop_id
+        if shop_id is None and upload_file.parsed_shop:
+            shop = await ShopService.get_or_create_shop(
+                db,
+                org_id=upload_file.org_id,
+                platform_name=source_platform,
+                shop_name=upload_file.parsed_shop,
+            )
+            shop_id = shop.id
+
         existing_stmt = select(TransactionUploadFile).where(
             TransactionUploadFile.source_upload_file_id == upload_file.id,
             TransactionUploadFile.is_deleted.is_(False),
         )
         existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+        derived_upload_file = existing
+        if derived_upload_file is not None and shop_id is not None and derived_upload_file.shop_id is None:
+            derived_upload_file.shop_id = shop_id
         if existing is not None:
             task_stmt = (
                 select(TransactionTask)
@@ -192,22 +210,44 @@ class TransactionAccountingService:
             if current_task is not None:
                 return current_task
 
-        derived_upload_file = TransactionUploadFile(
-            org_id=upload_file.org_id,
-            user_id=user.id,
-            source_upload_file_id=upload_file.id,
-            original_name=upload_file.original_name,
-            oss_key=upload_file.oss_key,
-            file_size=upload_file.file_size,
-            file_hash=upload_file.file_hash,
-            platform_code=source_platform,
-            shop_name=upload_file.parsed_shop,
-            accounting_year=upload_file.parsed_year,
-            accounting_month=upload_file.parsed_month,
-            status="uploaded",
-        )
-        db.add(derived_upload_file)
-        await db.flush()
+        if shop_id is not None and upload_file.parsed_year is not None and upload_file.parsed_month is not None:
+            existing_business_file = await TransactionAccountingService._get_existing_business_upload_file(
+                db,
+                org_id=upload_file.org_id,
+                platform_code=source_platform,
+                shop_id=shop_id,
+                accounting_year=upload_file.parsed_year,
+                accounting_month=upload_file.parsed_month,
+            )
+            if existing_business_file is not None:
+                if shop_id is not None and existing_business_file.shop_id is None:
+                    existing_business_file.shop_id = shop_id
+                current_task = await TransactionAccountingService._get_latest_task_for_upload_file(
+                    db,
+                    file_id=existing_business_file.id,
+                )
+                if current_task is not None:
+                    return current_task
+                derived_upload_file = existing_business_file
+
+        if derived_upload_file is None:
+            derived_upload_file = TransactionUploadFile(
+                org_id=upload_file.org_id,
+                user_id=user.id,
+                shop_id=shop_id,
+                source_upload_file_id=upload_file.id,
+                original_name=upload_file.original_name,
+                oss_key=upload_file.oss_key,
+                file_size=upload_file.file_size,
+                file_hash=upload_file.file_hash,
+                platform_code=source_platform,
+                shop_name=upload_file.parsed_shop,
+                accounting_year=upload_file.parsed_year,
+                accounting_month=upload_file.parsed_month,
+                status="uploaded",
+            )
+            db.add(derived_upload_file)
+            await db.flush()
 
         task = TransactionTask(
             file_id=derived_upload_file.id,
@@ -240,21 +280,39 @@ class TransactionAccountingService:
             },
         )
 
-        try:
-            from app.tasks.transaction_accounting import run_transaction_accounting_task
-
-            async_result = run_transaction_accounting_task.delay(task.id)
-            task.celery_task_id = async_result.id
-        except Exception as exc:
-            task.status = "failed"
-            task.progress = 100
-            task.error_message = f"资金任务投递失败: {exc}"
-            task.finished_at = datetime.now(timezone.utc)
-            derived_upload_file.status = "failed"
-            derived_upload_file.error_message = task.error_message
+        TransactionAccountingService.dispatch_task_after_commit(
+            db,
+            task=task,
+            upload_file=derived_upload_file,
+        )
         await db.flush()
         await db.refresh(task)
         return task
+
+    @staticmethod
+    def dispatch_task_after_commit(
+        db: AsyncSession,
+        *,
+        task: TransactionTask,
+        upload_file: TransactionUploadFile | None,
+    ) -> None:
+        async def dispatch() -> None:
+            try:
+                from app.tasks.transaction_accounting import run_transaction_accounting_task
+
+                async_result = run_transaction_accounting_task.delay(task.id)
+                task.celery_task_id = async_result.id
+            except Exception as exc:
+                task.status = "failed"
+                task.progress = 100
+                task.error_message = f"资金任务投递失败: {exc}"
+                task.finished_at = datetime.now(timezone.utc)
+                if upload_file is not None:
+                    upload_file.status = "failed"
+                    upload_file.error_message = task.error_message
+            await db.flush()
+
+        register_after_commit(db, dispatch)
 
     @staticmethod
     async def list_subjects(db: AsyncSession, *, user: User) -> list[TransactionSubject]:
@@ -405,13 +463,30 @@ class TransactionAccountingService:
         platform_code = data.platform_code or "douyin"
         if platform_code != "douyin":
             raise ValueError("动账核算 v1 仅支持抖音动账")
+        shop = await ShopService.get_or_create_shop(
+            db,
+            org_id=scoped_org_id,
+            platform_name=platform_code,
+            shop_name=data.shop_name or parsed["shop"],
+        )
+        existing_business_file = await TransactionAccountingService._get_existing_business_upload_file(
+            db,
+            org_id=scoped_org_id,
+            platform_code=platform_code,
+            shop_id=shop.id,
+            accounting_year=data.accounting_year or parsed["year"],
+            accounting_month=data.accounting_month or parsed["month"],
+        )
+        if existing_business_file is not None:
+            raise ValueError("该店铺该月份的动账任务已存在，请勿重复上传")
         upload_file = TransactionUploadFile(
             org_id=scoped_org_id,
             user_id=user.id,
+            shop_id=shop.id,
             original_name=data.original_name,
             file_size=data.file_size,
             platform_code=platform_code,
-            shop_name=data.shop_name or parsed["shop"],
+            shop_name=shop.shop_name,
             accounting_year=data.accounting_year or parsed["year"],
             accounting_month=data.accounting_month or parsed["month"],
             status="initialized",
@@ -452,6 +527,9 @@ class TransactionAccountingService:
         if upload_file is None or upload_file.is_deleted:
             raise ValueError("上传文件不存在")
         TransactionAccountingService.validate_org_scope(org_id=upload_file.org_id, user=user)
+        existing_task = await TransactionAccountingService._get_latest_task_for_upload_file(db, file_id=upload_file.id)
+        if existing_task is not None:
+            return existing_task
         upload_file.oss_key = data.oss_key
         upload_file.file_size = data.file_size
         upload_file.file_hash = data.file_hash
@@ -484,16 +562,11 @@ class TransactionAccountingService:
             extra_data={"task_id": task.id, "file_size": data.file_size},
         )
 
-        try:
-            from app.tasks.transaction_accounting import run_transaction_accounting_task
-
-            async_result = run_transaction_accounting_task.delay(task.id)
-            task.celery_task_id = async_result.id
-        except Exception as exc:
-            task.status = "failed"
-            task.progress = 100
-            task.error_message = f"资金任务投递失败: {exc}"
-            task.finished_at = datetime.now(timezone.utc)
+        TransactionAccountingService.dispatch_task_after_commit(
+            db,
+            task=task,
+            upload_file=upload_file,
+        )
         await db.flush()
         await db.refresh(task)
         return task
@@ -532,10 +605,12 @@ class TransactionAccountingService:
             user_agent=user_agent,
         )
 
-        from app.tasks.transaction_accounting import run_transaction_accounting_task
-
-        async_result = run_transaction_accounting_task.delay(task.id)
-        task.celery_task_id = async_result.id
+        upload_file = await db.get(TransactionUploadFile, task.file_id)
+        TransactionAccountingService.dispatch_task_after_commit(
+            db,
+            task=task,
+            upload_file=upload_file,
+        )
         await db.flush()
         await db.refresh(task)
         return task
@@ -549,6 +624,7 @@ class TransactionAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         accounting_year: int | None = None,
         accounting_month: int | None = None,
         accounting_start_year: int | None = None,
@@ -571,6 +647,8 @@ class TransactionAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionUploadFile.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(TransactionUploadFile.shop_id == shop_id)
         if accounting_year is not None:
             filters.append(TransactionUploadFile.accounting_year == accounting_year)
         if accounting_month is not None:
@@ -615,6 +693,7 @@ class TransactionAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -649,6 +728,8 @@ class TransactionAccountingService:
             filters.append(TransactionDetail.id.in_(ids))
         if task_id is not None:
             filters.append(TransactionDetail.task_id == task_id)
+        else:
+            filters.append(TransactionDetail.task_id.in_(TransactionAccountingService._latest_result_task_ids_select()))
         if status:
             filters.append(TransactionDetail.status == status)
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
@@ -657,6 +738,8 @@ class TransactionAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionDetail.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(TransactionDetail.shop_id == shop_id)
         subject_ids = TransactionAccountingService._split_int_filter_values(subject_id)
         if subject_ids:
             filters.append(TransactionDetail.subject_id.in_(subject_ids))
@@ -725,6 +808,7 @@ class TransactionAccountingService:
                 TransactionDetail.accounting_year.desc().nullslast(),
                 TransactionDetail.accounting_month.desc().nullslast(),
                 TransactionDetail.platform_code,
+                TransactionDetail.shop_id,
                 TransactionDetail.shop_name,
                 TransactionSubject.name,
                 TransactionCategory.name,
@@ -762,6 +846,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -790,12 +875,16 @@ class TransactionAccountingService:
             filters.append(TransactionSummaryRow.org_id == scoped_org_id)
         if task_id is not None:
             filters.append(TransactionSummaryRow.task_id == task_id)
+        else:
+            filters.append(TransactionSummaryRow.task_id.in_(TransactionAccountingService._latest_result_task_ids_select()))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(TransactionSummaryRow.platform_code.in_(platform_codes))
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionSummaryRow.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(TransactionSummaryRow.shop_id == shop_id)
         subject_ids = TransactionAccountingService._split_int_filter_values(subject_id)
         if subject_ids:
             filters.append(TransactionSummaryRow.subject_id.in_(subject_ids))
@@ -844,6 +933,7 @@ class TransactionAccountingService:
         grouped_fields = [
             TransactionSummaryRow.org_id,
             TransactionSummaryRow.platform_code,
+            TransactionSummaryRow.shop_id,
             TransactionSummaryRow.shop_name,
             TransactionUploadFile.accounting_year,
             TransactionUploadFile.accounting_month,
@@ -860,6 +950,7 @@ class TransactionAccountingService:
                 func.min(TransactionSummaryRow.task_id).label("task_id"),
                 func.min(TransactionSummaryRow.file_id).label("file_id"),
                 TransactionSummaryRow.org_id.label("org_id"),
+                TransactionSummaryRow.shop_id.label("shop_id"),
                 TransactionSummaryRow.subject_id.label("subject_id"),
                 func.min(TransactionSummaryRow.category_id).label("category_id"),
                 TransactionSummaryRow.subject_name.label("subject_name"),
@@ -885,6 +976,7 @@ class TransactionAccountingService:
                 TransactionSummaryRow.accounting_year.desc().nullslast(),
                 TransactionSummaryRow.accounting_month.desc().nullslast(),
                 TransactionSummaryRow.platform_code,
+                TransactionSummaryRow.shop_id,
                 TransactionSummaryRow.shop_name,
                 cash_flow_groups.c.cash_flow_group_name,
                 TransactionSummaryRow.subject_name,
@@ -914,6 +1006,7 @@ class TransactionAccountingService:
                 task_id=row.task_id,
                 file_id=row.file_id,
                 org_id=row.org_id,
+                shop_id=row.shop_id,
                 subject_id=row.subject_id,
                 category_id=row.category_id,
                 subject_name=row.subject_name,
@@ -944,6 +1037,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -964,6 +1058,7 @@ class TransactionAccountingService:
             task_id=task_id,
             platform_code=platform_code,
             shop_name=shop_name,
+            shop_id=shop_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -992,6 +1087,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1011,6 +1107,7 @@ class TransactionAccountingService:
             task_id=task_id,
             platform_code=platform_code,
             shop_name=shop_name,
+            shop_id=shop_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1034,6 +1131,7 @@ class TransactionAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1062,6 +1160,7 @@ class TransactionAccountingService:
             status=status,
             platform_code=platform_code,
             shop_name=shop_name,
+            shop_id=shop_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1093,6 +1192,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1120,6 +1220,7 @@ class TransactionAccountingService:
             task_id=task_id,
             platform_code=platform_code,
             shop_name=shop_name,
+            shop_id=shop_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1181,6 +1282,7 @@ class TransactionAccountingService:
                     direction_field=direction_field,
                     remark_field=remark_field,
                 )
+
                 for evaluation in evaluations:
                     detail_evaluation = TransactionAccountingService._period_failed_result(evaluation=evaluation, message=period_error) if period_error else evaluation
                     counts[detail_evaluation.status] += 1
@@ -1387,6 +1489,62 @@ class TransactionAccountingService:
         return values
 
     @staticmethod
+    async def _get_latest_task_for_upload_file(db: AsyncSession, *, file_id: int) -> TransactionTask | None:
+        stmt = (
+            select(TransactionTask)
+            .where(
+                TransactionTask.file_id == file_id,
+                TransactionTask.is_deleted.is_(False),
+            )
+            .order_by(TransactionTask.id.desc())
+        )
+        return (await db.execute(stmt)).scalars().first()
+
+    @staticmethod
+    async def _get_existing_business_upload_file(
+        db: AsyncSession,
+        *,
+        org_id: int,
+        platform_code: str,
+        shop_id: int,
+        accounting_year: int,
+        accounting_month: int,
+    ) -> TransactionUploadFile | None:
+        stmt = (
+            select(TransactionUploadFile)
+            .where(
+                TransactionUploadFile.org_id == org_id,
+                TransactionUploadFile.platform_code == platform_code,
+                TransactionUploadFile.shop_id == shop_id,
+                TransactionUploadFile.accounting_year == accounting_year,
+                TransactionUploadFile.accounting_month == accounting_month,
+                TransactionUploadFile.is_deleted.is_(False),
+            )
+            .order_by(TransactionUploadFile.id.desc())
+        )
+        return (await db.execute(stmt)).scalars().first()
+
+    @staticmethod
+    def _latest_result_task_ids_select():
+        return (
+            select(func.max(TransactionTask.id).label("task_id"))
+            .select_from(TransactionTask)
+            .join(TransactionUploadFile, TransactionUploadFile.id == TransactionTask.file_id)
+            .where(
+                TransactionTask.is_deleted.is_(False),
+                TransactionUploadFile.is_deleted.is_(False),
+                TransactionTask.status.in_(TRANSACTION_RESULT_TASK_STATUSES),
+            )
+            .group_by(
+                TransactionUploadFile.org_id,
+                TransactionUploadFile.platform_code,
+                TransactionUploadFile.shop_id,
+                TransactionUploadFile.accounting_year,
+                TransactionUploadFile.accounting_month,
+            )
+        )
+
+    @staticmethod
     def _cash_flow_group_subquery():
         parent = aliased(CashFlowItem)
         return (
@@ -1420,6 +1578,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1442,12 +1601,16 @@ class TransactionAccountingService:
             filters.append(TransactionSummaryRow.org_id == scoped_org_id)
         if task_id is not None:
             filters.append(TransactionSummaryRow.task_id == task_id)
+        else:
+            filters.append(TransactionSummaryRow.task_id.in_(TransactionAccountingService._latest_result_task_ids_select()))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(TransactionSummaryRow.platform_code.in_(platform_codes))
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionSummaryRow.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(TransactionSummaryRow.shop_id == shop_id)
         subject_ids = TransactionAccountingService._split_int_filter_values(subject_id)
         if subject_ids:
             filters.append(TransactionSummaryRow.subject_id.in_(subject_ids))
@@ -1777,6 +1940,7 @@ class TransactionAccountingService:
                     category_id=category_id,
                     rule_id=None,
                     row_number=first_row,
+                    shop_id=upload_file.shop_id,
                     platform_code=upload_file.platform_code,
                     shop_name=upload_file.shop_name,
                     accounting_year=accounting_year,
@@ -1806,6 +1970,7 @@ class TransactionAccountingService:
                     subject_name=subject.name,
                     category_name=category.name,
                     transaction_direction=None,
+                    shop_id=upload_file.shop_id,
                     platform_code=upload_file.platform_code,
                     shop_name=upload_file.shop_name,
                     accounting_year=accounting_year,

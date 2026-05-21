@@ -8,9 +8,19 @@ from app.services.bic_accounting_service import BicAccountingService
 from app.tasks.celery_app import _run_async_in_worker, celery_app
 
 
-@celery_app.task(name="app.tasks.bic_accounting.run_bic_accounting_task")
-def run_bic_accounting_task(task_id: int) -> dict:
-    return _run_async_in_worker(_run_bic_accounting_task(task_id))
+@celery_app.task(
+    bind=True,
+    name="app.tasks.bic_accounting.run_bic_accounting_task",
+    max_retries=5,
+)
+def run_bic_accounting_task(self, task_id: int) -> dict:
+    try:
+        return _run_async_in_worker(_run_bic_accounting_task(task_id))
+    except ValueError as exc:
+        if str(exc) == "BIC任务不存在":
+            countdown = min(2 ** self.request.retries, 30)
+            raise self.retry(exc=exc, countdown=countdown)
+        raise
 
 
 async def _run_bic_accounting_task(task_id: int) -> dict:

@@ -1,8 +1,8 @@
 """Rule engine for the independent transaction-accounting flow."""
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-import re
 
 from app.tasks.processors.base import canonical_remark, safe_str
 
@@ -65,6 +65,7 @@ def evaluate_transaction_row_matches(
 ) -> list[TransactionEvaluationResult]:
     direction = safe_str(row.get(direction_field))
     remark = canonical_remark(safe_str(row.get(remark_field)))
+    print(remark)
     matched_rules = _match_rules(direction=direction, remark=remark, rules=rules)
     if not matched_rules:
         return [
@@ -141,11 +142,7 @@ def _match_rules(
     remark: str,
     rules: list[TransactionRuleCandidate],
 ) -> list[TransactionRuleCandidate]:
-    candidates = [
-        rule
-        for rule in rules
-        if safe_str(rule.transaction_direction) == direction and _remark_matches(rule=rule, remark=remark)
-    ]
+    candidates = [rule for rule in rules if safe_str(rule.transaction_direction) == direction and _remark_matches(rule=rule, remark=remark)]
     return sorted(candidates, key=lambda rule: (rule.priority, rule.id))
 
 
@@ -169,14 +166,7 @@ def _parse_amount(value: object) -> Decimal | None:
     text = safe_str(value)
     if not text:
         return None
-    normalized = (
-        text.replace(",", "")
-        .replace("，", "")
-        .replace("￥", "")
-        .replace("¥", "")
-        .replace("元", "")
-        .strip()
-    )
+    normalized = text.replace(",", "").replace("，", "").replace("￥", "").replace("¥", "").replace("元", "").strip()
     if not normalized:
         return None
     try:

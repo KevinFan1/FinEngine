@@ -65,32 +65,34 @@ class ShopService:
 
     @staticmethod
     async def create_shop(db: AsyncSession, *, data: ShopCreate, org_id: int, operator: User, ip: str | None = None, user_agent: str | None = None) -> Shop:
-        # Check uniqueness
-        existing = await db.execute(
-            select(Shop).where(
-                Shop.org_id == org_id,
-                Shop.platform_name == data.platform_name,
-                Shop.shop_name == data.shop_name,
-                ShopService.active_filter(),
-            )
-        )
-        if existing.scalar_one_or_none():
-            raise ValueError(SHOP_DUPLICATE_MESSAGE)
-        shop = Shop(
+        shop_color = normalize_shop_color(data.shop_color) or assign_default_shop_color(
             org_id=org_id,
             platform_name=data.platform_name,
             shop_name=data.shop_name,
-            shop_color=normalize_shop_color(data.shop_color) or assign_default_shop_color(
+        )
+        stmt = (
+            insert(Shop)
+            .values(
                 org_id=org_id,
                 platform_name=data.platform_name,
                 shop_name=data.shop_name,
-            ),
-            entity_name=data.entity_name,
-            remark=data.remark,
+                shop_color=shop_color,
+                entity_name=data.entity_name,
+                remark=data.remark,
+                status=1,
+                is_deleted=False,
+                deleted_at=None,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[Shop.org_id, Shop.platform_name, Shop.shop_name],
+                index_where=text("is_deleted = false"),
+            )
+            .returning(Shop)
         )
-        db.add(shop)
-        await db.flush()
-        await db.refresh(shop)
+        result = await db.execute(stmt)
+        shop = result.scalar_one_or_none()
+        if shop is None:
+            raise ValueError(SHOP_DUPLICATE_MESSAGE)
         await AuditService.log(
             db,
             user_id=operator.id,

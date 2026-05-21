@@ -18,12 +18,29 @@ class BicUploadFile(SoftDeleteMixin, Base):
                 "is_deleted = false AND source_upload_file_id IS NOT NULL"
             ),
         ),
+        Index(
+            "uq_fin_bic_upload_business_key",
+            "org_id",
+            "platform_code",
+            "shop_id",
+            "accounting_year",
+            "accounting_month",
+            unique=True,
+            postgresql_where=text(
+                "is_deleted = false "
+                "AND platform_code IS NOT NULL "
+                "AND shop_id IS NOT NULL "
+                "AND accounting_year IS NOT NULL "
+                "AND accounting_month IS NOT NULL"
+            ),
+        ),
         {"comment": "BIC 独立上传文件表"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=False, comment="上传用户ID")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     source_upload_file_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("fin_upload_files.id"),
@@ -79,6 +96,7 @@ class BicDetail(SoftDeleteMixin, Base):
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_tasks.id"), nullable=False, comment="处理任务ID")
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_upload_files.id"), nullable=False, comment="上传文件ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     platform_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码")
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称")
     accounting_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算年份")
@@ -102,6 +120,7 @@ class BicReportRow(SoftDeleteMixin, Base):
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_tasks.id"), nullable=False, comment="处理任务ID")
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_upload_files.id"), nullable=False, comment="上传文件ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     platform_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码")
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称")
     accounting_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算年份")

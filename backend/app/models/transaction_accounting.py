@@ -96,12 +96,29 @@ class TransactionUploadFile(SoftDeleteMixin, Base):
                 "is_deleted = false AND source_upload_file_id IS NOT NULL"
             ),
         ),
+        Index(
+            "uq_fin_transaction_upload_business_key",
+            "org_id",
+            "platform_code",
+            "shop_id",
+            "accounting_year",
+            "accounting_month",
+            unique=True,
+            postgresql_where=text(
+                "is_deleted = false "
+                "AND platform_code IS NOT NULL "
+                "AND shop_id IS NOT NULL "
+                "AND accounting_year IS NOT NULL "
+                "AND accounting_month IS NOT NULL"
+            ),
+        ),
         {"comment": "动账核算独立上传文件表"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=False, comment="上传用户ID")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     source_upload_file_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("fin_upload_files.id"),
@@ -157,6 +174,7 @@ class TransactionDetail(SoftDeleteMixin, Base):
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_tasks.id"), nullable=False, comment="任务ID")
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_upload_files.id"), nullable=False, comment="文件ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     subject_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_transaction_subjects.id"), nullable=True, comment="科目ID")
     category_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_transaction_categories.id"), nullable=True, comment="分类ID")
     rule_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_transaction_rules.id"), nullable=True, comment="规则ID")
@@ -188,6 +206,7 @@ class TransactionSummaryRow(SoftDeleteMixin, Base):
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_tasks.id"), nullable=False, comment="任务ID")
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_upload_files.id"), nullable=False, comment="文件ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     subject_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_subjects.id"), nullable=False, comment="科目ID")
     category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_categories.id"), nullable=False, comment="分类ID")
     subject_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="科目名称快照")

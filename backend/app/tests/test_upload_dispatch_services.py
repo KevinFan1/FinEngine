@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.organization import Organization
+from app.core.database import run_after_commit_callbacks
 from app.models.task import ProcessingTask
 from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
@@ -32,6 +32,7 @@ class _CreateOnlySession:
         self.added = []
         self._next_id = 100
         self.executed = []
+        self.info = {}
 
     def add(self, instance) -> None:
         self.added.append(instance)
@@ -130,10 +131,16 @@ async def test_transaction_accounting_creates_independent_records_from_shared_up
         if item.__class__.__name__ == "TransactionUploadFile"
     )
     assert derived_upload.source_upload_file_id == shared_upload.id
+    assert derived_upload.shop_id == shared_upload.shop_id
     assert derived_upload.oss_key == shared_upload.oss_key
     assert derived_upload.original_name == shared_upload.original_name
     assert task.file_id == derived_upload.id
     assert task.org_id == shared_upload.org_id
+    assert task.celery_task_id is None
+    assert delay_calls == []
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
     assert task.celery_task_id == f"txn-{task.id}"
     assert delay_calls == [task.id]
 
@@ -172,10 +179,16 @@ async def test_bic_accounting_creates_independent_records_from_shared_upload(
         item for item in session.added if item.__class__.__name__ == "BicUploadFile"
     )
     assert derived_upload.source_upload_file_id == shared_upload.id
+    assert derived_upload.shop_id == shared_upload.shop_id
     assert derived_upload.oss_key == shared_upload.oss_key
     assert derived_upload.original_name == shared_upload.original_name
     assert task.file_id == derived_upload.id
     assert task.org_id == shared_upload.org_id
+    assert task.celery_task_id is None
+    assert delay_calls == []
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
     assert task.celery_task_id == f"bic-{task.id}"
     assert delay_calls == [task.id]
 
@@ -206,6 +219,10 @@ async def test_bic_accounting_marks_task_failed_when_dispatch_fails(
         user=user,
     )
 
+    assert task.status == "queued"
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
     assert task.status == "failed"
     assert task.progress == 100
     assert "BIC任务投递失败" in (task.error_message or "")
@@ -215,6 +232,7 @@ class _UploadDispatchSession:
     def __init__(self) -> None:
         self.added = []
         self._next_id = 1
+        self.info = {}
 
     def add(self, instance) -> None:
         self.added.append(instance)

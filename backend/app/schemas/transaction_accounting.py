@@ -151,6 +151,7 @@ class TransactionUploadFileOut(BaseModel):
     id: int
     org_id: int
     user_id: int
+    shop_id: int | None = None
     original_name: str
     oss_key: str
     file_size: int
@@ -173,6 +174,7 @@ class TransactionTaskOut(BaseModel):
     file_id: int
     org_id: int
     user_id: int
+    shop_id: int | None = None
     celery_task_id: str | None
     status: str
     progress: int
@@ -201,6 +203,7 @@ class TransactionDetailOut(BaseModel):
     task_id: int
     file_id: int
     org_id: int
+    shop_id: int | None = None
     subject_id: int | None
     category_id: int | None
     rule_id: int | None
@@ -236,6 +239,7 @@ class TransactionSummaryOut(BaseModel):
     task_id: int
     file_id: int
     org_id: int
+    shop_id: int | None = None
     subject_id: int
     category_id: int
     subject_name: str

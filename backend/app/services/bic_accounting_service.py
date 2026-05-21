@@ -11,12 +11,14 @@ from openpyxl import Workbook
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import register_after_commit
 from app.models.bic_accounting import BicDetail, BicReportRow, BicTask, BicUploadFile
 from app.models.shop import Shop
 from app.models.upload import UploadFile
 from app.models.user import User
 from app.services.audit_service import AuditService
 from app.services.oss_service import oss_service
+from app.services.shop_service import ShopService
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, safe_str
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
@@ -25,6 +27,7 @@ from app.utils.money import safe_decimal
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
 BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "店铺", "核算年月", "QIC仓", "结算金额"]
 BIC_REPORT_EXPORT_HEADERS = ["序号", "平台", "店铺", "核算年月", "结算金额"]
+BIC_RESULT_TASK_STATUSES = ("success", "partial_success")
 
 
 class BicAccountingService:
@@ -53,11 +56,27 @@ class BicAccountingService:
         if (upload_file.source_platform_code or upload_file.detected_platform or "").lower() != "douyin":
             raise ValueError("BIC 核算当前仅支持抖音文件")
 
+        source_platform = (upload_file.source_platform_code or upload_file.detected_platform or "").lower()
+        shop_id = upload_file.shop_id
+        shop_name = upload_file.parsed_shop
+        if shop_id is None and shop_name:
+            shop = await ShopService.get_or_create_shop(
+                db,
+                org_id=upload_file.org_id,
+                platform_name=source_platform,
+                shop_name=shop_name,
+            )
+            shop_id = shop.id
+            shop_name = shop.shop_name
+
         existing_stmt = select(BicUploadFile).where(
             BicUploadFile.source_upload_file_id == upload_file.id,
             BicUploadFile.is_deleted.is_(False),
         )
         existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+        bic_upload_file = existing
+        if bic_upload_file is not None and shop_id is not None and bic_upload_file.shop_id is None:
+            bic_upload_file.shop_id = shop_id
         if existing is not None:
             task_stmt = (
                 select(BicTask)
@@ -71,22 +90,44 @@ class BicAccountingService:
             if current_task is not None:
                 return current_task
 
-        bic_upload_file = BicUploadFile(
-            org_id=upload_file.org_id,
-            user_id=user.id,
-            source_upload_file_id=upload_file.id,
-            original_name=upload_file.original_name,
-            oss_key=upload_file.oss_key,
-            file_size=upload_file.file_size,
-            file_hash=upload_file.file_hash,
-            platform_code=upload_file.source_platform_code or upload_file.detected_platform,
-            shop_name=upload_file.parsed_shop,
-            accounting_year=upload_file.parsed_year,
-            accounting_month=upload_file.parsed_month,
-            status="uploaded",
-        )
-        db.add(bic_upload_file)
-        await db.flush()
+        if shop_id is not None and upload_file.parsed_year is not None and upload_file.parsed_month is not None:
+            existing_business_file = await BicAccountingService._get_existing_business_upload_file(
+                db,
+                org_id=upload_file.org_id,
+                platform_code=source_platform,
+                shop_id=shop_id,
+                accounting_year=upload_file.parsed_year,
+                accounting_month=upload_file.parsed_month,
+            )
+            if existing_business_file is not None:
+                if shop_id is not None and existing_business_file.shop_id is None:
+                    existing_business_file.shop_id = shop_id
+                current_task = await BicAccountingService._get_latest_task_for_upload_file(
+                    db,
+                    file_id=existing_business_file.id,
+                )
+                if current_task is not None:
+                    return current_task
+                bic_upload_file = existing_business_file
+
+        if bic_upload_file is None:
+            bic_upload_file = BicUploadFile(
+                org_id=upload_file.org_id,
+                user_id=user.id,
+                shop_id=shop_id,
+                source_upload_file_id=upload_file.id,
+                original_name=upload_file.original_name,
+                oss_key=upload_file.oss_key,
+                file_size=upload_file.file_size,
+                file_hash=upload_file.file_hash,
+                platform_code=source_platform,
+                shop_name=shop_name,
+                accounting_year=upload_file.parsed_year,
+                accounting_month=upload_file.parsed_month,
+                status="uploaded",
+            )
+            db.add(bic_upload_file)
+            await db.flush()
 
         task = BicTask(
             file_id=bic_upload_file.id,
@@ -119,18 +160,11 @@ class BicAccountingService:
             },
         )
 
-        try:
-            from app.tasks.bic_accounting import run_bic_accounting_task
-
-            async_result = run_bic_accounting_task.delay(task.id)
-            task.celery_task_id = async_result.id
-        except Exception as exc:
-            task.status = "failed"
-            task.progress = 100
-            task.error_message = f"BIC任务投递失败: {exc}"
-            task.finished_at = datetime.now(timezone.utc)
-            bic_upload_file.status = "failed"
-            bic_upload_file.error_message = task.error_message
+        BicAccountingService.dispatch_task_after_commit(
+            db,
+            task=task,
+            upload_file=bic_upload_file,
+        )
         await db.flush()
         await db.refresh(task)
         return task
@@ -177,19 +211,96 @@ class BicAccountingService:
             user_agent=user_agent,
         )
 
-        try:
-            from app.tasks.bic_accounting import run_bic_accounting_task
-
-            async_result = run_bic_accounting_task.delay(task.id)
-            task.celery_task_id = async_result.id
-        except Exception as exc:
-            task.status = "failed"
-            task.progress = 100
-            task.error_message = f"BIC任务投递失败: {exc}"
-            task.finished_at = datetime.now(timezone.utc)
+        upload_file = await db.get(BicUploadFile, task.file_id)
+        BicAccountingService.dispatch_task_after_commit(
+            db,
+            task=task,
+            upload_file=upload_file,
+        )
         await db.flush()
         await db.refresh(task)
         return task
+
+    @staticmethod
+    def dispatch_task_after_commit(
+        db: AsyncSession,
+        *,
+        task: BicTask,
+        upload_file: BicUploadFile | None,
+    ) -> None:
+        async def dispatch() -> None:
+            try:
+                from app.tasks.bic_accounting import run_bic_accounting_task
+
+                async_result = run_bic_accounting_task.delay(task.id)
+                task.celery_task_id = async_result.id
+            except Exception as exc:
+                task.status = "failed"
+                task.progress = 100
+                task.error_message = f"BIC任务投递失败: {exc}"
+                task.finished_at = datetime.now(timezone.utc)
+                if upload_file is not None:
+                    upload_file.status = "failed"
+                    upload_file.error_message = task.error_message
+            await db.flush()
+
+        register_after_commit(db, dispatch)
+
+    @staticmethod
+    async def _get_latest_task_for_upload_file(db: AsyncSession, *, file_id: int) -> BicTask | None:
+        stmt = (
+            select(BicTask)
+            .where(
+                BicTask.file_id == file_id,
+                BicTask.is_deleted.is_(False),
+            )
+            .order_by(BicTask.id.desc())
+        )
+        return (await db.execute(stmt)).scalars().first()
+
+    @staticmethod
+    async def _get_existing_business_upload_file(
+        db: AsyncSession,
+        *,
+        org_id: int,
+        platform_code: str,
+        shop_id: int,
+        accounting_year: int,
+        accounting_month: int,
+    ) -> BicUploadFile | None:
+        stmt = (
+            select(BicUploadFile)
+            .where(
+                BicUploadFile.org_id == org_id,
+                BicUploadFile.platform_code == platform_code,
+                BicUploadFile.shop_id == shop_id,
+                BicUploadFile.accounting_year == accounting_year,
+                BicUploadFile.accounting_month == accounting_month,
+                BicUploadFile.is_deleted.is_(False),
+            )
+            .order_by(BicUploadFile.id.desc())
+        )
+        return (await db.execute(stmt)).scalars().first()
+
+    @staticmethod
+    def _latest_result_task_ids_select():
+        return (
+            select(func.max(BicTask.id).label("task_id"))
+            .select_from(BicTask)
+            .join(BicUploadFile, BicUploadFile.id == BicTask.file_id)
+            .where(
+                BicTask.is_deleted.is_(False),
+                BicUploadFile.is_deleted.is_(False),
+                BicTask.status.in_(BIC_RESULT_TASK_STATUSES),
+            )
+            .group_by(
+                BicUploadFile.org_id,
+                BicUploadFile.platform_code,
+                BicUploadFile.shop_id,
+                BicUploadFile.accounting_year,
+                BicUploadFile.accounting_month,
+            )
+        )
 
     @staticmethod
     async def list_tasks(
@@ -200,6 +311,7 @@ class BicAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         accounting_start_year: int | None = None,
         accounting_start_month: int | None = None,
         accounting_end_year: int | None = None,
@@ -220,6 +332,8 @@ class BicAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicUploadFile.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(BicUploadFile.shop_id == shop_id)
         filters.extend(
             TransactionAccountingService._period_filters(
                 BicUploadFile.accounting_year * 100 + BicUploadFile.accounting_month,
@@ -242,7 +356,7 @@ class BicAccountingService:
         stmt = (
             select(BicTask, BicUploadFile, Shop.shop_color)
             .join(BicUploadFile, BicUploadFile.id == BicTask.file_id)
-            .outerjoin(Shop, Shop.shop_name == BicUploadFile.shop_name)
+            .outerjoin(Shop, Shop.id == BicUploadFile.shop_id)
             .where(*filters)
             .order_by(BicTask.id.desc())
         )
@@ -260,6 +374,7 @@ class BicAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         qic_warehouse: str | None = None,
         accounting_year: int | None = None,
         accounting_month: int | None = None,
@@ -281,12 +396,16 @@ class BicAccountingService:
             filters.append(BicDetail.id.in_(ids))
         if task_id is not None:
             filters.append(BicDetail.task_id == task_id)
+        else:
+            filters.append(BicDetail.task_id.in_(BicAccountingService._latest_result_task_ids_select()))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicDetail.platform_code.in_(platform_codes))
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicDetail.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(BicDetail.shop_id == shop_id)
         qic_values = TransactionAccountingService._split_filter_values(qic_warehouse)
         if qic_values:
             filters.append(BicDetail.qic_warehouse.in_(qic_values))
@@ -311,6 +430,7 @@ class BicAccountingService:
                 BicDetail.accounting_year.desc(),
                 BicDetail.accounting_month.desc(),
                 BicDetail.platform_code,
+                BicDetail.shop_id,
                 BicDetail.shop_name,
                 BicDetail.qic_warehouse,
             )
@@ -331,6 +451,7 @@ class BicAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
+        shop_id: int | None = None,
         accounting_year: int | None = None,
         accounting_month: int | None = None,
         accounting_start_year: int | None = None,
@@ -351,12 +472,16 @@ class BicAccountingService:
             filters.append(BicReportRow.id.in_(ids))
         if task_id is not None:
             filters.append(BicReportRow.task_id == task_id)
+        else:
+            filters.append(BicReportRow.task_id.in_(BicAccountingService._latest_result_task_ids_select()))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicReportRow.platform_code.in_(platform_codes))
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicReportRow.shop_name.in_(shop_names))
+        if shop_id is not None:
+            filters.append(BicReportRow.shop_id == shop_id)
         if accounting_year is not None:
             filters.append(BicReportRow.accounting_year == accounting_year)
         if accounting_month is not None:
@@ -378,6 +503,7 @@ class BicAccountingService:
                 BicReportRow.accounting_year.desc(),
                 BicReportRow.accounting_month.desc(),
                 BicReportRow.platform_code,
+                BicReportRow.shop_id,
                 BicReportRow.shop_name,
             )
         )
@@ -414,6 +540,7 @@ class BicAccountingService:
                     upload_file=upload_file,
                     file_path=tmp.name,
                     platform_code=upload_file.platform_code or "douyin",
+                    shop_id=upload_file.shop_id,
                     shop_name=upload_file.shop_name or "",
                 )
 
@@ -452,12 +579,24 @@ class BicAccountingService:
         upload_file: BicUploadFile,
         file_path: str,
         platform_code: str,
+        shop_id: int | None,
         shop_name: str,
     ) -> dict:
         if upload_file.accounting_year is None or upload_file.accounting_month is None:
             raise ValueError("BIC文件缺少文件名年月")
+        shop_name = shop_name or upload_file.shop_name or ""
         if not shop_name:
             raise ValueError("BIC文件缺少店铺名称")
+        if shop_id is None:
+            shop = await ShopService.get_or_create_shop(
+                db,
+                org_id=task.org_id,
+                platform_name=platform_code,
+                shop_name=shop_name,
+            )
+            shop_id = shop.id
+            upload_file.shop_id = shop_id
+            upload_file.shop_name = shop.shop_name
 
         await db.execute(delete(BicDetail).where(BicDetail.task_id == task.id))
         await db.execute(delete(BicReportRow).where(BicReportRow.task_id == task.id))
@@ -468,6 +607,7 @@ class BicAccountingService:
             upload_file=upload_file,
             rows=parse_result.get("bic_rows", []),
             platform_code=platform_code,
+            shop_id=shop_id,
             shop_name=shop_name,
         )
         db.add_all(detail_rows)
@@ -477,6 +617,7 @@ class BicAccountingService:
             task_id=task.id,
             file_id=upload_file.id,
             org_id=task.org_id,
+            shop_id=shop_id,
             platform_code=platform_code,
             shop_name=shop_name,
             accounting_year=int(upload_file.accounting_year),
@@ -553,6 +694,7 @@ class BicAccountingService:
         upload_file: BicUploadFile,
         rows: Iterable[dict],
         platform_code: str,
+        shop_id: int | None,
         shop_name: str,
     ) -> list[BicDetail]:
         groups: dict[str, dict[str, object]] = {}
@@ -570,6 +712,7 @@ class BicAccountingService:
                 task_id=task.id,
                 file_id=upload_file.id,
                 org_id=task.org_id,
+                shop_id=shop_id,
                 platform_code=platform_code,
                 shop_name=shop_name,
                 accounting_year=int(upload_file.accounting_year),
