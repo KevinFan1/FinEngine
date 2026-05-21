@@ -79,6 +79,7 @@ class AuthService:
             password_hash=hash_password(password),
             display_name="超级管理员",
             email=None,
+            must_change_password=True,
             role="superadmin",
             status=1,
         )

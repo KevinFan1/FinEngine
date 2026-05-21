@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, GroupKey, open_tabular_rows, parse_datetime, safe_str
+from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, GroupKey, normalize_positive_summary_fields, open_tabular_rows, parse_datetime, safe_str
 from app.utils.money import ZERO_MONEY, safe_decimal
 
 XIAOHONGSHU_GMV_HEADERS: list[str] = [
@@ -128,6 +128,8 @@ XIAOHONGSHU_ORDER_HEADERS: list[str] = [
 ]
 
 XIAOHONGSHU_GMV_FIELDS: tuple[str, ...] = (
+    "order_paid_amount",
+    "refund_amount",
     "gmv",
     "platform_income",
     "platform_fee",
@@ -230,7 +232,12 @@ class XiaohongshuProcessor(FinancialSummaryExcelProcessorMixin):
 
                     key = GroupKey(shop=shop_name, year=order_created_at.year, month=order_created_at.month)
                     agg = groups.setdefault(key, {field: ZERO_MONEY for field in XIAOHONGSHU_GMV_FIELDS})
-                    agg["gmv"] += safe_decimal(vals.get("商品实付/实退"))
+                    paid_or_refund = safe_decimal(vals.get("商品实付/实退"))
+                    if paid_or_refund > ZERO_MONEY:
+                        agg["order_paid_amount"] += paid_or_refund
+                    elif paid_or_refund < ZERO_MONEY:
+                        agg["refund_amount"] += paid_or_refund
+                    agg["gmv"] += paid_or_refund
                     agg["platform_income"] += safe_decimal(vals.get("平台优惠补贴"))
                     agg["platform_fee"] += safe_decimal(vals.get("佣金"))
                     agg["commission"] += safe_decimal(vals.get("分销佣金"))
@@ -239,7 +246,7 @@ class XiaohongshuProcessor(FinancialSummaryExcelProcessorMixin):
                     result["failed_rows"] += 1
                     result["errors"].append(f"Row {result['total_rows'] + 1}: {e}")
 
-        result["groups"] = self._serialize_groups(groups)
+        result["groups"] = self._serialize_groups({key: normalize_positive_summary_fields(agg) for key, agg in groups.items()})
         return result
 
     def _process_other_service(

@@ -14,6 +14,8 @@ from app.core.database import async_session_factory
 from app.core.security import hash_password
 from app.models.organization import Organization
 from app.models.user import User
+from app.services.cash_flow_seed_service import CashFlowSeedService
+from app.services.transaction_accounting_seed_service import TransactionAccountingSeedService
 from sqlalchemy import select
 
 
@@ -80,6 +82,9 @@ async def seed():
             print(f"[+] Created org_admin: id={org_admin.id} username=admin password=admin123")
         else:
             print(f"[=] Org admin already exists: id={org_admin.id}")
+
+        await TransactionAccountingSeedService.seed_defaults(db)
+        await CashFlowSeedService.seed_defaults(db)
 
         await db.commit()
         print("[OK] Seed users complete.")

@@ -1,4 +1,4 @@
-"""Shop model — platform + shop_name unique per org."""
+"""店铺模型 - 同一组织下平台和店铺名称唯一。"""
 
 from datetime import datetime
 
@@ -29,6 +29,6 @@ class Shop(SoftDeleteMixin, Base):
     shop_color: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="店铺展示色")
     entity_name: Mapped[str | None] = mapped_column(String(200), nullable=True, comment="主体名称")
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
-    status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态: 1=启用 0=禁用")
+    status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态：1=启用 0=禁用")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")

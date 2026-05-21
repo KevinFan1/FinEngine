@@ -106,6 +106,8 @@ WEIXIN_VIDEO_BIC_HEADERS: list[str] = [
 ]
 
 WEIXIN_VIDEO_ORDER_SUMMARY_FIELDS: tuple[str, ...] = (
+    "order_paid_amount",
+    "refund_amount",
     "gmv",
     "platform_income",
     "platform_fee",
@@ -297,9 +299,11 @@ class WeixinVideoProcessor(FinancialSummaryExcelProcessorMixin):
         amount = safe_decimal(vals.get("收支金额"))
 
         if action_type == "订单支付":
-            return {"gmv": abs(amount)}
+            paid_amount = abs(amount)
+            return {"order_paid_amount": paid_amount, "gmv": paid_amount}
         if action_type == "订单退款":
-            return {"gmv": -abs(amount)}
+            refund_amount = abs(amount)
+            return {"refund_amount": refund_amount, "gmv": -refund_amount}
         if action_type == "技术服务费":
             return {"platform_fee": abs(amount)}
         if action_type == "达人佣金":

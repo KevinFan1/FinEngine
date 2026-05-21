@@ -45,6 +45,8 @@ QIANNIU_DONGZHANG_HEADERS: list[str] = [
 ]
 
 QIANNIU_ORDER_SUMMARY_FIELDS: tuple[str, ...] = (
+    "order_paid_amount",
+    "refund_amount",
     "gmv",
     "platform_income",
     "platform_fee",
@@ -234,7 +236,9 @@ class QianniuProcessor(FinancialSummaryExcelProcessorMixin):
         net_amount = income - expense
 
         if entry_type == "交易收款":
-            return {"gmv": net_amount}
+            return {"order_paid_amount": income, "gmv": net_amount}
+        if entry_type == "交易退款(售后)":
+            return {"refund_amount": expense}
         if entry_type == "服务费":
             return {"platform_fee": net_amount}
         return {}

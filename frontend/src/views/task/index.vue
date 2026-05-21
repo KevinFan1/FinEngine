@@ -2,6 +2,11 @@
     <div class="page-container">
         <!-- Filter bar -->
         <el-card shadow="never" class="search-card">
+            <SearchCardIntro
+                kicker="任务工作台"
+                title="先筛选任务，再查看处理结果"
+                tip="支持按年月、平台、店铺、性质和状态快速收敛范围"
+            />
             <el-form :model="searchForm" inline>
                 <el-form-item label="年月">
                     <el-date-picker
@@ -118,6 +123,7 @@
                     <el-button @click="handleReset">重置</el-button>
                 </el-form-item>
             </el-form>
+            <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
         </el-card>
 
         <!-- Table -->
@@ -584,7 +590,7 @@ import {
 } from "@/api/task";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
-import { formatDateTime } from "@/utils/format";
+import { formatDateTime, getPlatformLabel } from "@/utils/format";
 import {
     getFallbackPlatforms,
     getReportPlatformCode,
@@ -600,6 +606,9 @@ import UploadView from "@/views/upload/index.vue";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
+import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
+import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import type { ActiveFilterTag } from "@/components/activeFilterTags";
 
 // Search
 const searchForm = reactive({
@@ -713,6 +722,24 @@ const selectedRetryableRows = computed(() =>
 const selectedRecalculableRows = computed(() =>
     selectedRows.value.filter((row) => canRecalculate(row)),
 );
+
+interface TaskFilterTag extends ActiveFilterTag {
+    key: "sourceMonth" | "platforms" | "shopIds" | "parsedTypes" | "statuses" | "keyword";
+}
+
+const activeFilterTags = computed<TaskFilterTag[]>(() => {
+    const tags: TaskFilterTag[] = [];
+    if (searchForm.sourceMonth) tags.push({ key: "sourceMonth", label: "年月", value: searchForm.sourceMonth });
+    searchForm.platforms.forEach((value) => tags.push({ key: "platforms", label: "平台", value: getPlatformLabel(value) }));
+    searchForm.shopIds.forEach((value) => {
+        const shop = shopOptions.value.find((item) => item.id === value);
+        tags.push({ key: "shopIds", label: "店铺", value: shop?.shop_name || String(value) });
+    });
+    searchForm.parsedTypes.forEach((value) => tags.push({ key: "parsedTypes", label: "性质", value: typeOptions.find((item) => item.value === value)?.label || value }));
+    searchForm.statuses.forEach((value) => tags.push({ key: "statuses", label: "状态", value: statusLabel(value) }));
+    if (searchForm.keyword.trim()) tags.push({ key: "keyword", label: "搜索", value: searchForm.keyword.trim() });
+    return tags;
+});
 
 function statusTagType(status: string): string {
     const map: Record<string, string> = {
@@ -854,6 +881,29 @@ function handleReset() {
     pagination.page = 1;
     fetchShopOptions();
     fetchData();
+}
+
+async function removeFilterTag(tag: TaskFilterTag) {
+    if (tag.key === "sourceMonth") {
+        searchForm.sourceMonth = "";
+    } else if (tag.key === "platforms") {
+        searchForm.platforms = searchForm.platforms.filter((item) => getPlatformLabel(item) !== tag.value);
+        await fetchShopOptions();
+        const availableShopIds = new Set(filteredShopOptions.value.map((shop) => shop.id));
+        searchForm.shopIds = searchForm.shopIds.filter((shopId) => availableShopIds.has(shopId));
+    } else if (tag.key === "shopIds") {
+        searchForm.shopIds = searchForm.shopIds.filter((item) => {
+            const shop = shopOptions.value.find((shopItem) => shopItem.id === item);
+            return (shop?.shop_name || String(item)) !== tag.value;
+        });
+    } else if (tag.key === "parsedTypes") {
+        searchForm.parsedTypes = searchForm.parsedTypes.filter((item) => (typeOptions.find((type) => type.value === item)?.label || item) !== tag.value);
+    } else if (tag.key === "statuses") {
+        searchForm.statuses = searchForm.statuses.filter((item) => statusLabel(item) !== tag.value);
+    } else if (tag.key === "keyword") {
+        searchForm.keyword = "";
+    }
+    handleSearch();
 }
 
 function openUploadDrawer() {

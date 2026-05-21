@@ -1,4 +1,4 @@
-import { get, post } from "./index";
+import { get, post, put } from "./index";
 
 export interface LoginParams {
     username: string;
@@ -24,12 +24,23 @@ export interface UserInfo {
     display_name: string;
     phone: string;
     email: string;
+    must_change_password: boolean;
     role: string;
     org_id: number | null;
     org_name?: string;
     status: string;
     last_login_at: string | null;
     created_at: string;
+}
+
+export interface UpdateMePayload {
+    display_name: string;
+    phone: string;
+}
+
+export interface ChangeMyPasswordPayload {
+    old_password: string;
+    new_password: string;
 }
 
 /**
@@ -58,4 +69,12 @@ export function logout() {
  */
 export function getUserInfo() {
     return get<UserInfo>("/auth/me");
+}
+
+export function updateMyProfile(data: UpdateMePayload) {
+    return put<UserInfo>("/auth/me", data);
+}
+
+export function changeMyPassword(data: ChangeMyPasswordPayload) {
+    return put<void>("/auth/me/password", data);
 }

@@ -2,7 +2,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.password_validator import PasswordValidator
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
@@ -146,6 +146,7 @@ class UserService:
             password_hash=hash_password(data.password),
             display_name=data.display_name,
             email=data.email,
+            must_change_password=False,
             role=data.role,
             status=1,
         )
@@ -196,6 +197,7 @@ class UserService:
             "phone": user.phone,
             "display_name": user.display_name,
             "email": user.email,
+            "must_change_password": user.must_change_password,
             "role": user.role,
             "org_id": user.org_id,
             "status": user.status,
@@ -219,6 +221,7 @@ class UserService:
             "phone": user.phone,
             "display_name": user.display_name,
             "email": user.email,
+            "must_change_password": user.must_change_password,
             "role": user.role,
             "org_id": user.org_id,
             "status": user.status,
@@ -306,6 +309,7 @@ class UserService:
             raise ValueError(error_msg)
 
         user.password_hash = hash_password(new_password)
+        user.must_change_password = True
         await db.flush()
 
         await AuditService.log(
@@ -325,3 +329,84 @@ class UserService:
         )
 
         return user
+
+    @staticmethod
+    async def update_current_user(
+        db: AsyncSession,
+        *,
+        current_user: User,
+        display_name: str,
+        phone: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> User:
+        if phone != current_user.phone:
+            existing = await db.execute(select(User).where(User.phone == phone, User.is_deleted.is_(False)))
+            if existing.scalar_one_or_none() is not None:
+                raise ValueError("手机号已被注册")
+
+        current_user.display_name = display_name
+        current_user.phone = phone
+        await db.flush()
+        await db.refresh(current_user)
+
+        await AuditService.log(
+            db,
+            user_id=current_user.id,
+            username=current_user.username,
+            display_name=current_user.display_name,
+            org_id=current_user.org_id,
+            module="user",
+            action="update_me",
+            description=f"用户 [{current_user.display_name}] 更新个人信息",
+            target_type="user",
+            target_id=current_user.id,
+            target_name=current_user.username,
+            ip=ip,
+            user_agent=user_agent,
+        )
+
+        return current_user
+
+    @staticmethod
+    async def change_current_user_password(
+        db: AsyncSession,
+        *,
+        current_user: User,
+        old_password: str,
+        new_password: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> User:
+        if not verify_password(old_password, current_user.password_hash):
+            raise ValueError("当前密码错误")
+
+        is_valid, error_msg = PasswordValidator.validate(new_password, strict=False)
+        if not is_valid:
+            raise ValueError(error_msg)
+
+        current_user.password_hash = hash_password(new_password)
+        current_user.must_change_password = False
+        current_user.active_session_id = None
+        current_user.active_session_ip = None
+        current_user.active_session_user_agent = None
+        current_user.active_session_at = None
+        await db.flush()
+
+        await AuditService.log(
+            db,
+            user_id=current_user.id,
+            username=current_user.username,
+            display_name=current_user.display_name,
+            org_id=current_user.org_id,
+            module="user",
+            action="change_pwd",
+            description=f"用户 [{current_user.display_name}] 修改个人密码",
+            target_type="user",
+            target_id=current_user.id,
+            target_name=current_user.username,
+            ip=ip,
+            user_agent=user_agent,
+        )
+
+        return current_user

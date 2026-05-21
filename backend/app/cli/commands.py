@@ -98,16 +98,24 @@ def seed_category_dicts() -> None:
     asyncio.run(seed())
 
 
+def seed_transaction_accounting_defaults() -> None:
+    from scripts.seed_transaction_accounting_defaults import seed
+
+    asyncio.run(seed())
+
+
 async def _seed_all() -> None:
     from scripts.seed_category_dicts import seed as seed_categories
     from scripts.seed_file_specs import seed as seed_specs
     from scripts.seed_platforms import seed as seed_platform_data
+    from scripts.seed_transaction_accounting_defaults import seed as seed_transaction_accounting
     from scripts.seed_users import seed as seed_user_data
 
     await seed_platform_data()
     await seed_user_data()
     await seed_specs()
     await seed_categories()
+    await seed_transaction_accounting()
     print("\n[OK] All seeds complete.")
 
 

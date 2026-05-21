@@ -25,6 +25,12 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "首页", icon: "House" },
             },
             {
+                path: "profile",
+                name: "ProfileCenter",
+                component: () => import("@/views/profile/index.vue"),
+                meta: { title: "个人中心", icon: "User" },
+            },
+            {
                 path: "organizations",
                 name: "Organizations",
                 component: () => import("@/views/organization/index.vue"),
@@ -51,6 +57,16 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "店铺管理", icon: "Shop" },
             },
             {
+                path: "category-dicts",
+                name: "CategoryDicts",
+                component: () => import("@/views/category-dict/index.vue"),
+                meta: {
+                    title: "动账重分类字典",
+                    icon: "Collection",
+                    roles: ["superadmin"],
+                },
+            },
+            {
                 path: "upload",
                 name: "UploadCenter",
                 component: () => import("@/views/upload/index.vue"),
@@ -60,43 +76,75 @@ const routes: RouteRecordRaw[] = [
                 path: "tasks",
                 name: "Tasks",
                 component: () => import("@/views/task/index.vue"),
-                meta: { title: "任务列表", icon: "List" },
+                meta: { title: "核算任务", icon: "List" },
             },
             {
                 path: "summaries",
                 name: "Summaries",
                 component: () => import("@/views/summary/index.vue"),
-                meta: { title: "汇总明细", icon: "Document" },
+                meta: { title: "核算明细", icon: "Document" },
             },
             {
                 path: "summary-report",
                 name: "SummaryReport",
                 component: () => import("@/views/summary-report/index.vue"),
-                meta: { title: "汇总报表", icon: "DataAnalysis" },
+                meta: { title: "核算报表", icon: "DataAnalysis" },
             },
             {
                 path: "transaction-upload",
                 name: "TransactionUploadCenter",
-                component: () => import("@/views/transaction-placeholder/index.vue"),
-                meta: { title: "动账上传中心", icon: "Upload" },
+                redirect: "/upload",
+                meta: { title: "上传中心", icon: "Upload" },
             },
             {
                 path: "transaction-tasks",
                 name: "TransactionTasks",
-                component: () => import("@/views/transaction-placeholder/index.vue"),
-                meta: { title: "动账任务列表", icon: "List" },
+                component: () =>
+                    import("@/views/transaction-accounting/tasks.vue"),
+                meta: { title: "资金任务", icon: "List" },
+            },
+            {
+                path: "transaction-rules",
+                name: "TransactionRules",
+                component: () =>
+                    import("@/views/transaction-accounting/rules.vue"),
+                meta: {
+                    title: "资金重分类规则",
+                    icon: "Setting",
+                    roles: ["superadmin"],
+                },
             },
             {
                 path: "transaction-summaries",
                 name: "TransactionSummaries",
-                component: () => import("@/views/transaction-placeholder/index.vue"),
-                meta: { title: "动账汇总明细", icon: "Document" },
+                component: () =>
+                    import("@/views/transaction-accounting/details.vue"),
+                meta: { title: "资金明细", icon: "Document" },
             },
             {
                 path: "transaction-summary-report",
                 name: "TransactionSummaryReport",
-                component: () => import("@/views/transaction-placeholder/index.vue"),
-                meta: { title: "动账汇总报表", icon: "DataAnalysis" },
+                component: () =>
+                    import("@/views/transaction-accounting/report.vue"),
+                meta: { title: "资金报表", icon: "DataAnalysis" },
+            },
+            {
+                path: "bic-tasks",
+                name: "BicTasks",
+                component: () => import("@/views/bic-accounting/tasks.vue"),
+                meta: { title: "BIC任务", icon: "List" },
+            },
+            {
+                path: "bic-details",
+                name: "BicDetails",
+                component: () => import("@/views/bic-accounting/details.vue"),
+                meta: { title: "BIC明细", icon: "Document" },
+            },
+            {
+                path: "bic-report",
+                name: "BicReport",
+                component: () => import("@/views/bic-accounting/report.vue"),
+                meta: { title: "BIC报表", icon: "DataAnalysis" },
             },
             {
                 path: "audit-logs",
@@ -135,7 +183,9 @@ router.beforeEach((to, _from, next) => {
     }
 
     // Set page title
-    const title = to.meta.title ? `${to.meta.title} - FinEngine 财务运营平台` : "FinEngine 财务运营平台";
+    const title = to.meta.title
+        ? `${to.meta.title} - FinEngine 财务核算平台`
+        : "FinEngine 财务核算平台";
     document.title = title as string;
 
     // Public routes (login page)

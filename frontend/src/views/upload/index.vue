@@ -684,6 +684,127 @@
         </div>
 
         <el-dialog
+            v-model="uploadConfirmVisible"
+            title="确认开始上传"
+            width="760px"
+            append-to-body
+            destroy-on-close
+            :close-on-click-modal="false"
+        >
+            <div class="upload-complete-dialog">
+                <div>
+                    <p class="upload-complete-title">
+                        本次将上传 {{ readyUploadItems.length }} 个文件
+                    </p>
+                    <p class="upload-complete-desc">
+                        系统会先创建统一上传记录，再根据文件类型派生任务。所有可识别文件都会进入核算任务；抖音动账文件会额外创建资金任务；抖音
+                        BIC 文件会额外创建 BIC 任务。
+                    </p>
+                </div>
+            </div>
+            <div class="upload-confirm-summary">
+                <div class="upload-confirm-stat">
+                    <span>总大小</span>
+                    <strong>{{ uploadConfirmSummary.totalSizeLabel }}</strong>
+                </div>
+                <div class="upload-confirm-stat">
+                    <span>核算任务</span>
+                    <strong>{{ uploadConfirmSummary.orderCount }}</strong>
+                </div>
+                <div class="upload-confirm-stat">
+                    <span>动账资金任务</span>
+                    <strong>{{ uploadConfirmSummary.transactionCount }}</strong>
+                </div>
+                <div class="upload-confirm-stat">
+                    <span>BIC任务</span>
+                    <strong>{{ uploadConfirmSummary.bicCount }}</strong>
+                </div>
+            </div>
+            <div class="upload-confirm-note">
+                提交前请重点核对文件名、年月、店铺、性质和预计进入模块。若识别结果不对，先返回修改命名再上传。
+            </div>
+            <el-table
+                :data="uploadConfirmRows"
+                stripe
+                border
+                class="summary-table upload-confirm-table"
+                max-height="420"
+            >
+                <el-table-column
+                    type="index"
+                    label="#"
+                    width="52"
+                    align="center"
+                />
+                <el-table-column
+                    prop="name"
+                    label="文件名"
+                    min-width="220"
+                    show-overflow-tooltip
+                />
+                <el-table-column
+                    prop="monthLabel"
+                    label="年月"
+                    width="110"
+                    align="center"
+                />
+                <el-table-column
+                    prop="typeLabel"
+                    label="性质"
+                    width="110"
+                    align="center"
+                />
+                <el-table-column
+                    prop="shopLabel"
+                    label="店铺"
+                    min-width="170"
+                    show-overflow-tooltip
+                />
+                <el-table-column
+                    prop="platformLabel"
+                    label="平台"
+                    width="120"
+                    align="center"
+                />
+                <el-table-column
+                    prop="sizeLabel"
+                    label="大小"
+                    width="110"
+                    align="right"
+                />
+                <el-table-column
+                    prop="targetLabel"
+                    label="预计进入模块"
+                    min-width="190"
+                    show-overflow-tooltip
+                />
+                <el-table-column
+                    label="检查结果"
+                    min-width="210"
+                    show-overflow-tooltip
+                >
+                    <template #default="{ row }">
+                        <el-tag
+                            :type="row.reviewStatusType"
+                            size="small"
+                            effect="plain"
+                        >
+                            {{ row.reviewStatusLabel }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <template #footer>
+                <el-button @click="uploadConfirmVisible = false"
+                    >取消</el-button
+                >
+                <el-button type="primary" @click="confirmStartUpload"
+                    >确认上传</el-button
+                >
+            </template>
+        </el-dialog>
+
+        <el-dialog
             v-model="uploadCompleteDialogVisible"
             title="上传完成"
             width="420px"
@@ -701,7 +822,7 @@
                         成功上传 {{ uploadCompleteCount }} 个文件
                     </p>
                     <p class="upload-complete-desc">
-                        系统已创建处理任务，可以继续上传或前往任务列表查看进度。
+                        系统已创建统一上传记录，并按文件类型派生对应任务，可以继续上传或前往任务列表查看进度。
                     </p>
                 </div>
             </div>
@@ -805,6 +926,18 @@ interface FileItem {
     status: "pending" | "uploading" | "success" | "error";
     progress: number;
     error?: string;
+}
+
+interface UploadConfirmRow {
+    name: string;
+    monthLabel: string;
+    typeLabel: string;
+    shopLabel: string;
+    platformLabel: string;
+    sizeLabel: string;
+    targetLabel: string;
+    reviewStatusLabel: string;
+    reviewStatusType: "success" | "warning" | "danger";
 }
 
 interface UploadBatchContext {
@@ -1049,6 +1182,7 @@ const orgLoading = ref(false);
 const orgOptions = ref<Organization[]>([]);
 const targetOrgId = ref<number | undefined>(undefined);
 const isReadingHeaders = ref(false);
+const uploadConfirmVisible = ref(false);
 const uploadCompleteDialogVisible = ref(false);
 const uploadCompleteCount = ref(0);
 const uploadingFileName = ref("");
@@ -1119,8 +1253,104 @@ const canUpload = computed(() => {
     );
 });
 
+const uploadConfirmRows = computed<UploadConfirmRow[]>(() =>
+    orderUploadItems(uploadableItems.value).map((item) => ({
+        name: item.name,
+        monthLabel: formatMetaMonth(item),
+        typeLabel: formatConfirmType(item),
+        shopLabel: item.meta?.shop || "-",
+        platformLabel:
+            item.matchedRule?.platform_name ||
+            item.matchedRule?.platform_code ||
+            "-",
+        sizeLabel: formatFileSize(item.file.size),
+        targetLabel: uploadTargetLabel(item),
+        reviewStatusLabel: uploadReviewStatusLabel(item),
+        reviewStatusType: uploadReviewStatusType(item),
+    })),
+);
+
+const uploadConfirmSummary = computed(() => {
+    let orderCount = 0;
+    let transactionCount = 0;
+    let bicCount = 0;
+    const totalBytes = totalFileBytes(readyUploadItems.value);
+
+    for (const item of readyUploadItems.value) {
+        const targets = uploadTargets(item);
+        if (targets.includes("核算任务")) orderCount += 1;
+        if (targets.includes("资金任务")) transactionCount += 1;
+        if (targets.includes("BIC任务")) bicCount += 1;
+    }
+
+    return {
+        totalSizeLabel: formatFileSize(totalBytes),
+        orderCount,
+        transactionCount,
+        bicCount,
+    };
+});
+
 function totalFileBytes(items: FileItem[]): number {
     return items.reduce((sum, item) => sum + item.file.size, 0);
+}
+
+function formatMetaMonth(item: FileItem): string {
+    if (!item.meta) return "-";
+    return `${item.meta.year}-${String(item.meta.month).padStart(2, "0")}`;
+}
+
+function formatConfirmType(item: FileItem): string {
+    if (!item.meta?.type) return "-";
+    return fileTypeLabel(item.meta.type);
+}
+
+function formatFileSize(bytes: number): string {
+    if (bytes >= 1024 * 1024 * 1024) {
+        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+    if (bytes >= 1024 * 1024) {
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+    return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function uploadTargets(item: FileItem): string[] {
+    const type = item.meta?.type?.toLowerCase() || "";
+    const platform = item.matchedRule?.platform_code || "";
+    const targets = new Set<string>();
+
+    targets.add("核算任务");
+
+    if (type === "动账" && platform === "douyin") {
+        targets.add("资金任务");
+    }
+
+    if (type === "bic" && platform === "douyin") {
+        targets.add("BIC任务");
+    }
+
+    return Array.from(targets);
+}
+
+function uploadTargetLabel(item: FileItem): string {
+    const targets = uploadTargets(item);
+    return targets.length > 0 ? targets.join(" / ") : "-";
+}
+
+function uploadReviewStatusLabel(item: FileItem): string {
+    if (isFileReadyForUpload(item)) return "可上传";
+    if (item.status === "success") return "已上传";
+    return validationMessage(item);
+}
+
+function uploadReviewStatusType(
+    item: FileItem,
+): "success" | "warning" | "danger" {
+    if (isFileReadyForUpload(item)) return "success";
+    if (!item.meta) return "danger";
+    if (item.headerMatch.status === "matched") return "warning";
+    return "danger";
 }
 
 // Load file specs on mount for platform auto-detection
@@ -1853,6 +2083,11 @@ async function runUploadQueue(itemsToUpload: FileItem[]) {
 
 async function startUpload() {
     if (!canUpload.value) return;
+    uploadConfirmVisible.value = true;
+}
+
+async function confirmStartUpload() {
+    uploadConfirmVisible.value = false;
 
     // 计算总文件大小
     const totalBytes = totalFileBytes(readyUploadItems.value);
@@ -1860,26 +2095,28 @@ async function startUpload() {
 
     // 检查本月上传额度。超级管理员代上传时，后端会按目标组织在创建批次前再次校验。
     if (!userStore.isSuperAdmin) {
-      try {
-          const result = await checkUploadQuota(totalBytes);
-          if (!result.can_upload) {
-              await ElMessageBox.alert(
-                  `${result.message}\n\n本次上传文件总大小：${totalMB} MB`,
-                  '本月上传额度不足',
-                  {
-                      appendTo: 'body',
-                      confirmButtonText: '我知道了',
-                      customClass: 'upload-quota-limit-message-box',
-                      modalClass: 'upload-quota-limit-message-box__mask',
-                      type: 'warning',
-                  }
-              );
-              return;
-          }
-      } catch (error: any) {
-          ElMessage.error('检查本月上传额度失败：' + (error.message || '未知错误'));
-          return;
-      }
+        try {
+            const result = await checkUploadQuota(totalBytes);
+            if (!result.can_upload) {
+                await ElMessageBox.alert(
+                    `${result.message}\n\n本次上传文件总大小：${totalMB} MB`,
+                    "本月上传额度不足",
+                    {
+                        appendTo: "body",
+                        confirmButtonText: "我知道了",
+                        customClass: "upload-quota-limit-message-box",
+                        modalClass: "upload-quota-limit-message-box__mask",
+                        type: "warning",
+                    },
+                );
+                return;
+            }
+        } catch (error: any) {
+            ElMessage.error(
+                "检查本月上传额度失败：" + (error.message || "未知错误"),
+            );
+            return;
+        }
     }
 
     await runUploadQueue(orderUploadItems(readyUploadItems.value));
@@ -2408,6 +2645,52 @@ function exportFailedList() {
 
 .file-table {
     border-radius: 0;
+}
+
+.upload-confirm-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 14px 0 12px;
+}
+
+.upload-confirm-stat {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color-light);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+
+    span {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    strong {
+        color: var(--text-primary);
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+}
+
+.upload-confirm-note {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--warning-light-7);
+    border-radius: 10px;
+    background: var(--warning-light-9);
+    color: var(--warning-dark-2);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.upload-confirm-table {
+    :deep(.el-table__cell) {
+        vertical-align: top;
+    }
 }
 
 .shop-cell {

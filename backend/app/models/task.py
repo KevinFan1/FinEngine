@@ -17,12 +17,12 @@ class ProcessingTask(SoftDeleteMixin, Base):
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=False, comment="触发用户ID")
 
-    # Celery task tracking
-    celery_task_id: Mapped[str | None] = mapped_column(String(200), nullable=True, comment="Celery任务ID")
+    # 任务跟踪
+    celery_task_id: Mapped[str | None] = mapped_column(String(200), nullable=True, comment="异步任务 ID（Celery）")
     status: Mapped[str] = mapped_column(String(20), default="queued", comment="任务状态")
     progress: Mapped[int] = mapped_column(SmallInteger, default=0, comment="进度百分比 0~100")
 
-    # Execution results
+    # 执行结果
     processed_rows: Mapped[int] = mapped_column(Integer, default=0, comment="已处理行数")
     success_rows: Mapped[int] = mapped_column(Integer, default=0, comment="成功行数")
     failed_rows: Mapped[int] = mapped_column(Integer, default=0, comment="失败行数")

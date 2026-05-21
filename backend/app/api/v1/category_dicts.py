@@ -33,7 +33,7 @@ async def list_category_dicts(
     page_size: int = Query(50, ge=1, le=200),
     platform_id: int | None = Query(None),
     type_code: str | None = Query(None),
-    current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
     """列出分类字典（支持按平台/类型筛选）。"""
@@ -165,7 +165,7 @@ async def delete_category_dict(
 @router.post("/classify", response_model=ApiResponse[ClassifyResult])
 async def classify_single(
     body: ClassifyRequest,
-    current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
     """对单条文本进行分类。"""
@@ -192,7 +192,7 @@ async def classify_single(
 @router.post("/classify-batch", response_model=ApiResponse[list[ClassifyResult]])
 async def classify_batch_endpoint(
     body: ClassifyBatchRequest,
-    current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
     """批量文本分类。"""

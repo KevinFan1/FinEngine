@@ -32,7 +32,7 @@ class FinancialSummary(SoftDeleteMixin, Base):
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     shop_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=False, comment="店铺ID")
 
-    # Unique key dimensions
+    # 唯一键维度
     summary_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="汇总年份")
     summary_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="汇总月份")
     source_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default=text("0"), comment="数据表上传年份，来自文件名解析")
@@ -42,7 +42,9 @@ class FinancialSummary(SoftDeleteMixin, Base):
     platform_name: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码冗余")
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称冗余")
 
-    # 财务指标列 — 由「动账」文件填充
+    # 财务指标列，由“动账”文件填充
+    order_paid_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, server_default=text("0"), comment="订单实付金额")
+    refund_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, server_default=text("0"), comment="退款金额")
     gmv: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="实收GMV")
     platform_income: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="平台其他收入")
     platform_fee: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="平台服务费")
@@ -53,10 +55,10 @@ class FinancialSummary(SoftDeleteMixin, Base):
     provider_commission: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="服务商佣金")
     donation_fee: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="支付捐赠费用")
 
-    # 由「运费险」文件填充
+    # 由“运费险”文件填充
     insurance_fee: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="运费险")
 
-    # 由「bic」文件填充
+    # 由“BIC”文件填充
     bic: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="BIC")
 
     # 扩展字段

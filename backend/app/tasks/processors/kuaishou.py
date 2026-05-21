@@ -152,6 +152,8 @@ class KuaishouGmvStrategy(FinancialSummaryStrategy):
     """Kuaishou GMV formulas."""
 
     fields: tuple[str, ...] = (
+        "order_paid_amount",
+        "refund_amount",
         "gmv",
         "platform_income",
         "platform_fee",
@@ -200,6 +202,8 @@ class KuaishouGmvStrategy(FinancialSummaryStrategy):
     ) -> dict[str, Decimal]:
         _ = category_dict
         return {
+            "order_paid_amount": self._compute_order_paid_amount(vals),
+            "refund_amount": self._compute_refund_amount(vals),
             "gmv": self._compute_gmv(vals),
             "platform_income": self._compute_platform_income(vals),
             "platform_fee": self._compute_platform_fee(vals),
@@ -213,6 +217,14 @@ class KuaishouGmvStrategy(FinancialSummaryStrategy):
     @staticmethod
     def _compute_gmv(vals: dict[str, object]) -> Decimal:
         return safe_decimal(vals.get("订单实付(元)")) - safe_decimal(vals.get("订单退款(元)"))
+
+    @staticmethod
+    def _compute_order_paid_amount(vals: dict[str, object]) -> Decimal:
+        return safe_decimal(vals.get("订单实付(元)"))
+
+    @staticmethod
+    def _compute_refund_amount(vals: dict[str, object]) -> Decimal:
+        return safe_decimal(vals.get("订单退款(元)"))
 
     @staticmethod
     def _compute_platform_income(vals: dict[str, object]) -> Decimal:

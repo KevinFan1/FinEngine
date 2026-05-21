@@ -5,7 +5,7 @@
         <div class="placeholder-icon">
           <el-icon><Wallet /></el-icon>
         </div>
-        <p class="placeholder-kicker">动账核算</p>
+        <p class="placeholder-kicker">动账资金核算</p>
         <h2>{{ pageTitle }}</h2>
         <p class="placeholder-desc">
           这里预留独立的{{ pageTitle }}页面，后续会接入动账专用接口和处理逻辑。
@@ -21,7 +21,7 @@
           </div>
           <div class="placeholder-item">
             <span>数据范围</span>
-            <strong>动账核算</strong>
+            <strong>动账资金核算</strong>
           </div>
         </div>
       </section>
@@ -38,7 +38,7 @@ import { Wallet } from '@element-plus/icons-vue'
 
 const route = useRoute()
 
-const pageTitle = computed(() => (route.meta.title as string) || '动账核算')
+const pageTitle = computed(() => (route.meta.title as string) || '动账资金核算')
 </script>
 
 <style scoped lang="scss">

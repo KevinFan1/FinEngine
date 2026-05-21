@@ -1,4 +1,4 @@
-"""Add active session device metadata
+"""为用户添加当前会话设备信息
 
 Revision ID: 005
 Revises: 004
@@ -19,7 +19,7 @@ def upgrade() -> None:
     op.execute("ALTER TABLE fin_users ADD COLUMN IF NOT EXISTS active_session_ip VARCHAR(64)")
     op.execute("ALTER TABLE fin_users ADD COLUMN IF NOT EXISTS active_session_user_agent VARCHAR(500)")
     op.execute("ALTER TABLE fin_users ADD COLUMN IF NOT EXISTS active_session_at TIMESTAMP WITH TIME ZONE")
-    op.execute("COMMENT ON COLUMN fin_users.active_session_ip IS '当前登录IP'")
+    op.execute("COMMENT ON COLUMN fin_users.active_session_ip IS '当前登录 IP'")
     op.execute("COMMENT ON COLUMN fin_users.active_session_user_agent IS '当前登录客户端'")
     op.execute("COMMENT ON COLUMN fin_users.active_session_at IS '当前会话登录时间'")
 

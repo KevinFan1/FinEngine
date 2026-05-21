@@ -60,6 +60,8 @@ def test_xiaohongshu_gmv_aggregates_and_extracts_order_times(tmp_path: Path) -> 
     assert result["failed_rows"] == 0
     assert [row["order_no"] for row in result["orders"]] == ["xhs-1", "xhs-2"]
     agg = result["groups"]["小红书店铺|2026|4"]
+    assert agg["order_paid_amount"] == Decimal("100")
+    assert agg["refund_amount"] == Decimal("20")
     assert agg["gmv"] == Decimal("80")
     assert agg["platform_income"] == Decimal("6.50")
     assert agg["platform_fee"] == Decimal("3.50")

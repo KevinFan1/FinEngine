@@ -2,15 +2,11 @@
   <div class="page-container">
     <!-- Filter bar -->
     <el-card shadow="never" class="search-card audit-search-card">
-      <div class="search-card-head">
-        <div>
-          <p class="search-card-kicker">AUDIT TRAIL</p>
-          <h2 class="search-card-title">先定位操作，再查看日志详情</h2>
-        </div>
-        <div class="search-card-tip">
-          支持按模块、操作类型、操作人和时间范围快速筛选
-        </div>
-      </div>
+      <SearchCardIntro
+        kicker="AUDIT TRAIL"
+        title="先定位操作，再查看日志详情"
+        tip="支持按模块、操作类型、操作人和时间范围快速筛选"
+      />
 
       <el-form :model="searchForm" inline class="audit-filter-form">
         <el-form-item label="模块">
@@ -23,14 +19,12 @@
             collapse-tags-tooltip
             style="width: 160px"
           >
-            <el-option label="认证" value="auth" />
-            <el-option label="组织" value="org" />
-            <el-option label="用户" value="user" />
-            <el-option label="上传" value="upload" />
-            <el-option label="任务" value="task" />
-            <el-option label="汇总" value="summary" />
-            <el-option label="导出" value="export" />
-            <el-option label="系统" value="system" />
+            <el-option
+              v-for="item in moduleOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="操作类型">
@@ -80,6 +74,7 @@
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
+      <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
     </el-card>
 
     <!-- Table -->
@@ -227,6 +222,9 @@ import { getAuditLogList, type AuditLog } from '@/api/audit'
 import { formatDateTime } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import { useUserStore } from '@/stores/user'
+import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
+import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
 const userStore = useUserStore()
 const isSuperAdmin = computed(() => userStore.isSuperAdmin)
@@ -261,6 +259,8 @@ const moduleMap: Record<string, string> = {
   export: '导出',
   platform: '平台',
   category_dict: '分类字典',
+  transaction_accounting: '动账资金核算',
+  bic_accounting: 'BIC核算',
   system: '系统',
   summary_adjustment: '汇总调整',
 }
@@ -277,13 +277,36 @@ const actionMap: Record<string, string> = {
   upload: '上传',
   upload_start: '发起上传',
   upload_file: '上传文件',
+  task_rerun: '重跑任务',
   download: '下载',
   export: '导出',
   view: '查看',
   config_change: '配置变更',
 }
 
+const moduleOptions = Object.entries(moduleMap).map(([value, label]) => ({ value, label }))
 const actionOptions = Object.entries(actionMap).map(([value, label]) => ({ value, label }))
+
+interface AuditFilterTag extends ActiveFilterTag {
+  key: 'modules' | 'actions' | 'username' | 'dateRange'
+}
+
+const activeFilterTags = computed<AuditFilterTag[]>(() => {
+  const tags: AuditFilterTag[] = []
+  searchForm.modules.forEach((module) => {
+    tags.push({ key: 'modules', label: '模块', value: moduleLabel(module) })
+  })
+  searchForm.actions.forEach((action) => {
+    tags.push({ key: 'actions', label: '操作类型', value: actionLabel(action) })
+  })
+  if (searchForm.username) {
+    tags.push({ key: 'username', label: '操作人', value: searchForm.username })
+  }
+  if (searchForm.dateRange?.length === 2) {
+    tags.push({ key: 'dateRange', label: '时间范围', value: `${searchForm.dateRange[0]} 至 ${searchForm.dateRange[1]}` })
+  }
+  return tags
+})
 
 function moduleLabel(val: string): string {
   return moduleMap[val] || val
@@ -337,6 +360,19 @@ function handleReset() {
   fetchData()
 }
 
+function removeFilterTag(tag: AuditFilterTag) {
+  if (tag.key === 'modules') {
+    searchForm.modules = searchForm.modules.filter((module) => moduleLabel(module) !== tag.value)
+  } else if (tag.key === 'actions') {
+    searchForm.actions = searchForm.actions.filter((action) => actionLabel(action) !== tag.value)
+  } else if (tag.key === 'username') {
+    searchForm.username = ''
+  } else if (tag.key === 'dateRange') {
+    searchForm.dateRange = null
+  }
+  handleSearch()
+}
+
 function openDetailDrawer(row: AuditLog) {
   selectedLog.value = row
   detailDrawerVisible.value = true
@@ -355,37 +391,6 @@ onMounted(() => {
 
 .audit-search-card {
   margin-bottom: 16px;
-}
-
-.search-card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.search-card-kicker {
-  margin: 0 0 4px;
-  color: var(--el-color-primary);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-
-.search-card-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.search-card-tip {
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
 }
 
 .table-card {
@@ -428,12 +433,6 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 600;
   line-height: 22px;
-}
-
-@media (max-width: 768px) {
-  .search-card-head {
-    flex-direction: column;
-  }
 }
 
 .detail-panel {

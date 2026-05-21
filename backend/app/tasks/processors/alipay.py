@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, safe_str
+from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, normalize_positive_summary_fields, open_tabular_rows, safe_str
 from app.utils.money import ZERO_MONEY, safe_decimal
 
 ALIPAY_DONGZHANG_HEADERS: list[str] = [
@@ -32,6 +32,8 @@ ALIPAY_DONGZHANG_HEADERS: list[str] = [
 ]
 
 ALIPAY_SUMMARY_FIELDS: tuple[str, ...] = (
+    "order_paid_amount",
+    "refund_amount",
     "gmv",
     "platform_income",
     "platform_fee",
@@ -133,7 +135,7 @@ class AlipayProcessor(FinancialSummaryExcelProcessorMixin):
                     result["failed_rows"] += 1
                     result["errors"].append(f"Row {result['total_rows'] + header_row_number}: {e}")
 
-        result["groups"] = {f"{shop}|{year}|{month}": values for (shop, year, month), values in groups.items()}
+        result["groups"] = {f"{shop}|{year}|{month}": normalize_positive_summary_fields(values) for (shop, year, month), values in groups.items()}
         return result
 
     @staticmethod
@@ -178,8 +180,10 @@ class AlipayProcessor(FinancialSummaryExcelProcessorMixin):
 
         values = {field: ZERO_MONEY for field in ALIPAY_SUMMARY_FIELDS}
         if account_type == "在线支付":
+            values["order_paid_amount"] += income
             values["gmv"] += income
         if account_type == "退款（交易退款）":
+            values["refund_amount"] += expense
             values["gmv"] -= expense
 
         if "其他收入-百亿补贴激励前返" in business_desc:

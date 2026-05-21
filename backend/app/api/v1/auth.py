@@ -6,10 +6,18 @@ from app.core.deps import get_current_user
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token
 from app.models.user import User
-from app.schemas.auth import CaptchaResponse, LoginRequest, TokenResponse, UserInfo
+from app.schemas.auth import (
+    CaptchaResponse,
+    ChangeMyPasswordRequest,
+    LoginRequest,
+    TokenResponse,
+    UpdateMeRequest,
+    UserInfo,
+)
 from app.schemas.common import ApiResponse
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
+from app.services.user_service import UserService
 from app.services.captcha_service import captcha_service
 
 router = APIRouter()
@@ -110,9 +118,60 @@ async def get_me(
             phone=current_user.phone,
             display_name=current_user.display_name,
             email=current_user.email,
+            must_change_password=current_user.must_change_password,
             role=current_user.role,
             status=current_user.status,
             org_name=org_name,
             last_login_at=str(current_user.last_login_at) if current_user.last_login_at else None,
         )
     )
+
+
+@router.put("/me", response_model=ApiResponse[UserInfo])
+async def update_me(
+    body: UpdateMeRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+
+    try:
+        user = await UserService.update_current_user(
+            db,
+            current_user=current_user,
+            display_name=body.display_name,
+            phone=body.phone,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
+
+    return await get_me(current_user=user, db=db)
+
+
+@router.put("/me/password", response_model=ApiResponse)
+async def change_my_password(
+    body: ChangeMyPasswordRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+
+    try:
+        await UserService.change_current_user_password(
+            db,
+            current_user=current_user,
+            old_password=body.old_password,
+            new_password=body.new_password,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
+
+    return ApiResponse(message="密码修改成功，请重新登录")

@@ -27,7 +27,7 @@ class SummaryAdjustment(SoftDeleteMixin, Base):
     platform_name: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码")
     shop_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=False, comment="店铺ID")
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称快照")
-    metric_key: Mapped[str] = mapped_column(String(50), nullable=False, comment="调整指标: gmv=实收GMV return_cost=退货费用及其他费用")
+    metric_key: Mapped[str] = mapped_column(String(50), nullable=False, comment="调整指标：实收GMV/退货费用及其他费用")
     adjustment_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), nullable=False, default=0, comment="有符号调整金额，正数增加，负数减少")
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="调整备注")
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=False, comment="创建用户ID")

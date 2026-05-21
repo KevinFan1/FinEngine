@@ -74,6 +74,7 @@ def test_qianniu_dongzhang_returns_order_summary_rows(tmp_path: Path) -> None:
         [
             _row(QIANNIU_DONGZHANG_HEADERS, 支付流水号="f1", 主订单id="qn-1", 入帐类型="交易收款", **{"收入金额(元)": "100.50"}),
             _row(QIANNIU_DONGZHANG_HEADERS, 支付流水号="f2", 主订单id="qn-1", 入帐类型="交易收款", **{"支出金额(元)": "20"}),
+            _row(QIANNIU_DONGZHANG_HEADERS, 支付流水号="f6", 主订单id="qn-1", 入帐类型="交易退款(售后)", **{"支出金额(元)": "15.25"}),
             _row(QIANNIU_DONGZHANG_HEADERS, 支付流水号="f3", 主订单id="qn-1", 入帐类型="服务费", **{"收入金额(元)": "1.00", "支出金额(元)": "4.50"}),
             _row(QIANNIU_DONGZHANG_HEADERS, 支付流水号="f4", 主订单id="qn-2", 入帐类型="其他", **{"收入金额(元)": "8"}),
             _row(QIANNIU_DONGZHANG_HEADERS, 支付流水号="f5", 主订单id="", 入帐类型="交易收款", **{"收入金额(元)": "9"}),
@@ -82,13 +83,15 @@ def test_qianniu_dongzhang_returns_order_summary_rows(tmp_path: Path) -> None:
 
     result = qianniu_processor.process(str(file_path), shop_name="千牛店铺", type_code="动账")
 
-    assert result["total_rows"] == 5
-    assert result["success_rows"] == 4
+    assert result["total_rows"] == 6
+    assert result["success_rows"] == 5
     assert result["failed_rows"] == 1
     assert result["groups"] == {}
     assert result["order_summary_fields"] == list(QIANNIU_ORDER_SUMMARY_FIELDS)
+    assert result["order_summary_fields"][:2] == ["order_paid_amount", "refund_amount"]
     assert result["order_summary_rows"] == [
-        {"order_no": "qn-1", "gmv": Decimal("100.50")},
-        {"order_no": "qn-1", "gmv": Decimal("-20")},
+        {"order_no": "qn-1", "order_paid_amount": Decimal("100.50"), "gmv": Decimal("100.50")},
+        {"order_no": "qn-1", "order_paid_amount": Decimal("0"), "gmv": Decimal("-20")},
+        {"order_no": "qn-1", "refund_amount": Decimal("15.25")},
         {"order_no": "qn-1", "platform_fee": Decimal("-3.50")},
     ]

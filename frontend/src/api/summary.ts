@@ -3,6 +3,8 @@ import type { PaginatedData } from "./index";
 import { downloadBlob } from "./index";
 
 interface SummaryMetricFields {
+    order_paid_amount: number;
+    refund_amount: number;
     real_gmv: number;
     platform_other_income: number;
     platform_service_fee: number;

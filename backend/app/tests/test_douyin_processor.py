@@ -2,8 +2,12 @@ from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 
+from app.models.shop import Shop
+from app.models.summary import FinancialSummary
+from app.tasks.aggregation import AggregationService
 from app.tasks.processors.douyin import (
     DOUYIN_BIC_HEADERS,
     DOUYIN_DONGZHANG_HEADERS,
@@ -64,6 +68,8 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
     assert result["success_rows"] == 1
     agg = result["groups"]["抖音店铺|2026|4"]
     assert agg["gmv"] == Decimal("80")
+    assert agg["order_paid_amount"] == Decimal("100")
+    assert agg["refund_amount"] == Decimal("20")
     assert agg["platform_income"] == Decimal("6")
     assert agg["platform_fee"] == Decimal("5")
     assert agg["return_cost"] == Decimal("3")
@@ -72,6 +78,80 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
     assert agg["promotion_fee"] == Decimal("8")
     assert agg["provider_commission"] == Decimal("9")
     assert "donation_fee" not in agg
+
+
+def test_douyin_dongzhang_computes_paid_refund_and_positive_fee_totals(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_positive_fees.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-05-01 10:00:00",
+                动账时间="2026-05-02 10:00:00",
+                动账方向="入账",
+                备注="订单结算",
+                动账金额="0",
+                订单实付应结="100",
+                订单退款="-20",
+                平台服务费="0",
+                佣金="-10",
+                招商服务费="-8",
+                站外推广费="-6",
+                服务商佣金="-4",
+            ),
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-05-01 10:00:00",
+                动账时间="2026-05-02 10:00:00",
+                动账方向="入账",
+                备注="下单返现金活动追缴用户后商家退回平台返现金额",
+                动账金额="5",
+                订单实付应结="0",
+                订单退款="0",
+                平台服务费="0",
+                佣金="3",
+                招商服务费="2",
+                站外推广费="1",
+                服务商佣金="0.5",
+            ),
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-05-01 10:00:00",
+                动账时间="2026-05-02 10:00:00",
+                动账方向="出账",
+                备注="下单返现金活动追缴用户后商家退回平台返现金额",
+                动账金额="11",
+                订单实付应结="0",
+                订单退款="0",
+                平台服务费="0",
+            ),
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-05-01 10:00:00",
+                动账时间="2026-05-02 10:00:00",
+                动账方向="出账",
+                备注="退款转赔付",
+                动账金额="3",
+                订单实付应结="0",
+                订单退款="0",
+                平台服务费="0",
+            ),
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+
+    assert result["success_rows"] == 4
+    agg = result["groups"]["抖音店铺|2026|5"]
+    assert agg["order_paid_amount"] == Decimal("95")
+    assert agg["refund_amount"] == Decimal("23")
+    assert agg["gmv"] == Decimal("72")
+    assert agg["commission"] == Decimal("7")
+    assert agg["merchant_fee"] == Decimal("6")
+    assert agg["promotion_fee"] == Decimal("5")
+    assert agg["provider_commission"] == Decimal("3.5")
 
 
 def test_douyin_simple_monthly_sum_types(tmp_path: Path) -> None:
@@ -158,3 +238,69 @@ def test_douyin_order_extracts_sub_order_time_and_parent_order(tmp_path: Path) -
             "extra_data": {"主订单编号": "P20260515001"},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_douyin_order_paid_and_refund_amounts_are_persisted() -> None:
+    summary = FinancialSummary(
+        org_id=1,
+        shop_id=1,
+        summary_year=2026,
+        summary_month=5,
+        source_platform_code="douyin",
+        report_platform_code="douyin",
+        platform_name="douyin",
+        shop_name="抖音店铺",
+        order_paid_amount=Decimal("0"),
+        refund_amount=Decimal("0"),
+        commission=Decimal("0"),
+        merchant_fee=Decimal("0"),
+        promotion_fee=Decimal("0"),
+        provider_commission=Decimal("0"),
+        source_file_ids=[1],
+    )
+    shop = Shop(id=1, org_id=1, platform_name="douyin", shop_name="抖音店铺")
+
+    class FakeResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, _stmt):
+            self.calls += 1
+            return FakeResult(shop if self.calls == 1 else summary)
+
+        async def flush(self):
+            return None
+
+    await AggregationService.upsert_summary_dict(
+        FakeSession(),
+        org_id=1,
+        shop_id=1,
+        year=2026,
+        month=5,
+        platform_name="douyin",
+        shop_name="抖音店铺",
+        values={
+            "order_paid_amount": Decimal("95"),
+            "refund_amount": Decimal("-23"),
+            "commission": Decimal("-7"),
+            "merchant_fee": Decimal("-6"),
+            "promotion_fee": Decimal("-5"),
+            "provider_commission": Decimal("-3.5"),
+        },
+        source_file_id=2,
+    )
+
+    assert summary.order_paid_amount == Decimal("95")
+    assert summary.refund_amount == Decimal("23")
+    assert summary.commission == Decimal("7")
+    assert summary.merchant_fee == Decimal("6")
+    assert summary.promotion_fee == Decimal("5")
+    assert summary.provider_commission == Decimal("3.5")

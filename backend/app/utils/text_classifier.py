@@ -71,7 +71,9 @@ def _build_sorted_index(
     entries: list[tuple[str, str]] = []
     for category, keywords in category_dict.items():
         for kw in keywords:
-            entries.append((kw, category))
+            normalized_keyword = extract_chinese(kw)
+            if normalized_keyword:
+                entries.append((normalized_keyword, category))
     entries.sort(key=lambda x: len(x[0]), reverse=True)
     return entries
 
@@ -103,9 +105,10 @@ def classify_text(
     # ── 第一轮：精确匹配 ──
     for category, keywords in category_dict.items():
         for kw in keywords:
-            if result.chinese_text == kw:
+            normalized_keyword = extract_chinese(kw)
+            if result.chinese_text == normalized_keyword:
                 result.category = category
-                result.matched_keyword = kw
+                result.matched_keyword = normalized_keyword
                 result.match_type = "exact"
                 return result
 
@@ -141,9 +144,10 @@ def classify_batch(
         matched = False
         for category, keywords in category_dict.items():
             for kw in keywords:
-                if r.chinese_text == kw:
+                normalized_keyword = extract_chinese(kw)
+                if r.chinese_text == normalized_keyword:
                     r.category = category
-                    r.matched_keyword = kw
+                    r.matched_keyword = normalized_keyword
                     r.match_type = "exact"
                     matched = True
                     break

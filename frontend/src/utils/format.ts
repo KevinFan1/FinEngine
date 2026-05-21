@@ -22,8 +22,11 @@ export interface ParsedFileName {
  *   26年02月_其他服务款_小红书店铺.xlsx
  */
 export function parseFileName(filename: string): ParsedFileName | null {
-    // Remove file extension
-    const nameWithoutExt = filename.replace(/\.(xlsx|xlsm|xls|csv)$/i, "");
+    // Remove one or more trailing spreadsheet extensions, e.g. .xlsx.xlsx
+    const nameWithoutExt = filename.replace(
+        /(?:\.(?:xlsx|xlsm|xls|csv))+$/i,
+        "",
+    );
 
     // Match pattern: YY/YYYY年M(M)月_性质_店铺
     const regex = /^(\d{2}|\d{4})年(\d{1,2})月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _](.+)$/i;
@@ -37,7 +40,9 @@ export function parseFileName(filename: string): ParsedFileName | null {
 
     const lowerType = match[3].toLowerCase();
     const type = lowerType === "bic" || lowerType === "gmv" ? lowerType : match[3];
-    const shop = match[4].trim();
+    const shop = match[4]
+        .replace(/(?:\.(?:xlsx|xlsm|xls|csv))+$/i, "")
+        .trim();
     if (!shop) return null;
 
     return { year, month, type, shop };

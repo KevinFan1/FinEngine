@@ -135,6 +135,8 @@ def test_kuaishou_gmv_aggregates_financial_fields(tmp_path: Path) -> None:
     assert result["orders"][0]["order_created_at"].month == 4
 
     agg = result["groups"]["快手店铺|2026|4"]
+    assert agg["order_paid_amount"] == Decimal("300")
+    assert agg["refund_amount"] == Decimal("30")
     assert agg["gmv"] == Decimal("270")
     assert agg["platform_income"] == Decimal("165")
     assert agg["platform_fee"] == Decimal("69")
