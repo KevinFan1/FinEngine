@@ -2,6 +2,11 @@
   <div class="page-container">
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
+      <SearchCardIntro
+        kicker="组织工作台"
+        title="先筛选组织，再查看或维护配置"
+        tip="支持按组织名称和编码快速定位"
+      />
       <el-form :model="searchForm" inline>
         <el-form-item label="组织名称">
           <el-input
@@ -21,6 +26,7 @@
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
+      <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
     </el-card>
 
     <!-- Table area -->
@@ -250,6 +256,9 @@ import { getOrgQuota, updateQuota } from '@/api/quota'
 import { formatDateTime } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import { useUserStore } from '@/stores/user'
+import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
+import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import type { ActiveFilterTag } from '@/components/activeFilterTags'
 import QuotaManagement from '@/components/QuotaManagement.vue'
 
 const userStore = useUserStore()
@@ -257,6 +266,18 @@ const userStore = useUserStore()
 // Search
 const searchForm = reactive({
   keyword: '',
+})
+
+interface OrgFilterTag extends ActiveFilterTag {
+  key: 'keyword'
+}
+
+const activeFilterTags = computed<OrgFilterTag[]>(() => {
+  const tags: OrgFilterTag[] = []
+  if (searchForm.keyword) {
+    tags.push({ key: 'keyword', label: '关键词', value: searchForm.keyword })
+  }
+  return tags
 })
 
 // Table
@@ -338,6 +359,13 @@ function handleReset() {
   searchForm.keyword = ''
   pagination.page = 1
   fetchData()
+}
+
+function removeFilterTag(tag: OrgFilterTag) {
+  if (tag.key === 'keyword') {
+    searchForm.keyword = ''
+  }
+  handleSearch()
 }
 
 function openDetailDrawer(row: Organization) {

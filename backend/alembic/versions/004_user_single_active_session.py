@@ -1,4 +1,4 @@
-"""Add single active session marker for users
+"""为用户添加单一有效会话标记
 
 Revision ID: 004
 Revises: 003
@@ -17,7 +17,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("ALTER TABLE fin_users ADD COLUMN IF NOT EXISTS active_session_id VARCHAR(64)")
-    op.execute("COMMENT ON COLUMN fin_users.active_session_id IS '当前有效登录会话ID'")
+    op.execute("COMMENT ON COLUMN fin_users.active_session_id IS '当前有效登录会话 ID'")
 
 
 def downgrade() -> None:

@@ -20,5 +20,5 @@ class Platform(SoftDeleteMixin, Base):
     processor_code: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="处理器平台编码，默认等于平台编码")
     order_scope_code: Mapped[str | None] = mapped_column(String(30), nullable=True, comment="订单索引归属编码，默认等于父平台编码")
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment="排序值")
-    status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态: 1=启用 0=禁用")
+    status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态：1=启用 0=禁用")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")

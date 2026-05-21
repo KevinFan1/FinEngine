@@ -9,9 +9,11 @@ from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
 from app.schemas.upload import UploadBatchCreate, UploadFileCallback
 from app.services.audit_service import AuditService
+from app.services.bic_accounting_service import BicAccountingService
 from app.services.platform_profile_service import resolve_platform_profile
 from app.services.quota_service import QuotaService
 from app.services.shop_service import ShopService
+from app.services.transaction_accounting_service import TransactionAccountingService
 
 
 class UploadService:
@@ -203,9 +205,51 @@ class UploadService:
             upload_file.status = "failed"
             upload_file.error_message = task.error_message
 
+        await UploadService.dispatch_independent_tasks(
+            db,
+            upload_file=upload_file,
+            user=user,
+            ip=ip,
+            user_agent=user_agent,
+        )
+
         await db.flush()
         await db.refresh(upload_file)
         return upload_file
+
+    @staticmethod
+    async def dispatch_independent_tasks(
+        db: AsyncSession,
+        *,
+        upload_file: UploadFile,
+        user: User,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        parsed_type = (upload_file.parsed_type or "").lower()
+        source_platform = (
+            upload_file.source_platform_code
+            or upload_file.detected_platform
+            or ""
+        ).lower()
+
+        if source_platform == "douyin" and parsed_type == "动账":
+            await TransactionAccountingService.create_from_shared_upload(
+                db,
+                upload_file=upload_file,
+                user=user,
+                ip=ip,
+                user_agent=user_agent,
+            )
+
+        if source_platform == "douyin" and parsed_type == "bic":
+            await BicAccountingService.create_from_shared_upload(
+                db,
+                upload_file=upload_file,
+                user=user,
+                ip=ip,
+                user_agent=user_agent,
+            )
 
     @staticmethod
     async def list_batches(

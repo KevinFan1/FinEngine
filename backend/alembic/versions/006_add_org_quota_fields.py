@@ -28,7 +28,7 @@ def upgrade() -> None:
         sa.Integer(),
         nullable=False,
         server_default='5',
-        comment='最大用户数量（免费版 5 个）'
+        comment='最大用户数量（免费版为 5 个）'
     ))
 
     # 添加存储配额字段（单位：字节）
@@ -55,7 +55,7 @@ def upgrade() -> None:
         sa.String(20),
         nullable=False,
         server_default='free',
-        comment='套餐类型: free=免费版, basic=基础版, pro=专业版, enterprise=企业版'
+        comment='套餐类型：免费版/基础版/专业版/企业版'
     ))
 
     # 添加套餐到期时间

@@ -14,7 +14,7 @@ from app.core.database import async_session_factory
 from app.models.file_spec import FileSpec
 from app.models.platform import Platform
 from app.tasks.processors.alipay import ALIPAY_DONGZHANG_HEADERS
-from app.tasks.processors.douyin import DOUYIN_ORDER_HEADERS, DOUYIN_SHIPPING_INSURANCE_HEADERS
+from app.tasks.processors.douyin import DOUYIN_DONGZHANG_HEADERS, DOUYIN_ORDER_HEADERS, DOUYIN_SHIPPING_INSURANCE_HEADERS
 from app.tasks.processors.qianniu import QIANNIU_DONGZHANG_HEADERS, QIANNIU_ORDER_HEADERS
 from app.tasks.processors.weixin_video import WEIXIN_VIDEO_BIC_HEADERS, WEIXIN_VIDEO_DONGZHANG_HEADERS, WEIXIN_VIDEO_ORDER_HEADERS
 from app.tasks.processors.xiaohongshu import (
@@ -52,46 +52,7 @@ FILE_SPECS = [
         "type_code": "动账",
         "name": "抖音动账",
         "match_threshold": 5,
-        "headers": [
-            "动账时间",
-            "动帐流水号",
-            "动账方向",
-            "动账金额",
-            "动账账户",
-            "动账场景",
-            "计费类型",
-            "子订单号",
-            "订单号",
-            "售后编号",
-            "下单时间",
-            "商品ID",
-            "商品名称",
-            "达人ID",
-            "达人名称",
-            "订单类型",
-            "订单实付应结",
-            "运费实付",
-            "实际平台补贴_运费",
-            "实际平台补贴",
-            "其他平台补贴",
-            "以旧换新抵扣",
-            "政府补贴平台垫资",
-            "实际达人补贴",
-            "实际抖音支付补贴",
-            "实际抖音月付营销补贴",
-            "银行补贴",
-            "订单退款",
-            "平台服务费",
-            "佣金",
-            "服务商佣金",
-            "渠道分成",
-            "招商服务费",
-            "站外推广费",
-            "其他分成",
-            "是否免佣",
-            "免佣金额",
-            "备注",
-        ],
+        "headers": DOUYIN_DONGZHANG_HEADERS,
     },
     {
         "platform_code": "douyin",

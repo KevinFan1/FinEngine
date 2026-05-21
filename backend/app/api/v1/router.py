@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     audit_logs,
     auth,
+    bic_accounting,
     category_dicts,
     file_specs,
     health,
@@ -14,6 +15,7 @@ from app.api.v1 import (
     summary_adjustments,
     summaries,
     tasks,
+    transaction_accounting,
     uploads,
     users,
 )
@@ -31,6 +33,8 @@ api_router.include_router(file_specs.router, prefix="/file-specs", tags=["文件
 api_router.include_router(tasks.router, prefix="/tasks", tags=["任务管理"])
 api_router.include_router(summaries.router, prefix="/summaries", tags=["汇总报表"])
 api_router.include_router(summary_adjustments.router, prefix="/summary-adjustments", tags=["汇总调整"])
+api_router.include_router(transaction_accounting.router, prefix="/transaction-accounting", tags=["动账核算"])
+api_router.include_router(bic_accounting.router, prefix="/bic-accounting", tags=["BIC核算"])
 api_router.include_router(platforms.router, prefix="/platforms", tags=["平台配置"])
 api_router.include_router(category_dicts.router, prefix="/category-dicts", tags=["分类字典"])
 api_router.include_router(audit_logs.router, prefix="/audit-logs", tags=["操作日志"])

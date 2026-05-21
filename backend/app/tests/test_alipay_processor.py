@@ -85,12 +85,16 @@ def test_alipay_dongzhang_uses_third_row_header_and_trade_month(tmp_path: Path) 
     assert set(result["groups"]) == {"支付宝店铺|2026|4", "支付宝店铺|2026|3"}
 
     april = result["groups"]["支付宝店铺|2026|4"]
+    assert april["order_paid_amount"] == Decimal("100.50")
+    assert april["refund_amount"] == Decimal("20.00")
     assert april["gmv"] == Decimal("80.50")
     assert april["platform_income"] == Decimal("6.50")
     assert april["platform_fee"] == Decimal("0")
     assert april["return_cost"] == Decimal("8.00")
 
     march = result["groups"]["支付宝店铺|2026|3"]
+    assert march["order_paid_amount"] == Decimal("0")
+    assert march["refund_amount"] == Decimal("0")
     assert march["platform_fee"] == Decimal("-10.50")
     assert march["gmv"] == Decimal("0")
     assert march["platform_income"] == Decimal("0")

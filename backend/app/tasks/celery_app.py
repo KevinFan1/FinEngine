@@ -12,7 +12,7 @@ from celery import Celery
 from celery.signals import worker_process_shutdown
 
 from app.core.config import settings
-from app.tasks.processors.base import safe_str
+from app.tasks.processors.base import normalize_positive_summary_fields, safe_str
 
 celery_app = Celery("finengine", broker=settings.CELERY_REDIS_URL, backend=settings.CELERY_REDIS_URL)
 celery_app.conf.update(
@@ -29,6 +29,10 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["app.tasks"])
+celery_app.conf.imports = (
+    "app.tasks.transaction_accounting",
+    "app.tasks.bic_accounting",
+)
 
 logger = logging.getLogger("finengine.worker")
 _worker_loop: asyncio.AbstractEventLoop | None = None
@@ -233,6 +237,8 @@ def _group_summary_rows_by_order_created_time(
         agg = grouped.setdefault(key, {field: Decimal("0") for field in fields})
         for field in fields:
             agg[field] = agg.get(field, Decimal("0")) + Decimal(str(row.get(field) or "0"))
+    for agg in grouped.values():
+        normalize_positive_summary_fields(agg)
     return grouped, list(dict.fromkeys(missing_order_nos))
 
 
@@ -924,85 +930,6 @@ async def _process_file_platform_async(
                         proc_result=proc_result,
                         summary_ids=summary_ids,
                         groups=len(grouped_values),
-                        missing_order_nos=missing_order_nos,
-                    )
-                    task.success_rows = task.result_summary["success_rows"]
-                    task.failed_rows = task.result_summary["failed_rows"]
-                    task.finished_at = datetime.now(timezone.utc)
-                    if upload_file:
-                        upload_file.status = "success"
-                        upload_file.row_count = proc_result["total_rows"]
-                    await db.commit()
-                    return
-
-                if file_type == "bic" and "bic_rows" in proc_result:
-                    from app.services.order_index_service import OrderIndexService
-                    from app.tasks.aggregation import AggregationService
-
-                    task.progress = 80
-                    await db.commit()
-
-                    bic_rows = proc_result.get("bic_rows", [])
-                    if not bic_rows:
-                        task.status = "success"
-                        task.progress = 100
-                        task.success_rows = proc_result["success_rows"]
-                        task.failed_rows = proc_result["failed_rows"]
-                        task.result_summary = {
-                            "type": "bic",
-                            "summary_ids": [],
-                            "total_rows": proc_result["total_rows"],
-                            "success_rows": proc_result["success_rows"],
-                            "failed_rows": proc_result["failed_rows"],
-                            "missing_order_count": 0,
-                            "groups": 0,
-                            "errors": _json_safe(proc_result["errors"][:10]),
-                        }
-                        task.finished_at = datetime.now(timezone.utc)
-                        if upload_file:
-                            upload_file.status = "success"
-                            upload_file.row_count = proc_result["total_rows"]
-                        await db.commit()
-                        return
-
-                    order_created_times = await OrderIndexService.get_order_created_times(
-                        db,
-                        platform_code=order_scope_code,
-                        order_nos=[safe_str(row.get("order_no")) for row in bic_rows],
-                    )
-                    grouped_bic, missing_order_nos = _group_money_by_order_created_time(
-                        bic_rows,
-                        order_created_times=order_created_times,
-                        amount_key="bic",
-                    )
-
-                    summary_ids: list[int] = []
-                    for (g_year, g_month), bic in grouped_bic.items():
-                        summary = await AggregationService.upsert_summary_dict(
-                            db,
-                            org_id=org_id,
-                            shop_id=shop_id,
-                            year=g_year,
-                            month=g_month,
-                            platform_name=platform_code,
-                            shop_name=shop_name,
-                            values={"bic": bic},
-                            source_file_id=file_id,
-                            source_year=source_year,
-                            source_month=source_month,
-                            source_platform_code=platform_code,
-                            report_platform_code=report_platform_code,
-                            shop_platform_code=report_platform_code,
-                        )
-                        summary_ids.append(summary.id)
-
-                    task.status = "success"
-                    task.progress = 100
-                    task.result_summary = _build_order_dependency_summary(
-                        type_code="bic",
-                        proc_result=proc_result,
-                        summary_ids=summary_ids,
-                        groups=len(grouped_bic),
                         missing_order_nos=missing_order_nos,
                     )
                     task.success_rows = task.result_summary["success_rows"]

@@ -75,8 +75,8 @@ def test_weixin_video_dongzhang_returns_order_summary_rows(tmp_path: Path) -> No
     assert result["groups"] == {}
     assert result["order_summary_fields"] == list(WEIXIN_VIDEO_ORDER_SUMMARY_FIELDS)
     assert result["order_summary_rows"] == [
-        {"order_no": "wx-1", "gmv": Decimal("100.50")},
-        {"order_no": "wx-1", "gmv": Decimal("-20")},
+        {"order_no": "wx-1", "order_paid_amount": Decimal("100.50"), "gmv": Decimal("100.50")},
+        {"order_no": "wx-1", "refund_amount": Decimal("20"), "gmv": Decimal("-20")},
         {"order_no": "wx-1", "platform_fee": Decimal("3.50")},
         {"order_no": "wx-2", "commission": Decimal("8")},
     ]
@@ -123,9 +123,9 @@ def test_weixin_video_shipping_insurance_returns_zero_placeholder(tmp_path: Path
 def test_group_summary_rows_by_order_created_time_supports_multiple_fields() -> None:
     grouped, missing_order_nos = _group_summary_rows_by_order_created_time(
         [
-            {"order_no": "wx-1", "gmv": Decimal("100.50")},
-            {"order_no": "wx-1", "gmv": Decimal("-20"), "platform_fee": Decimal("3.50")},
-            {"order_no": "wx-2", "commission": Decimal("8")},
+            {"order_no": "wx-1", "order_paid_amount": Decimal("100.50"), "gmv": Decimal("100.50")},
+            {"order_no": "wx-1", "refund_amount": Decimal("-20"), "gmv": Decimal("-20"), "platform_fee": Decimal("3.50")},
+            {"order_no": "wx-2", "commission": Decimal("-8")},
             {"order_no": "missing", "gmv": Decimal("5")},
         ],
         order_created_times={
@@ -135,9 +135,13 @@ def test_group_summary_rows_by_order_created_time_supports_multiple_fields() -> 
         fields=WEIXIN_VIDEO_ORDER_SUMMARY_FIELDS,
     )
 
+    assert grouped[(2026, 4)]["order_paid_amount"] == Decimal("100.50")
+    assert grouped[(2026, 4)]["refund_amount"] == Decimal("20")
     assert grouped[(2026, 4)]["gmv"] == Decimal("80.50")
     assert grouped[(2026, 4)]["platform_fee"] == Decimal("3.50")
     assert grouped[(2026, 4)]["commission"] == Decimal("0")
+    assert grouped[(2026, 5)]["order_paid_amount"] == Decimal("0")
+    assert grouped[(2026, 5)]["refund_amount"] == Decimal("0")
     assert grouped[(2026, 5)]["gmv"] == Decimal("0")
     assert grouped[(2026, 5)]["commission"] == Decimal("8")
     assert missing_order_nos == ["missing"]

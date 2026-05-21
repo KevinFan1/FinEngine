@@ -47,16 +47,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 register_exception_handlers(app)
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-API-Encrypted-Response", "X-Request-ID"],
-)
-
 # Request ID tracking for distributed tracing
 app.add_middleware(RequestIDMiddleware)
 
@@ -68,6 +58,17 @@ app.add_middleware(ApiLoggingMiddleware)
 
 # Optional encrypted transport for frontend API payloads
 app.add_middleware(ApiCryptoMiddleware)
+
+# CORS must be registered last so it wraps all custom middleware responses,
+# including early crypto/decryption errors returned before the router runs.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-API-Encrypted-Response", "X-Request-ID"],
+)
 
 # Mount API router
 app.include_router(api_router, prefix="/api/v1")

@@ -7,11 +7,13 @@ from app.tasks.processors.base import (
     FinancialSummaryStrategy,
     SimpleMonthlySumProcessorMixin,
     canonical_remark,
+    normalize_positive_summary_fields,
     open_tabular_rows,
     parse_datetime,
     safe_str,
 )
 from app.utils.money import ZERO_MONEY, safe_decimal
+from app.utils.text_classifier import classify_text
 
 # ── Douyin 动账 expected headers ─────────────────────────────────────────────
 DOUYIN_DONGZHANG_HEADERS: list[str] = [
@@ -52,6 +54,7 @@ DOUYIN_DONGZHANG_HEADERS: list[str] = [
     "其他分成",
     "是否免佣",
     "免佣金额",
+    "商户主体名称",
     "备注",
 ]
 
@@ -180,6 +183,8 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
     """Douyin 动账 formulas."""
 
     fields: tuple[str, ...] = (
+        "order_paid_amount",
+        "refund_amount",
         "gmv",
         "platform_income",
         "platform_fee",
@@ -240,16 +245,20 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             refund_to_compensation = safe_decimal(vals.get("动账金额"))
 
         cashback = ZERO_MONEY
-        if "返现" in beizhu:
-            cashback = safe_decimal(vals.get("订单实付应结"))
+        if "返现" in beizhu and safe_str(vals.get("动账方向")) == "入账":
+            cashback = safe_decimal(vals.get("动账金额"))
 
         order_paid = safe_decimal(vals.get("订单实付应结"))
         order_refund = safe_decimal(vals.get("订单退款"))
-        gmv = order_paid + order_refund - refund_to_compensation - cashback
+        order_paid_amount = order_paid - cashback
+        refund_amount = refund_to_compensation - order_refund
+        gmv = order_paid_amount - refund_amount
 
         platform_income = safe_decimal(vals.get("实际平台补贴")) + safe_decimal(vals.get("实际抖音支付补贴")) + safe_decimal(vals.get("实际抖音月付营销补贴"))
 
         return {
+            "order_paid_amount": order_paid_amount,
+            "refund_amount": refund_amount,
             "gmv": gmv,
             "platform_income": platform_income,
             "platform_fee": -safe_decimal(vals.get("平台服务费")),
@@ -260,6 +269,9 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             "provider_commission": safe_decimal(vals.get("服务商佣金")),
         }
 
+    def finalize_agg(self, agg: dict[str, Decimal]) -> dict[str, Decimal]:
+        return normalize_positive_summary_fields(agg)
+
     @staticmethod
     def _match_compensation(
         beizhu: str,
@@ -268,10 +280,7 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         if not category_dict or not beizhu:
             return None
 
-        for category_name, keywords in category_dict.items():
-            if beizhu in keywords:
-                return category_name
-        return None
+        return classify_text(beizhu, category_dict).category
 
 
 class DouyinProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumProcessorMixin):

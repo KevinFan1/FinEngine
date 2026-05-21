@@ -1,6 +1,11 @@
 <template>
-  <div class="page-container">
+    <div class="page-container">
     <el-card shadow="never" class="search-card">
+      <SearchCardIntro
+        kicker="店铺工作台"
+        title="先筛选店铺，再查看或维护资料"
+        tip="支持按平台和关键词快速定位店铺"
+      />
       <el-form :model="searchForm" inline>
         <el-form-item label="搜索">
           <el-input
@@ -34,6 +39,7 @@
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
+      <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
     </el-card>
 
     <el-card shadow="never" class="table-card shop-table-card">
@@ -200,6 +206,9 @@ import { formatDateTime } from '@/utils/format'
 import { getFallbackPlatforms, toReportPlatformOptions, type PlatformOption } from '@/utils/platform'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import PlatformBadge from '@/components/PlatformBadge.vue'
+import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
+import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
 const platforms = ref<Platform[]>(getFallbackPlatforms())
 const platformOptions = ref<PlatformOption[]>(toReportPlatformOptions(platforms.value))
@@ -208,6 +217,20 @@ const platformOptions = ref<PlatformOption[]>(toReportPlatformOptions(platforms.
 const searchForm = reactive({
   keyword: '',
   platformNames: [] as string[],
+})
+
+interface ShopFilterTag extends ActiveFilterTag {
+  key: 'keyword' | 'platformNames'
+}
+
+const activeFilterTags = computed<ShopFilterTag[]>(() => {
+  const tags: ShopFilterTag[] = []
+  if (searchForm.keyword.trim()) tags.push({ key: 'keyword', label: '搜索', value: searchForm.keyword.trim() })
+  searchForm.platformNames.forEach((value) => {
+    const option = platformOptions.value.find((item) => item.value === value)
+    tags.push({ key: 'platformNames', label: '平台', value: option?.label || value })
+  })
+  return tags
 })
 
 // Table
@@ -291,6 +314,18 @@ async function fetchPlatformOptions() {
 function handleReset() {
   searchForm.keyword = ''
   searchForm.platformNames = []
+  pagination.page = 1
+  fetchData()
+}
+
+function removeFilterTag(tag: ShopFilterTag) {
+  if (tag.key === 'keyword') searchForm.keyword = ''
+  if (tag.key === 'platformNames') {
+    searchForm.platformNames = searchForm.platformNames.filter((item) => {
+      const option = platformOptions.value.find((platform) => platform.value === item)
+      return (option?.label || item) !== tag.value
+    })
+  }
   pagination.page = 1
   fetchData()
 }

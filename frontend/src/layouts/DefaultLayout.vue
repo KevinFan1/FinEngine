@@ -12,7 +12,7 @@
                 <transition name="fade-text">
                     <div v-show="!appStore.sidebarCollapsed" class="logo-copy">
                         <span class="logo-text">FinEngine</span>
-                        <span class="logo-subtitle">财务运营平台</span>
+                        <span class="logo-subtitle">财务核算平台</span>
                     </div>
                 </transition>
             </div>
@@ -112,6 +112,15 @@
                         >
                         <el-breadcrumb-item
                             v-if="
+                                currentRouteParentTitle &&
+                                currentRouteParentTitle !== '工作台' &&
+                                currentRouteTitle !== currentRouteParentTitle
+                            "
+                        >
+                            {{ currentRouteParentTitle }}
+                        </el-breadcrumb-item>
+                        <el-breadcrumb-item
+                            v-if="
                                 currentRouteTitle &&
                                 currentRouteTitle !== '首页'
                             "
@@ -202,7 +211,7 @@
                     </div>
                 </div>
                 <div class="tab-cache-control">
-                    <span class="tab-cache-label">页面缓存</span>
+                    <span class="tab-cache-label">保留页面状态</span>
                     <el-switch
                         :model-value="appStore.tagCacheEnabled"
                         inline-prompt
@@ -266,10 +275,10 @@
         <div class="guide-drawer-body">
             <section class="guide-hero">
                 <p class="guide-kicker">推荐流程</p>
-                <h3>先维护基础信息，再上传文件核对结果</h3>
+                <h3>先上传，再按模块看任务和结果</h3>
                 <p class="guide-hero-desc">
                     当前账号角色：{{ currentRoleLabel }}。系统主流程以 “上传中心
-                    -> 任务列表 -> 汇总明细 / 汇总报表”
+                    -> 核算任务 / 资金任务 / BIC任务 -> 明细 / 报表”
                     为主，基础资料只需先配置一次，后续按月重复上传即可。
                 </p>
             </section>
@@ -332,6 +341,8 @@
             </section>
         </div>
     </el-drawer>
+
+    <ForcePasswordChangeDialog v-model="forcePasswordVisible" />
 </template>
 
 <script setup lang="ts">
@@ -339,6 +350,7 @@ import { computed, ref, watch, type Component } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { useRoute, useRouter } from "vue-router";
 import {
+    Collection,
     DataAnalysis,
     Document,
     House,
@@ -346,6 +358,7 @@ import {
     Money,
     OfficeBuilding,
     QuestionFilled,
+    Setting,
     Shop,
     Upload,
     User,
@@ -355,6 +368,7 @@ import { useAppStore, type Tab } from "@/stores/app";
 import { useUserStore } from "@/stores/user";
 import { useThemeStore } from "@/stores/theme";
 import BrandLogo from "@/components/BrandLogo.vue";
+import ForcePasswordChangeDialog from "@/components/ForcePasswordChangeDialog.vue";
 import QuotaWarning from "@/components/QuotaWarning.vue";
 
 const route = useRoute();
@@ -363,6 +377,7 @@ const appStore = useAppStore();
 const userStore = useUserStore();
 const themeStore = useThemeStore();
 const guideDrawerVisible = ref(false);
+const forcePasswordVisible = ref(false);
 
 const tabContextMenu = ref<{
     visible: boolean;
@@ -385,29 +400,29 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-    { path: "/dashboard", title: "首页", icon: House },
     {
-        path: "/organizations",
-        title: "组织管理",
-        icon: OfficeBuilding,
-        roles: ["superadmin"],
+        path: "/workspace",
+        title: "工作台",
+        icon: House,
+        children: [
+            { path: "/dashboard", title: "首页", icon: House },
+            { path: "/upload", title: "上传中心", icon: Upload },
+        ],
     },
     {
-        path: "/users",
-        title: "用户管理",
-        icon: User,
-        roles: ["superadmin", "org_admin"],
+        path: "/base-data",
+        title: "基础资料",
+        icon: Collection,
+        children: [{ path: "/shops", title: "店铺管理", icon: Shop }],
     },
-    { path: "/shops", title: "店铺管理", icon: Shop },
     {
         path: "/order-accounting",
         title: "动账核算",
         icon: Money,
         children: [
-            { path: "/upload", title: "上传中心", icon: Upload },
-            { path: "/tasks", title: "任务列表", icon: List },
-            { path: "/summaries", title: "汇总明细", icon: Document },
-            { path: "/summary-report", title: "汇总报表", icon: DataAnalysis },
+            { path: "/tasks", title: "核算任务", icon: List },
+            { path: "/summaries", title: "核算明细", icon: Document },
+            { path: "/summary-report", title: "核算报表", icon: DataAnalysis },
         ],
     },
     {
@@ -415,25 +430,84 @@ const menuItems: MenuItem[] = [
         title: "动账资金核算",
         icon: Wallet,
         children: [
-            { path: "/transaction-upload", title: "上传中心", icon: Upload },
-            { path: "/transaction-tasks", title: "任务列表", icon: List },
+            { path: "/transaction-tasks", title: "资金任务", icon: List },
             {
                 path: "/transaction-summaries",
-                title: "汇总明细",
+                title: "资金明细",
                 icon: Document,
             },
             {
                 path: "/transaction-summary-report",
-                title: "汇总报表",
+                title: "资金报表",
                 icon: DataAnalysis,
             },
         ],
     },
     {
-        path: "/audit-logs",
-        title: "操作日志",
-        icon: Document,
-        roles: ["superadmin", "org_admin"],
+        path: "/bic-accounting",
+        title: "BIC核算",
+        icon: Wallet,
+        children: [
+            {
+                path: "/bic-tasks",
+                title: "BIC任务",
+                icon: List,
+            },
+            {
+                path: "/bic-details",
+                title: "BIC明细",
+                icon: Document,
+            },
+            {
+                path: "/bic-report",
+                title: "BIC报表",
+                icon: DataAnalysis,
+            },
+        ],
+    },
+    {
+        path: "/rule-config",
+        title: "规则配置",
+        icon: Setting,
+        children: [
+            {
+                path: "/category-dicts",
+                title: "动账重分类字典",
+                icon: Collection,
+                roles: ["superadmin"],
+            },
+            {
+                path: "/transaction-rules",
+                title: "资金重分类规则",
+                icon: Setting,
+                roles: ["superadmin"],
+            },
+        ],
+    },
+    {
+        path: "/system-management",
+        title: "系统管理",
+        icon: OfficeBuilding,
+        children: [
+            {
+                path: "/organizations",
+                title: "组织管理",
+                icon: OfficeBuilding,
+                roles: ["superadmin"],
+            },
+            {
+                path: "/users",
+                title: "用户管理",
+                icon: User,
+                roles: ["superadmin", "org_admin"],
+            },
+            {
+                path: "/audit-logs",
+                title: "操作日志",
+                icon: Document,
+                roles: ["superadmin", "org_admin"],
+            },
+        ],
     },
 ];
 
@@ -460,6 +534,12 @@ const openedMenuPaths = computed(() => {
 });
 
 const currentRouteTitle = computed(() => (route.meta.title as string) || "");
+const currentRouteParentTitle = computed(() => {
+    const matched = menuItems.find((item) =>
+        item.children?.some((child) => child.path === route.path),
+    );
+    return matched?.title || "";
+});
 
 const cachedRouteNames = computed(() => {
     if (!appStore.tagCacheEnabled) return [];
@@ -484,73 +564,62 @@ const currentRoleLabel = computed(() => {
 const quickStartSteps = [
     {
         index: "01",
-        title: "先维护组织、用户、店铺",
+        title: "先维护店铺资料",
         desc: "至少保证店铺名称和实际上传文件里的店铺名一致，后续任务和报表才能稳定归集。",
     },
     {
         index: "02",
         title: "按命名规则上传文件",
-        desc: "文件名建议使用“年月_性质_店铺名”，系统会先识别年月、性质、店铺，再提交后台任务。",
+        desc: "文件名建议使用“年月_性质_店铺名”，系统会先识别年月、性质、店铺，再进入上传确认。",
     },
     {
         index: "03",
-        title: "到任务列表看处理结果",
-        desc: "这里查看排队、运行、成功、失败状态。失败任务先看错误原因，再决定重试或重新统计。",
+        title: "按模块查看任务结果",
+        desc: "普通文件先看核算任务，抖音动账文件额外看资金任务，抖音 BIC 文件额外看 BIC 任务。失败任务先看错误原因。",
     },
     {
         index: "04",
         title: "在明细和报表里核对数据",
-        desc: "汇总明细看原始处理结果，汇总报表看聚合结果和调整后的金额，用于最终导出。",
+        desc: "明细看原始处理结果，报表看聚合结果和调整后的金额，用于最终导出。",
     },
 ];
 
 const guideSections = [
     {
-        title: "首页",
-        desc: "看当前任务概况和快捷入口，适合先判断今天有没有失败任务、要不要先处理。",
-        tip: "工作台入口",
+        title: "工作台",
+        desc: "从首页和上传中心进入系统主流程，先上传，再看任务，再核对结果。",
+        tip: "主流程入口",
     },
     {
-        title: "组织管理",
-        desc: "维护组织信息，通常只有超级管理员会用到。",
-        tip: "权限配置",
-        roles: ["superadmin"],
-    },
-    {
-        title: "用户管理",
-        desc: "新增账号、分配角色、绑定所属组织。组织管理员一般从这里维护本组织人员。",
-        tip: "账号与角色",
-        roles: ["superadmin", "org_admin"],
-    },
-    {
-        title: "店铺管理",
-        desc: "维护店铺、平台和颜色标识。上传识别、任务筛选和报表汇总都会依赖这里的店铺配置。",
+        title: "基础资料",
+        desc: "先维护店铺资料，上传识别、任务筛选和报表汇总都会依赖这里的店铺配置。",
         tip: "先配一次",
     },
     {
-        title: "上传中心",
-        desc: "上传 Excel / CSV 财务文件，系统会先做文件名识别和表头预检，再生成后台任务。",
-        tip: "主入口",
+        title: "动账核算",
+        desc: "核算任务负责处理共享核算文件；核算明细看原始结果；核算报表看聚合结果。",
+        tip: "通用链路",
     },
     {
-        title: "任务列表",
-        desc: "查看处理进度、失败原因、批量重试和重新统计，是日常排查问题的核心页面。",
-        tip: "重点关注",
+        title: "动账资金核算",
+        desc: "重点看资金任务、明细和报表，适合处理抖音动账延伸出的资金链路。",
+        tip: "资金链路",
     },
     {
-        title: "汇总明细",
-        desc: "查看处理器生成的原始财务明细，适合核对平台收入、费用、佣金等基础结果。",
-        tip: "原始结果",
+        title: "BIC核算",
+        desc: "BIC 文件走独立任务链路，适合单独核对 BIC 相关结果。",
+        tip: "独立模块",
     },
     {
-        title: "汇总报表",
-        desc: "查看按核算年月聚合后的数据，可导出、筛选，并叠加人工调整金额。",
-        tip: "最终报表",
+        title: "规则配置",
+        desc: "管理员在这里维护动账重分类字典和资金重分类规则，普通用户只需要按规则上传和核对。",
+        tip: "管理员配置",
+        roles: ["superadmin"],
     },
     {
-        title: "操作日志",
-        desc: "记录关键操作，便于回查谁修改过数据、什么时候做过调整。",
-        tip: "审计追踪",
+        title: "系统管理",
+        desc: "组织、用户和操作日志都放在这里，避免和日常核算流程混在一起。",
+        tip: "后台管理",
         roles: ["superadmin", "org_admin"],
     },
 ];
@@ -596,6 +665,14 @@ watch(
                 closable: path !== "/dashboard",
             });
         }
+    },
+    { immediate: true },
+);
+
+watch(
+    () => userStore.userInfo?.must_change_password,
+    (mustChangePassword) => {
+        forcePasswordVisible.value = Boolean(mustChangePassword);
     },
     { immediate: true },
 );
@@ -663,14 +740,14 @@ function closeAllContextTabs() {
 function handleTagCacheToggle(value: string | number | boolean) {
     const enabled = Boolean(value);
     appStore.setTagCacheEnabled(enabled);
-    ElMessage.success(enabled ? "已开启 tag 缓存" : "已关闭 tag 缓存");
+    ElMessage.success(enabled ? "已开启页面状态保留" : "已关闭页面状态保留");
 }
 
 function handleCommand(command: string) {
     if (command === "logout") {
         userStore.logout();
     } else if (command === "profile") {
-        ElMessage.info("个人信息功能开发中");
+        router.push("/profile");
     }
 }
 </script>

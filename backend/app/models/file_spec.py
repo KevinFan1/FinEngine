@@ -1,9 +1,4 @@
-"""FileSpec — platform file header specifications for auto-detection.
-
-Stores the expected column headers for each platform + file type combination.
-The frontend reads these specs to auto-detect the platform and type of an
-uploaded Excel/CSV file by matching its headers.
-"""
+"""平台文件表头规格，用于自动识别上传文件。"""
 
 from datetime import datetime
 
@@ -29,10 +24,10 @@ class FileSpec(SoftDeleteMixin, Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     platform_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_platforms.id"), nullable=False, comment="平台ID")
-    type_code: Mapped[str] = mapped_column(String(30), nullable=False, comment="业务类型: 动账/gmv/bic/运费险/订单")
+    type_code: Mapped[str] = mapped_column(String(30), nullable=False, comment="业务类型：动账/gmv/bic/运费险/订单")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="规格名称，如「抖音动账」")
 
-    # Expected headers — ordered list of column names
+    # 期望表头：按顺序保存的列名列表
     headers: Mapped[list] = mapped_column(JSONB, nullable=False, comment="期望表头列表")
     match_threshold: Mapped[int] = mapped_column(SmallInteger, default=5, comment="最少匹配表头数量")
 

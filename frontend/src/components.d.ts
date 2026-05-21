@@ -7,6 +7,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ActiveFilterTags: typeof import('./components/ActiveFilterTags.vue')['default']
     BrandLogo: typeof import('./components/BrandLogo.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
@@ -34,6 +35,8 @@ declare module 'vue' {
     ElPagination: typeof import('element-plus/es')['ElPagination']
     ElPopover: typeof import('element-plus/es')['ElPopover']
     ElProgress: typeof import('element-plus/es')['ElProgress']
+    ElRadioButton: typeof import('element-plus/es')['ElRadioButton']
+    ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElScrollbar: typeof import('element-plus/es')['ElScrollbar']
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElSubMenu: typeof import('element-plus/es')['ElSubMenu']
@@ -43,11 +46,13 @@ declare module 'vue' {
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     FileTypeBadge: typeof import('./components/FileTypeBadge.vue')['default']
+    ForcePasswordChangeDialog: typeof import('./components/ForcePasswordChangeDialog.vue')['default']
     PlatformBadge: typeof import('./components/PlatformBadge.vue')['default']
     QuotaManagement: typeof import('./components/QuotaManagement.vue')['default']
     QuotaWarning: typeof import('./components/QuotaWarning.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SearchCardIntro: typeof import('./components/SearchCardIntro.vue')['default']
     ShopBadge: typeof import('./components/ShopBadge.vue')['default']
     SummaryDetailDrawer: typeof import('./components/SummaryDetailDrawer.vue')['default']
   }

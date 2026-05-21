@@ -2,6 +2,11 @@
   <div class="page-container">
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
+      <SearchCardIntro
+        kicker="用户工作台"
+        title="先筛选用户，再查看或维护账号"
+        tip="支持按姓名、手机号和组织快速定位用户"
+      />
       <el-form :model="searchForm" inline>
         <el-form-item label="搜索">
           <el-input
@@ -40,6 +45,7 @@
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
+      <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
     </el-card>
 
     <!-- Table area -->
@@ -322,6 +328,9 @@ import {
 import { getAllOrganizations, type Organization } from '@/api/organization'
 import { formatDateTime, getRoleLabel } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
+import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
+import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
 const userStore = useUserStore()
 
@@ -333,6 +342,20 @@ const searchForm = reactive({
 
 // Organization options
 const orgOptions = ref<Organization[]>([])
+
+interface UserFilterTag extends ActiveFilterTag {
+  key: 'keyword' | 'orgIds'
+}
+
+const activeFilterTags = computed<UserFilterTag[]>(() => {
+  const tags: UserFilterTag[] = []
+  if (searchForm.keyword.trim()) tags.push({ key: 'keyword', label: '搜索', value: searchForm.keyword.trim() })
+  searchForm.orgIds.forEach((value) => {
+    const org = orgOptions.value.find((item) => item.id === value)
+    tags.push({ key: 'orgIds', label: '组织', value: org?.name || String(value) })
+  })
+  return tags
+})
 
 // Role tag map
 const roleTagMap: Record<string, string> = {
@@ -409,6 +432,17 @@ function handleReset() {
   searchForm.orgIds = []
   pagination.page = 1
   fetchData()
+}
+
+function removeFilterTag(tag: UserFilterTag) {
+  if (tag.key === 'keyword') searchForm.keyword = ''
+  if (tag.key === 'orgIds') {
+    searchForm.orgIds = searchForm.orgIds.filter((item) => {
+      const org = orgOptions.value.find((orgItem) => orgItem.id === item)
+      return (org?.name || String(item)) !== tag.value
+    })
+  }
+  handleSearch()
 }
 
 // --- User Drawer ---

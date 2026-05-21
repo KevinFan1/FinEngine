@@ -7,6 +7,7 @@ This directory contains a source-based deployment baseline for the backend.
 - `env.production.example`: backend environment variable template
 - `install_backend.sh`: install backend dependencies with `uv`
 - `init_backend.sh`: run database migrations and optional seed data
+- `update_backend.sh`: guarded update flow for pull/install/migrate/restart/health-check
 - `start_api.sh`: start the FastAPI API process
 - `start_worker.sh`: start the Celery worker process
 - `supervisor/finengine.conf`: `supervisor` config for API + worker
@@ -102,6 +103,71 @@ Restart:
 ```bash
 supervisorctl restart finengine:*
 ```
+
+## Routine updates
+
+Use `update_backend.sh` for normal source updates so dependency installation,
+database migrations, process restart, and health checks are not skipped.
+
+From the backend directory:
+
+```bash
+cd /data/www/FinEngine/backend
+bash deploy/update_backend.sh --git-pull
+```
+
+If this release also needs the frontend rebuilt on the server:
+
+```bash
+bash deploy/update_backend.sh --git-pull --with-frontend-build
+```
+
+If this release includes seed data changes:
+
+```bash
+bash deploy/update_backend.sh --git-pull --with-seed
+```
+
+The update script stops immediately if any step fails. By default it runs:
+
+1. optional `git pull --ff-only`
+2. `uv sync --frozen`
+3. `uv run migrate-upgrade`
+4. optional `uv run seed-all`
+5. `uv run python -m compileall app`
+6. optional frontend `npm ci` and `npm run build`
+7. `supervisorctl restart finengine:*`
+8. health check against `/api/v1/health/detailed` and require `message: healthy`
+   with `api/database/redis` all `ok`
+
+Useful options:
+
+```bash
+bash deploy/update_backend.sh --help
+bash deploy/update_backend.sh --git-pull --branch main
+bash deploy/update_backend.sh --no-restart --no-health-check
+```
+
+The script uses a lock under `backend/tmp/` so two updates cannot run at the
+same time.
+
+## Same-server blue/green option
+
+Running two API processes on the same server is useful for lower-downtime
+switching and quick rollback, but it does not replace the update script. You
+still need to install dependencies and run migrations before traffic is moved.
+
+A practical single-server blue/green shape:
+
+- blue API: `APP_PORT=8000`
+- green API: `APP_PORT=8001`
+- nginx proxies to the active port
+- start the new color, check `/api/v1/health/detailed`, then switch nginx
+- keep the old color running briefly so rollback is just an nginx switch
+
+Be careful with database migrations in blue/green deployments. Both colors
+share the same database, so migrations should be backward compatible whenever
+old and new code may run at the same time.
 
 ## Notes
 

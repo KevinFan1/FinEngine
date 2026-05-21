@@ -129,6 +129,34 @@
                     </template>
                 </el-table-column>
                 <el-table-column
+                    prop="order_paid_amount"
+                    label="订单实付金额"
+                    width="145"
+                    align="right"
+                    header-align="right"
+                    class-name="money-column"
+                >
+                    <template #default="{ row }">
+                        <span class="font-mono money-cell">{{
+                            formatMoney(row.order_paid_amount)
+                        }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="refund_amount"
+                    label="退款金额"
+                    width="130"
+                    align="right"
+                    header-align="right"
+                    class-name="money-column"
+                >
+                    <template #default="{ row }">
+                        <span class="font-mono money-cell">{{
+                            formatMoney(row.refund_amount)
+                        }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column
                     prop="real_gmv"
                     label="实收GMV"
                     width="145"
@@ -356,6 +384,8 @@ const pagination = reactive({
 });
 
 const moneyColumns = [
+    "order_paid_amount",
+    "refund_amount",
     "real_gmv",
     "platform_other_income",
     "platform_service_fee",

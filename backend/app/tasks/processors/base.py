@@ -42,6 +42,8 @@ DATE_FORMATS: tuple[str, ...] = (
 )
 
 FINANCIAL_SUMMARY_FIELDS: tuple[str, ...] = (
+    "order_paid_amount",
+    "refund_amount",
     "gmv",
     "platform_income",
     "platform_fee",
@@ -51,6 +53,15 @@ FINANCIAL_SUMMARY_FIELDS: tuple[str, ...] = (
     "promotion_fee",
     "provider_commission",
     "donation_fee",
+)
+POSITIVE_SUMMARY_FIELDS: frozenset[str] = frozenset(
+    (
+        "refund_amount",
+        "commission",
+        "merchant_fee",
+        "promotion_fee",
+        "provider_commission",
+    )
 )
 CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gb18030")
 HEADER_SCAN_LIMIT = 20
@@ -101,6 +112,14 @@ def canonical_header(value: object) -> str:
     """Normalize small header variants shared by frontend and backend matching."""
     header = HEADER_NORMALIZE_PATTERN.sub("", safe_str(value))
     return header.replace("帐", "账").replace("（", "(").replace("）", ")").lower()
+
+
+def normalize_positive_summary_fields(values: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Normalize fee/refund fields that should display as positive totals."""
+    for field in POSITIVE_SUMMARY_FIELDS:
+        if field in values:
+            values[field] = abs(safe_decimal(values[field]))
+    return values
 
 
 def detect_csv_encoding(file_path: str) -> str:
@@ -375,6 +394,9 @@ class FinancialSummaryStrategy(ABC):
     def empty_agg(self) -> dict[str, Decimal]:
         return {field: ZERO_MONEY for field in self.fields}
 
+    def finalize_agg(self, agg: dict[str, Decimal]) -> dict[str, Decimal]:
+        return normalize_positive_summary_fields(agg)
+
 
 class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
     """Template method implementation for summary-field tabular processors."""
@@ -462,7 +484,7 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
                     result["failed_rows"] += 1
                     result["errors"].append(f"Row {result['total_rows'] + 1}: {e}")
 
-        result["groups"] = self._serialize_groups(groups)
+        result["groups"] = self._serialize_groups({key: strategy.finalize_agg(agg) for key, agg in groups.items()})
         return result
 
     @staticmethod

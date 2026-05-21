@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
 from app.services.shop_service import ShopService
+from app.tasks.processors.base import normalize_positive_summary_fields
 from app.utils.money import ZERO_MONEY, safe_decimal
 
 
@@ -21,6 +22,20 @@ class AggregationService:
       - 运费险: insurance_fee
       - bic:   bic
     """
+
+    DONGZHANG_FIELDS = (
+        "order_paid_amount",
+        "refund_amount",
+        "gmv",
+        "platform_income",
+        "platform_fee",
+        "return_cost",
+        "commission",
+        "merchant_fee",
+        "promotion_fee",
+        "provider_commission",
+        "donation_fee",
+    )
 
     @staticmethod
     async def upsert_summary(
@@ -94,15 +109,9 @@ class AggregationService:
 
         # Aggregate rows by type
         if type_code in {"动账", "gmv"}:
-            summary.gmv = AggregationService._sum_rows(rows, "gmv")
-            summary.platform_income = AggregationService._sum_rows(rows, "platform_income")
-            summary.platform_fee = AggregationService._sum_rows(rows, "platform_fee")
-            summary.return_cost = AggregationService._sum_rows(rows, "return_cost")
-            summary.commission = AggregationService._sum_rows(rows, "commission")
-            summary.merchant_fee = AggregationService._sum_rows(rows, "merchant_fee")
-            summary.promotion_fee = AggregationService._sum_rows(rows, "promotion_fee")
-            summary.provider_commission = AggregationService._sum_rows(rows, "provider_commission")
-            summary.donation_fee = AggregationService._sum_rows(rows, "donation_fee")
+            for key in AggregationService.DONGZHANG_FIELDS:
+                setattr(summary, key, AggregationService._sum_rows(rows, key))
+            AggregationService._normalize_positive_fields(summary)
         elif type_code == "运费险":
             summary.insurance_fee = AggregationService._sum_rows(rows, "insurance_fee")
         elif type_code == "bic":
@@ -140,7 +149,7 @@ class AggregationService:
 
         Used by platform processors that have already computed the sums
         internally. *values* keys correspond to FinancialSummary columns:
-          gmv, platform_income, platform_fee, return_cost, commission,
+          order_paid_amount, refund_amount, gmv, platform_income, platform_fee, return_cost, commission,
           merchant_fee, promotion_fee, provider_commission, donation_fee,
           insurance_fee, bic
         """
@@ -195,20 +204,13 @@ class AggregationService:
 
         # Directly set aggregated values
         for key in (
-            "gmv",
-            "platform_income",
-            "platform_fee",
-            "return_cost",
-            "commission",
-            "merchant_fee",
-            "promotion_fee",
-            "provider_commission",
-            "donation_fee",
+            *AggregationService.DONGZHANG_FIELDS,
             "insurance_fee",
             "bic",
         ):
             if key in values:
                 setattr(summary, key, safe_decimal(values[key]))
+        AggregationService._normalize_positive_fields(summary)
 
         # Track source file
         if summary.source_file_ids is None:
@@ -291,6 +293,20 @@ class AggregationService:
         for row in rows:
             total += safe_decimal(row.get(key))
         return total
+
+    @staticmethod
+    def _normalize_positive_fields(summary: FinancialSummary) -> None:
+        values = normalize_positive_summary_fields(
+            {
+                "refund_amount": summary.refund_amount,
+                "commission": summary.commission,
+                "merchant_fee": summary.merchant_fee,
+                "promotion_fee": summary.promotion_fee,
+                "provider_commission": summary.provider_commission,
+            }
+        )
+        for field, value in values.items():
+            setattr(summary, field, value)
 
     @staticmethod
     def _normalize_source_date_part(value: int | None) -> int:

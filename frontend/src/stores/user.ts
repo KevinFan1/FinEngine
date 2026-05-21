@@ -14,9 +14,15 @@ export interface UserInfo {
     id: number;
     username: string;
     display_name: string;
+    phone: string;
+    email: string;
+    must_change_password: boolean;
     role: string;
     org_id: number | null;
     org_name?: string;
+    status: string;
+    last_login_at: string | null;
+    created_at?: string;
 }
 
 function safeGetToken(): string | null {
@@ -65,9 +71,15 @@ export const useUserStore = defineStore("user", () => {
                 id: info.id,
                 username: info.username,
                 display_name: info.display_name,
+                phone: info.phone,
+                email: info.email,
+                must_change_password: info.must_change_password,
                 role: info.role,
                 org_id: info.org_id,
                 org_name: info.org_name,
+                status: info.status,
+                last_login_at: info.last_login_at,
+                created_at: info.created_at,
             };
             userInfo.value = user;
             localStorage.setItem("userInfo", JSON.stringify(user));
@@ -100,6 +112,13 @@ export const useUserStore = defineStore("user", () => {
         localStorage.setItem("userInfo", JSON.stringify(info));
     }
 
+    function refreshUserInfo(info: Partial<UserInfo>) {
+        if (!userInfo.value) return;
+        const next = { ...userInfo.value, ...info } as UserInfo;
+        userInfo.value = next;
+        localStorage.setItem("userInfo", JSON.stringify(next));
+    }
+
     function clearAuth() {
         token.value = null;
         userInfo.value = null;
@@ -117,6 +136,7 @@ export const useUserStore = defineStore("user", () => {
         login,
         logout,
         setUserInfo,
+        refreshUserInfo,
         clearAuth,
     };
 });

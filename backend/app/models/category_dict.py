@@ -31,9 +31,9 @@ class CategoryDict(SoftDeleteMixin, Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     platform_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_platforms.id"), nullable=False, comment="平台ID")
-    type_code: Mapped[str] = mapped_column(String(30), nullable=False, comment="业务类型: 动账/gmv/bic/运费险/订单")
+    type_code: Mapped[str] = mapped_column(String(30), nullable=False, comment="业务类型：动账/gmv/bic/运费险/订单")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="字典名称，如「抖音动账分类」")
-    categories: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="分类字典 JSON")
+    categories: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="分类字典 JSON 数据")
     status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="1=启用 0=禁用")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")

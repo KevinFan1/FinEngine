@@ -1,17 +1,11 @@
 <template>
     <div class="page-container">
         <el-card shadow="never" class="search-card summary-search-card">
-            <div class="search-card-head">
-                <div>
-                    <p class="search-card-kicker">动账报表工作台</p>
-                    <h2 class="search-card-title">
-                        先汇总查看，再进入明细核对
-                    </h2>
-                </div>
-                <div class="search-card-tip">
-                    <span>保留与动账明细一致的筛选和导出节奏</span>
-                </div>
-            </div>
+            <SearchCardIntro
+                kicker="动账报表工作台"
+                title="先汇总查看，再进入明细核对"
+                tip="保留与动账明细一致的筛选和导出节奏"
+            />
 
             <el-form :model="searchForm" inline class="summary-filter-form">
                 <el-form-item label="核算年月">
@@ -91,21 +85,7 @@
                 </el-form-item>
             </el-form>
 
-            <div v-if="activeFilterTags.length" class="active-filters">
-                <span class="active-filters-label">当前筛选</span>
-                <el-tag
-                    v-for="tag in activeFilterTags"
-                    :key="`${tag.key}-${tag.value}`"
-                    closable
-                    class="filter-tag"
-                    @close="removeFilterTag(tag)"
-                >
-                    {{ tag.label }}：{{ tag.value }}
-                </el-tag>
-                <el-button link class="clear-filters-btn" @click="handleReset"
-                    >清空全部</el-button
-                >
-            </div>
+            <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
         </el-card>
 
         <el-card shadow="never" class="table-card summary-table-card">
@@ -227,6 +207,34 @@
                                 size="table"
                             />
                         </button>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="order_paid_amount"
+                    label="订单实付金额"
+                    width="130"
+                    align="right"
+                    header-align="right"
+                    class-name="money-column"
+                >
+                    <template #default="{ row }">
+                        <span class="font-mono money-cell">{{
+                            formatMoney(row.order_paid_amount)
+                        }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="refund_amount"
+                    label="退款金额"
+                    width="120"
+                    align="right"
+                    header-align="right"
+                    class-name="money-column"
+                >
+                    <template #default="{ row }">
+                        <span class="font-mono money-cell">{{
+                            formatMoney(row.refund_amount)
+                        }}</span>
                     </template>
                 </el-table-column>
                 <el-table-column
@@ -455,14 +463,15 @@ import {
 } from "@/utils/pagination";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
+import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
+import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import SummaryDetailDrawer, {
     type SummaryDetailContext,
 } from "@/components/SummaryDetailDrawer.vue";
 
-interface FilterTag {
+interface FilterTag extends ActiveFilterTag {
     key: "accountingMonthRange" | "platforms" | "shops" | "keyword";
-    label: string;
-    value: string;
 }
 
 interface SummaryTableInstance {
@@ -584,6 +593,8 @@ const activeFilterTags = computed<FilterTag[]>(() => {
 });
 
 const moneyColumns = [
+    "order_paid_amount",
+    "refund_amount",
     "original_gmv",
     "platform_other_income",
     "platform_service_fee",
@@ -831,61 +842,6 @@ onMounted(async () => {
     margin-bottom: 16px;
 }
 
-.search-card-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 14px;
-}
-
-.search-card-kicker {
-    margin: 0 0 4px;
-    color: var(--el-color-primary);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-}
-
-.search-card-title {
-    margin: 0;
-    color: var(--text-primary);
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1.2;
-}
-
-.search-card-tip {
-    display: flex;
-    align-items: center;
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.active-filters {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 8px;
-    padding-top: 12px;
-    border-top: 1px dashed var(--border-light);
-}
-
-.active-filters-label {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.filter-tag {
-    margin: 0;
-}
-
-.clear-filters-btn {
-    padding: 0;
-}
-
 .table-card {
     min-width: 0;
 
@@ -925,33 +881,11 @@ onMounted(async () => {
     min-height: 0;
 }
 
-.inline-filter-trigger,
-.inline-filter-link {
-    border: 0;
-    background: transparent;
-    padding: 0;
-    cursor: pointer;
-}
-
-.inline-filter-link {
-    color: var(--text-primary);
-    font: inherit;
-    transition: color 0.18s ease;
-}
-
-.inline-filter-link:hover {
-    color: var(--el-color-primary);
-}
-
 .pagination-area {
     flex-shrink: 0;
 }
 
 @media (max-width: 768px) {
-    .search-card-head {
-        flex-direction: column;
-    }
-
     .table-card {
         .card-header {
             align-items: flex-start;

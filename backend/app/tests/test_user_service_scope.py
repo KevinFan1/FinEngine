@@ -15,6 +15,7 @@ def make_user(*, user_id: int, org_id: int | None, role: str = "org_admin") -> U
         display_name=f"用户{user_id}",
         role=role,
         status=1,
+        must_change_password=False,
     )
 
 
@@ -85,3 +86,42 @@ def test_superadmin_can_manage_any_org_user() -> None:
         data=UserUpdate(org_id=30, role="org_admin"),
         operator=operator,
     )
+
+
+@pytest.mark.asyncio
+async def test_change_my_password_clears_must_change_flag(monkeypatch) -> None:
+    from app.core.security import hash_password, verify_password
+
+    operator = make_user(user_id=1, org_id=10, role="member")
+    operator.password_hash = hash_password("OldPass1")
+    operator.must_change_password = True
+
+    class _FakeResult:
+        def scalar_one_or_none(self):
+            return None
+
+    class _FakeDB:
+        async def execute(self, _statement):
+            return _FakeResult()
+
+        async def flush(self):
+            return None
+
+    logged = {}
+
+    async def fake_log(*args, **kwargs):
+        logged["called"] = True
+
+    monkeypatch.setattr("app.services.user_service.AuditService.log", fake_log)
+
+    updated = await UserService.change_current_user_password(
+        _FakeDB(),
+        current_user=operator,
+        old_password="OldPass1",
+        new_password="NewPass1",
+    )
+
+    assert updated.must_change_password is False
+    assert updated.password_hash != hash_password("OldPass1")
+    assert verify_password("NewPass1", updated.password_hash)
+    assert logged["called"] is True

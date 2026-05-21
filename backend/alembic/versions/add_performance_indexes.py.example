@@ -1,15 +1,15 @@
-"""Add performance indexes
+"""添加性能索引
 
 Revision ID: add_performance_indexes
 Revises:
 Create Date: 2026-05-16
 
-This migration adds indexes to improve query performance.
+该迁移通过增加索引提升查询性能。
 """
 from alembic import op
 
 
-# revision identifiers, used by Alembic.
+# 迁移标识，由 Alembic 使用。
 revision = 'add_performance_indexes'
 down_revision = None  # Update this to the latest migration
 branch_labels = None
@@ -17,9 +17,9 @@ depends_on = None
 
 
 def upgrade():
-    """Add performance indexes."""
+    """添加性能索引。"""
 
-    # Users table indexes
+    # 用户表索引
     op.create_index(
         'idx_users_org_status',
         'users',
@@ -41,7 +41,7 @@ def upgrade():
         postgresql_where='is_deleted = false'
     )
 
-    # Upload files table indexes
+    # 上传文件表索引
     op.create_index(
         'idx_upload_files_org_created',
         'upload_files',
@@ -58,7 +58,7 @@ def upgrade():
         ['platform_id', 'is_deleted']
     )
 
-    # Processing tasks table indexes
+    # 处理任务表索引
     op.create_index(
         'idx_processing_tasks_file_status',
         'processing_tasks',
@@ -70,7 +70,7 @@ def upgrade():
         ['created_at']
     )
 
-    # Summaries table indexes
+    # 汇总表索引
     op.create_index(
         'idx_summaries_org_date',
         'summaries',
@@ -87,7 +87,7 @@ def upgrade():
         ['shop_id', 'date', 'is_deleted']
     )
 
-    # Audit logs table indexes
+    # 审计日志表索引
     op.create_index(
         'idx_audit_logs_user_created',
         'audit_logs',
@@ -106,9 +106,9 @@ def upgrade():
 
 
 def downgrade():
-    """Remove performance indexes."""
+    """移除性能索引。"""
 
-    # Drop all indexes in reverse order
+    # 按逆序删除所有索引
     op.drop_index('idx_audit_logs_module_action')
     op.drop_index('idx_audit_logs_org_created')
     op.drop_index('idx_audit_logs_user_created')

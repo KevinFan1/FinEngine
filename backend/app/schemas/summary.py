@@ -37,6 +37,8 @@ class SummaryOut(BaseModel):
     report_platform: str
 
     # 动账指标
+    order_paid_amount: float = 0
+    refund_amount: float = 0
     gmv: float = 0
     real_gmv: float = 0
     platform_income: float = 0
@@ -92,6 +94,8 @@ class SummaryReportOut(BaseModel):
     report_platform: str
 
     summary_count: int = 0
+    order_paid_amount: float = 0
+    refund_amount: float = 0
     original_gmv: float = 0
     gmv_adjustment: float = 0
     gmv: float = 0

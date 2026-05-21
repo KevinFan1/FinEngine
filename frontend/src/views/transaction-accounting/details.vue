@@ -1,0 +1,626 @@
+<template>
+    <div class="page-container transaction-page">
+        <el-card shadow="never" class="search-card">
+            <SearchCardIntro
+                kicker="资金明细"
+                title="按科目和重分类查看汇总明细"
+                tip="明细在任务处理时完成聚合"
+            />
+
+            <el-form :model="searchForm" inline class="filter-form">
+                <el-form-item label="业务年月">
+                    <el-date-picker
+                        v-model="searchForm.businessMonthRange"
+                        type="monthrange"
+                        start-placeholder="开始年月"
+                        end-placeholder="结束年月"
+                        range-separator="至"
+                        clearable
+                        value-format="YYYY-MM"
+                        style="width: 230px"
+                    />
+                </el-form-item>
+                <el-form-item label="平台">
+                    <el-select
+                        v-model="searchForm.platforms"
+                        clearable
+                        filterable
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="全部平台"
+                        style="width: 190px"
+                        @change="handlePlatformChange"
+                    >
+                        <el-option
+                            v-for="item in platformOptions"
+                            :key="item.value"
+                            :label="item.label"
+                            :value="item.value"
+                        >
+                            <PlatformBadge :platform="item.value" />
+                        </el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="店铺">
+                    <el-select
+                        v-model="searchForm.shopNames"
+                        clearable
+                        filterable
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="全部店铺"
+                        :loading="shopLoading"
+                        style="width: 210px"
+                    >
+                        <el-option
+                            v-for="shop in filteredShopOptions"
+                            :key="`${shop.platform_name}-${shop.shop_name}`"
+                            :label="shop.shop_name"
+                            :value="shop.shop_name"
+                        >
+                            <ShopBadge
+                                :label="shop.shop_name"
+                                :color="shop.shop_color"
+                                size="compact"
+                            />
+                        </el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="科目">
+                    <el-select
+                        v-model="searchForm.subjectIds"
+                        clearable
+                        filterable
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="全部科目"
+                        style="width: 220px"
+                        @change="handleSubjectChange"
+                    >
+                        <el-option
+                            v-for="subject in subjects"
+                            :key="subject.id"
+                            :label="subject.name"
+                            :value="subject.id"
+                        />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="重分类">
+                    <el-select
+                        v-model="searchForm.categoryIds"
+                        clearable
+                        filterable
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="全部重分类"
+                        style="width: 200px"
+                    >
+                        <el-option
+                            v-for="category in categoryOptions"
+                            :key="category.id"
+                            :label="category.name"
+                            :value="category.id"
+                        />
+                    </el-select>
+                </el-form-item>
+                <el-form-item>
+                    <el-button type="primary" @click="handleSearch"
+                        >搜索</el-button
+                    >
+                    <el-button @click="handleReset">重置</el-button>
+                </el-form-item>
+            </el-form>
+            <ActiveFilterTags
+                :tags="activeFilterTags"
+                @remove="removeFilterTag"
+                @clear="handleReset"
+            />
+        </el-card>
+
+        <el-card shadow="never" class="table-card">
+            <template #header>
+                <div class="card-header">
+                    <div class="summary-title-group">
+                        <span class="card-header-title">明细数据</span>
+                        <span class="summary-count"
+                            >共 {{ pagination.total }} 条 · 已选
+                            {{ selectedRows.length }} 条</span
+                        >
+                    </div>
+                    <div class="card-header-actions">
+                        <el-button
+                            :disabled="selectedRows.length === 0"
+                            @click="clearSelectedRows"
+                            >清空选中</el-button
+                        >
+                        <el-button
+                            :loading="exportSelectedLoading"
+                            :disabled="selectedRows.length === 0"
+                            @click="handleExport('selected')"
+                        >
+                            <el-icon><Download /></el-icon> 导出选中
+                        </el-button>
+                        <el-button
+                            :loading="exportCurrentPageLoading"
+                            @click="handleExport('current_page')"
+                        >
+                            <el-icon><Download /></el-icon> 导出当前页
+                        </el-button>
+                        <el-button
+                            type="primary"
+                            :loading="exportAllLoading"
+                            @click="handleExport('all')"
+                        >
+                            <el-icon><Download /></el-icon> 导出全部
+                        </el-button>
+                    </div>
+                </div>
+            </template>
+
+            <el-table
+                ref="tableRef"
+                class="summary-table roomy-table detail-table"
+                :data="tableData"
+                v-loading="loading"
+                stripe
+                border
+                show-summary
+                :summary-method="detailSummaryMethod"
+                :fit="true"
+                style="width: 100%"
+                row-key="id"
+                height="calc(100vh - 278px)"
+                @selection-change="handleSelectionChange"
+            >
+                <el-table-column
+                    type="selection"
+                    width="48"
+                    fixed="left"
+                    :reserve-selection="true"
+                />
+                <el-table-column
+                    label="序号"
+                    width="78"
+                    fixed="left"
+                    align="center"
+                >
+                    <template #default="{ $index }">{{
+                        (pagination.page - 1) * pagination.pageSize + $index + 1
+                    }}</template>
+                </el-table-column>
+                <el-table-column label="业务年月" width="120">
+                    <template #default="{ row }">{{
+                        formatMonth(row.accounting_year, row.accounting_month)
+                    }}</template>
+                </el-table-column>
+                <el-table-column prop="platform_code" label="平台" width="110">
+                    <template #default="{ row }">
+                        <PlatformBadge
+                            v-if="row.platform_code"
+                            :platform="row.platform_code"
+                        />
+                        <span v-else class="text-tertiary">-</span>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="shop_name"
+                    label="店铺"
+                    width="180"
+                    show-overflow-tooltip
+                >
+                    <template #default="{ row }">
+                        <ShopBadge
+                            :label="row.shop_name || '-'"
+                            :color="shopColorByName.get(row.shop_name || '')"
+                            size="table"
+                        />
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="cash_flow_group_name"
+                    label="总分类"
+                    min-width="180"
+                    show-overflow-tooltip
+                />
+                <el-table-column
+                    prop="subject_name"
+                    label="科目"
+                    min-width="210"
+                    show-overflow-tooltip
+                />
+                <el-table-column
+                    prop="reclassification_name"
+                    label="重分类"
+                    min-width="180"
+                    show-overflow-tooltip
+                />
+                <el-table-column
+                    prop="total_amount"
+                    label="汇总数值"
+                    min-width="160"
+                    align="right"
+                    header-align="right"
+                    class-name="money-column detail-edge-column"
+                    header-class-name="money-column detail-edge-column"
+                >
+                    <template #default="{ row }"
+                        ><span class="font-mono money-cell">{{
+                            formatAmount(
+                                row.total_amount ?? row.calculated_amount,
+                            )
+                        }}</span></template
+                    >
+                </el-table-column>
+                <!-- <el-table-column prop="update_time" label="最新统计时间" min-width="172" class-name="created-time-column detail-edge-column" header-class-name="detail-edge-column">
+                    <template #default="{ row }">
+                        <span class="text-tertiary">{{ formatDateTime(row.update_time) }}</span>
+                    </template>
+                </el-table-column> -->
+            </el-table>
+
+            <div class="pagination-area">
+                <el-pagination
+                    v-model:current-page="pagination.page"
+                    v-model:page-size="pagination.pageSize"
+                    :total="pagination.total"
+                    :page-sizes="PAGE_SIZE_OPTIONS"
+                    :layout="PAGINATION_LAYOUT"
+                    background
+                    @size-change="fetchData"
+                    @current-change="fetchData"
+                />
+            </div>
+        </el-card>
+    </div>
+</template>
+
+<script setup lang="ts">
+defineOptions({ name: "TransactionDetails" });
+
+import { ElMessage } from "element-plus";
+import type { TableInstance } from "element-plus";
+import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
+import type { ActiveFilterTag } from "@/components/activeFilterTags";
+import PlatformBadge from "@/components/PlatformBadge.vue";
+import ShopBadge from "@/components/ShopBadge.vue";
+import {
+    exportTransactionDetailsExcel,
+    listTransactionCategories,
+    listTransactionDetails,
+    listTransactionSubjects,
+    type TransactionCategory,
+    type TransactionDetail,
+    type TransactionSubject,
+    type TransactionExportScope,
+} from "@/api/transactionAccounting";
+import {
+    DEFAULT_PAGE_SIZE,
+    PAGE_SIZE_OPTIONS,
+    PAGINATION_LAYOUT,
+} from "@/utils/pagination";
+import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import {
+    detailSummaryMethod,
+    downloadBlob,
+    formatAmount,
+    formatMonth,
+    monthRangeLabel,
+    splitMonthRange,
+} from "./common";
+import { formatDateTime, getPlatformLabel } from "@/utils/format";
+import { getPlatformList, type Platform } from "@/api/platform";
+import { getShopList, type Shop } from "@/api/shop";
+import {
+    getFallbackPlatforms,
+    getReportPlatformCode,
+    toSourcePlatformOptions,
+    type PlatformOption,
+} from "@/utils/platform";
+
+const loading = ref(false);
+const tableRef = ref<TableInstance>();
+const tableData = ref<TransactionDetail[]>([]);
+const selectedRows = ref<TransactionDetail[]>([]);
+const subjects = ref<TransactionSubject[]>([]);
+const categories = ref<TransactionCategory[]>([]);
+const shopOptions = ref<Shop[]>([]);
+const platforms = ref<Platform[]>(getFallbackPlatforms());
+const platformOptions = ref<PlatformOption[]>(
+    toSourcePlatformOptions(platforms.value),
+);
+const shopLoading = ref(false);
+const exportAllLoading = ref(false);
+const exportCurrentPageLoading = ref(false);
+const exportSelectedLoading = ref(false);
+const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
+const searchForm = reactive({
+    businessMonthRange: [] as string[],
+    platforms: [] as string[],
+    shopNames: [] as string[],
+    subjectIds: [] as number[],
+    categoryIds: [] as number[],
+});
+
+const categoryOptions = computed(() => {
+    return categories.value.filter(
+        (item) =>
+            !searchForm.subjectIds.length ||
+            searchForm.subjectIds.includes(item.subject_id),
+    );
+});
+
+const selectedReportPlatformsParam = computed(() => {
+    const values = new Set(
+        searchForm.platforms
+            .map((platform) => getReportPlatformCode(platform, platforms.value))
+            .filter(Boolean),
+    );
+    return Array.from(values).join(",") || undefined;
+});
+
+const filteredShopOptions = computed(() => {
+    if (!searchForm.platforms.length) return shopOptions.value;
+    const reportPlatforms = new Set(
+        searchForm.platforms
+            .map((platform) => getReportPlatformCode(platform, platforms.value))
+            .filter(Boolean),
+    );
+    return shopOptions.value.filter((shop) =>
+        reportPlatforms.has(shop.platform_name),
+    );
+});
+
+const shopColorByName = computed(() => {
+    const map = new Map<string, string | undefined>();
+    shopOptions.value.forEach((shop) => {
+        if (!map.has(shop.shop_name)) {
+            map.set(shop.shop_name, shop.shop_color);
+        }
+    });
+    return map;
+});
+
+interface DetailFilterTag extends ActiveFilterTag {
+    key:
+        | "businessMonthRange"
+        | "platforms"
+        | "shopNames"
+        | "subjectIds"
+        | "categoryIds";
+}
+
+const activeFilterTags = computed<DetailFilterTag[]>(() => {
+    const tags: DetailFilterTag[] = [];
+    if (searchForm.businessMonthRange.length) {
+        tags.push({
+            key: "businessMonthRange",
+            label: "业务年月",
+            value: monthRangeLabel(searchForm.businessMonthRange),
+        });
+    }
+    searchForm.platforms.forEach((value) => {
+        tags.push({
+            key: "platforms",
+            label: "平台",
+            value: getPlatformLabel(value),
+        });
+    });
+    searchForm.shopNames.forEach((value) => {
+        tags.push({ key: "shopNames", label: "店铺", value });
+    });
+    searchForm.subjectIds.forEach((value) => {
+        const subject = subjects.value.find((item) => item.id === value);
+        tags.push({
+            key: "subjectIds",
+            label: "科目",
+            value: subject?.name || String(value),
+        });
+    });
+    searchForm.categoryIds.forEach((value) => {
+        const category = categories.value.find((item) => item.id === value);
+        tags.push({
+            key: "categoryIds",
+            label: "重分类",
+            value: category?.name || String(value),
+        });
+    });
+    return tags;
+});
+
+function queryParams() {
+    return {
+        page: pagination.page,
+        page_size: pagination.pageSize,
+        platform_code: selectedReportPlatformsParam.value,
+        shop_name: searchForm.shopNames.join(",") || undefined,
+        subject_id: searchForm.subjectIds.join(",") || undefined,
+        category_id: searchForm.categoryIds.join(",") || undefined,
+        ...splitMonthRange(searchForm.businessMonthRange),
+    };
+}
+
+async function fetchData() {
+    loading.value = true;
+    try {
+        const data = await listTransactionDetails(queryParams());
+        tableData.value = data.items;
+        pagination.total = data.total;
+    } finally {
+        loading.value = false;
+    }
+}
+
+async function loadOptions() {
+    const [subjectItems, categoryItems, platformItems] = await Promise.all([
+        listTransactionSubjects(),
+        listTransactionCategories(),
+        fetchPlatformOptions(),
+    ]);
+    subjects.value = subjectItems;
+    categories.value = categoryItems;
+    platforms.value = platformItems;
+    platformOptions.value = toSourcePlatformOptions(platforms.value);
+    await fetchShopOptions();
+}
+
+function handleSearch() {
+    pagination.page = 1;
+    selectedRows.value = [];
+    fetchData();
+}
+
+function handleReset() {
+    searchForm.businessMonthRange = [];
+    searchForm.platforms = [];
+    searchForm.shopNames = [];
+    searchForm.subjectIds = [];
+    searchForm.categoryIds = [];
+    fetchShopOptions();
+    handleSearch();
+}
+
+async function removeFilterTag(tag: DetailFilterTag) {
+    if (tag.key === "businessMonthRange") {
+        searchForm.businessMonthRange = [];
+    } else if (tag.key === "platforms") {
+        searchForm.platforms = searchForm.platforms.filter(
+            (item) => getPlatformLabel(item) !== tag.value,
+        );
+        await handlePlatformChange();
+    } else if (tag.key === "shopNames") {
+        searchForm.shopNames = searchForm.shopNames.filter(
+            (item) => item !== tag.value,
+        );
+    } else if (tag.key === "subjectIds") {
+        searchForm.subjectIds = searchForm.subjectIds.filter((item) => {
+            const subject = subjects.value.find(
+                (subjectItem) => subjectItem.id === item,
+            );
+            return (subject?.name || String(item)) !== tag.value;
+        });
+        handleSubjectChange();
+    } else if (tag.key === "categoryIds") {
+        searchForm.categoryIds = searchForm.categoryIds.filter((item) => {
+            const category = categories.value.find(
+                (categoryItem) => categoryItem.id === item,
+            );
+            return (category?.name || String(item)) !== tag.value;
+        });
+    }
+    handleSearch();
+}
+
+async function fetchPlatformOptions() {
+    try {
+        const res = await getPlatformList();
+        return res.length ? res : getFallbackPlatforms();
+    } catch {
+        return getFallbackPlatforms();
+    }
+}
+
+async function fetchShopOptions() {
+    shopLoading.value = true;
+    try {
+        const res = await getShopList({
+            page: 1,
+            page_size: 100,
+            platform_name: selectedReportPlatformsParam.value,
+        });
+        shopOptions.value = res.items || [];
+    } finally {
+        shopLoading.value = false;
+    }
+}
+
+async function handlePlatformChange() {
+    await fetchShopOptions();
+    const availableShopNames = new Set(
+        filteredShopOptions.value.map((shop) => shop.shop_name),
+    );
+    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
+        availableShopNames.has(shopName),
+    );
+}
+
+function handleSubjectChange() {
+    const availableCategoryIds = new Set(
+        categoryOptions.value.map((category) => category.id),
+    );
+    searchForm.categoryIds = searchForm.categoryIds.filter((categoryId) =>
+        availableCategoryIds.has(categoryId),
+    );
+}
+
+function handleSelectionChange(rows: TransactionDetail[]) {
+    selectedRows.value = rows;
+}
+
+function clearSelectedRows() {
+    tableRef.value?.clearSelection();
+    selectedRows.value = [];
+}
+
+async function handleExport(scope: TransactionExportScope) {
+    if (scope === "current_page" && tableData.value.length === 0) {
+        ElMessage.warning("当前页暂无可导出的数据");
+        return;
+    }
+    if (scope === "selected" && selectedRows.value.length === 0) {
+        ElMessage.warning("请先选择要导出的数据");
+        return;
+    }
+    const loadingRef =
+        scope === "all"
+            ? exportAllLoading
+            : scope === "current_page"
+              ? exportCurrentPageLoading
+              : exportSelectedLoading;
+    loadingRef.value = true;
+    try {
+        const blob = await exportTransactionDetailsExcel({
+            ...queryParams(),
+            scope,
+            ids:
+                scope === "selected"
+                    ? selectedRows.value.map((row) => row.id).join(",")
+                    : undefined,
+            page: scope === "current_page" ? pagination.page : undefined,
+            page_size:
+                scope === "current_page" ? pagination.pageSize : undefined,
+        });
+        const scopeLabel =
+            scope === "all"
+                ? "全部"
+                : scope === "current_page"
+                  ? `第${pagination.page}页`
+                  : "选中";
+        downloadBlob(blob, `资金明细_${scopeLabel}.xlsx`);
+        ElMessage.success("导出成功");
+    } finally {
+        loadingRef.value = false;
+    }
+}
+
+onMounted(async () => {
+    await loadOptions();
+    await fetchData();
+});
+</script>
+
+<style scoped lang="scss">
+@use "./transaction.scss";
+
+:deep(.detail-table) {
+    width: 100%;
+}
+
+:deep(.detail-table .detail-edge-column .cell),
+:deep(.detail-table th.detail-edge-column .cell) {
+    padding-right: 18px !important;
+}
+</style>

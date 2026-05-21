@@ -198,3 +198,8 @@ def test_mark_task_failed_sets_task_and_upload_file_state() -> None:
     assert task.finished_at is not None
     assert upload_file.status == "failed"
     assert upload_file.error_message == "OSS文件不存在"
+
+
+def test_celery_imports_include_bic_task_module() -> None:
+    assert "app.tasks.transaction_accounting" in celery_module.celery_app.conf.imports
+    assert "app.tasks.bic_accounting" in celery_module.celery_app.conf.imports
