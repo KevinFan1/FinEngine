@@ -34,7 +34,7 @@ from app.schemas.transaction_accounting import (
 from app.services.audit_service import AuditService
 from app.services.oss_service import assume_sts_role, oss_service
 from app.services.transaction_accounting_service import TransactionAccountingService
-from app.models.transaction_accounting import TransactionUploadFile
+from app.models.transaction_accounting import TransactionTask, TransactionUploadFile
 
 router = APIRouter()
 
@@ -42,6 +42,18 @@ router = APIRouter()
 class TransactionUploadInitResponse(BaseModel):
     file: TransactionUploadFileOut
     upload: TransactionUploadInitOut
+
+
+class TransactionTaskBatchActionIn(BaseModel):
+    task_ids: list[int]
+
+
+class TransactionTaskBatchActionOut(BaseModel):
+    total: int
+    success_count: int
+    failed_count: int
+    success_ids: list[int]
+    failed_items: list[dict[str, object]]
 
 
 def _client_info(request: Request) -> tuple[str | None, str | None]:
@@ -121,6 +133,14 @@ def _normalize_transaction_summary(result_summary: dict | None) -> dict | None:
     for key, value in result_summary.items():
         normalized[labels.get(key, key)] = value
     return normalized
+
+
+def _rule_display_name(rule) -> str:
+    scene = getattr(rule, "transaction_scene", None)
+    remark = getattr(rule, "remark_pattern", None)
+    if scene == "":
+        scene = "空场景"
+    return remark or scene or getattr(rule, "transaction_direction", "") or str(getattr(rule, "id", ""))
 
 
 @router.get("/subjects", response_model=ApiResponse[list[TransactionSubjectOut]])
@@ -308,10 +328,10 @@ async def create_rule(
         org_id=None,
         module="transaction_accounting",
         action="config_change",
-        description=f"新增动账核算规则 [{rule.remark_pattern}]",
+        description=f"新增动账核算规则 [{_rule_display_name(rule)}]",
         target_type="transaction_rule",
         target_id=rule.id,
-        target_name=rule.remark_pattern,
+        target_name=_rule_display_name(rule),
         ip=ip,
         user_agent=ua,
     )
@@ -342,10 +362,10 @@ async def update_rule(
         org_id=None,
         module="transaction_accounting",
         action="config_change",
-        description=f"修改动账核算规则 [{rule.remark_pattern}]",
+        description=f"修改动账核算规则 [{_rule_display_name(rule)}]",
         target_type="transaction_rule",
         target_id=rule.id,
-        target_name=rule.remark_pattern,
+        target_name=_rule_display_name(rule),
         ip=ip,
         user_agent=ua,
     )
@@ -484,6 +504,56 @@ async def rerun_task(
         return ApiResponse(code=404, message="任务不存在")
     upload_file = await db.get(TransactionUploadFile, task.file_id)
     return ApiResponse(data=_task_out(task, upload_file))
+
+
+@router.post("/tasks/batch/recalculate", response_model=ApiResponse[TransactionTaskBatchActionOut])
+async def batch_recalculate_tasks(
+    body: TransactionTaskBatchActionIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_org_admin_or_above),
+    db: AsyncSession = Depends(get_async_session),
+):
+    task_ids = list(dict.fromkeys(body.task_ids))
+    if not task_ids:
+        return ApiResponse(code=400, message="请选择任务")
+    if len(task_ids) > 100:
+        return ApiResponse(code=400, message="单次最多操作 100 个任务")
+
+    ip, ua = _client_info(request)
+    success_ids: list[int] = []
+    failed_items: list[dict[str, object]] = []
+    for task_id in task_ids:
+        task = await db.get(TransactionTask, task_id)
+        if task is None or task.is_deleted:
+            failed_items.append({"task_id": task_id, "message": "任务不存在"})
+            continue
+        if current_user.role != "superadmin" and task.org_id != current_user.org_id:
+            failed_items.append({"task_id": task_id, "message": "数据不存在或无权访问"})
+            continue
+        if task.status in {"queued", "processing"}:
+            failed_items.append({"task_id": task_id, "message": "排队中或运行中的任务不能重新统计"})
+            continue
+
+        try:
+            rerun = await TransactionAccountingService.rerun_task(db, task_id=task_id, user=current_user, ip=ip, user_agent=ua)
+        except ValueError as exc:
+            failed_items.append({"task_id": task_id, "message": str(exc)})
+            continue
+        if rerun is None:
+            failed_items.append({"task_id": task_id, "message": "任务不存在"})
+            continue
+        success_ids.append(rerun.id)
+
+    data = TransactionTaskBatchActionOut(
+        total=len(task_ids),
+        success_count=len(success_ids),
+        failed_count=len(failed_items),
+        success_ids=success_ids,
+        failed_items=failed_items,
+    )
+    message = "操作完成" if not failed_items else f"成功 {data.success_count} 个，失败 {data.failed_count} 个"
+    return ApiResponse(data=data, message=message)
 
 
 @router.get("/details", response_model=ApiResponse[PageResponse[TransactionDetailOut]])

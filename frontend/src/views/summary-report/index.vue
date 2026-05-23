@@ -450,7 +450,12 @@ import {
 } from "@/api/summary";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
-import { formatMoney, getPlatformLabel } from "@/utils/format";
+import {
+    buildExportFilename,
+    formatMoney,
+    getPlatformLabel,
+    summarizeFilenameValues,
+} from "@/utils/format";
 import {
     getFallbackPlatforms,
     toReportPlatformOptions,
@@ -463,6 +468,7 @@ import {
 } from "@/utils/pagination";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
@@ -812,7 +818,16 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        link.download = `汇总报表_${accountingMonthRangeLabel.value || "全部核算年月"}_${scopeLabel}.xlsx`;
+        link.download = buildExportFilename([
+            accountingMonthRangeLabel.value || "全部核算年月",
+            `归集平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shops, "全部")}`,
+            searchForm.keyword.trim()
+                ? `关键词${searchForm.keyword.trim()}`
+                : "关键词全部",
+            "汇总报表",
+            scopeLabel,
+        ]);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -829,6 +844,12 @@ onMounted(async () => {
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();
+});
+
+usePageRefresh(async () => {
+    await fetchPlatformOptions();
+    await fetchShopOptions();
+    await fetchData();
 });
 </script>
 

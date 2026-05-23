@@ -591,6 +591,7 @@ import {
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { formatDateTime, getPlatformLabel } from "@/utils/format";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import {
     getFallbackPlatforms,
     getReportPlatformCode,
@@ -1081,6 +1082,8 @@ onDeactivated(() => {
 onUnmounted(() => {
     stopAutoRefresh();
 });
+
+usePageRefresh(fetchData);
 </script>
 
 <style scoped lang="scss">

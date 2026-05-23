@@ -107,6 +107,10 @@ def seed_category_dicts() -> None:
 
 
 def seed_transaction_accounting_defaults() -> None:
+    seed_transaction_accounting_rules()
+
+
+def seed_transaction_accounting_rules() -> None:
     from scripts.seed_transaction_accounting_defaults import seed
 
     asyncio.run(seed())

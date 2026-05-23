@@ -76,7 +76,7 @@ def upgrade() -> None:
         sa.Column("transaction_direction", sa.String(length=20), nullable=False, comment="动账方向"),
         sa.Column("remark_field", sa.String(length=100), nullable=False, server_default="备注", comment="备注字段名"),
         sa.Column("direction_field", sa.String(length=100), nullable=False, server_default="动账方向", comment="方向字段名"),
-        sa.Column("match_type", sa.String(length=20), nullable=False, server_default="contains", comment="匹配方式：精确/包含/正则"),
+        sa.Column("match_type", sa.String(length=20), nullable=False, server_default="contains", comment="匹配方式：精确/包含/不包含"),
         sa.Column("remark_pattern", sa.String(length=1000), nullable=False, comment="备注匹配内容"),
         sa.Column("amount_field", sa.String(length=100), nullable=False, comment="取数字段名"),
         sa.Column("result_direction", sa.String(length=30), nullable=False, server_default="original", comment="结果方向：原始/正值/负值/按方向"),

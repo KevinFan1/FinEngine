@@ -3,7 +3,7 @@
         <el-card shadow="never" class="search-card">
             <SearchCardIntro
                 kicker="BIC明细"
-                title="按 QIC仓 查看质检费汇总"
+                title="按店铺查看 BIC 明细"
                 tip="仅统计费用项为 质检费(通过) 的结算金额"
             />
 
@@ -24,6 +24,9 @@
                             <ShopBadge :label="shop.shop_name" :color="shop.shop_color" size="compact" />
                         </el-option>
                     </el-select>
+                </el-form-item>
+                <el-form-item label="服务商">
+                    <el-input v-model="searchForm.serviceProvider" clearable placeholder="输入服务商" style="width: 180px" @keyup.enter="handleSearch" />
                 </el-form-item>
                 <el-form-item label="QIC仓">
                     <el-input v-model="searchForm.qicWarehouse" clearable placeholder="输入 QIC仓" style="width: 180px" @keyup.enter="handleSearch" />
@@ -57,16 +60,33 @@
                 <el-table-column label="序号" width="78" fixed="left" align="center">
                     <template #default="{ $index }">{{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}</template>
                 </el-table-column>
-                <el-table-column label="核算年月" width="120">
-                    <template #default="{ row }">{{ formatMonth(row.accounting_year, row.accounting_month) }}</template>
-                </el-table-column>
                 <el-table-column prop="platform_code" label="平台" width="110">
                     <template #default="{ row }"><PlatformBadge :platform="row.platform_code" /></template>
                 </el-table-column>
-                <el-table-column prop="shop_name" label="店铺" min-width="180" show-overflow-tooltip>
+                <el-table-column prop="service_provider" label="服务商" min-width="150" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.service_provider || "-" }}</template>
+                </el-table-column>
+                <el-table-column prop="store_short_id" label="店铺id" width="120" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.store_short_id || "-" }}</template>
+                </el-table-column>
+                <el-table-column prop="shop_name" label="店铺名称" min-width="180" show-overflow-tooltip>
                     <template #default="{ row }"><ShopBadge :label="row.shop_name || '-'" :color="shopColorByName.get(row.shop_name || '')" size="table" /></template>
                 </el-table-column>
-                <el-table-column prop="qic_warehouse" label="QIC仓" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="qic_warehouse" label="QIC仓" min-width="160" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.qic_warehouse || "-" }}</template>
+                </el-table-column>
+                <el-table-column prop="merchant" label="公司名称" min-width="190" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.merchant || "-" }}</template>
+                </el-table-column>
+                <el-table-column prop="tax_no" label="税号" min-width="170" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.tax_no || "-" }}</template>
+                </el-table-column>
+                <el-table-column prop="shop_type" label="抬头类型" width="120" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.shop_type || "-" }}</template>
+                </el-table-column>
+                <el-table-column prop="registered_address" label="注册地址" min-width="260" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.registered_address || "-" }}</template>
+                </el-table-column>
                 <el-table-column prop="total_amount" label="结算金额" min-width="160" align="right" header-align="right" class-name="money-column summary-edge-column" header-class-name="money-column summary-edge-column">
                     <template #default="{ row }"><span class="font-mono money-cell">{{ formatAmount(row.total_amount) }}</span></template>
                 </el-table-column>
@@ -92,9 +112,14 @@ import { exportBicDetailsExcel, listBicDetails, type BicDetail, type BicExportSc
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
-import { getPlatformLabel } from "@/utils/format";
+import { usePageRefresh } from "@/composables/pageRefresh";
+import {
+    buildExportFilename,
+    getPlatformLabel,
+    summarizeFilenameValues,
+} from "@/utils/format";
 import { getFallbackPlatforms, getReportPlatformCode, toSourcePlatformOptions, type PlatformOption } from "@/utils/platform";
-import { downloadBlob, formatAmount, formatMonth, monthRangeLabel, splitMonthRange } from "./common";
+import { downloadBlob, formatAmount, monthRangeLabel, splitMonthRange } from "./common";
 
 const loading = ref(false);
 const tableRef = ref<TableInstance>();
@@ -112,6 +137,7 @@ const searchForm = reactive({
     monthRange: [] as string[],
     platforms: [] as string[],
     shopNames: [] as string[],
+    serviceProvider: "",
     qicWarehouse: "",
 });
 
@@ -135,7 +161,7 @@ const shopColorByName = computed(() => {
 });
 
 interface DetailFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "platforms" | "shopNames" | "qicWarehouse";
+    key: "monthRange" | "platforms" | "shopNames" | "serviceProvider" | "qicWarehouse";
 }
 
 const activeFilterTags = computed<DetailFilterTag[]>(() => {
@@ -143,6 +169,7 @@ const activeFilterTags = computed<DetailFilterTag[]>(() => {
     if (searchForm.monthRange.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
     searchForm.platforms.forEach((value) => tags.push({ key: "platforms", label: "平台", value: getPlatformLabel(value) }));
     searchForm.shopNames.forEach((value) => tags.push({ key: "shopNames", label: "店铺", value }));
+    if (searchForm.serviceProvider) tags.push({ key: "serviceProvider", label: "服务商", value: searchForm.serviceProvider });
     if (searchForm.qicWarehouse) tags.push({ key: "qicWarehouse", label: "QIC仓", value: searchForm.qicWarehouse });
     return tags;
 });
@@ -153,6 +180,7 @@ function queryParams() {
         page_size: pagination.pageSize,
         platform_code: selectedReportPlatformsParam.value,
         shop_name: searchForm.shopNames.join(",") || undefined,
+        service_provider: searchForm.serviceProvider || undefined,
         qic_warehouse: searchForm.qicWarehouse || undefined,
         ...splitMonthRange(searchForm.monthRange),
     };
@@ -204,6 +232,7 @@ function handleReset() {
     searchForm.monthRange = [];
     searchForm.platforms = [];
     searchForm.shopNames = [];
+    searchForm.serviceProvider = "";
     searchForm.qicWarehouse = "";
     fetchShopOptions();
     handleSearch();
@@ -216,6 +245,7 @@ async function removeFilterTag(tag: DetailFilterTag) {
         await handlePlatformChange();
     }
     if (tag.key === "shopNames") searchForm.shopNames = searchForm.shopNames.filter((item) => item !== tag.value);
+    if (tag.key === "serviceProvider") searchForm.serviceProvider = "";
     if (tag.key === "qicWarehouse") searchForm.qicWarehouse = "";
     handleSearch();
 }
@@ -244,7 +274,20 @@ async function handleExport(scope: BicExportScope) {
     loadingRef.value = true;
     try {
         const blob = await exportBicDetailsExcel(params);
-        downloadBlob(blob, "BIC明细.xlsx");
+        const filename = buildExportFilename([
+            monthRangeLabel(searchForm.monthRange) || "全部核算年月",
+            `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shopNames, "全部")}`,
+            `服务商${searchForm.serviceProvider || "全部"}`,
+            `QIC仓${searchForm.qicWarehouse || "全部"}`,
+            "BIC明细",
+            scope === "all"
+                ? "全部"
+                : scope === "current_page"
+                  ? `第${pagination.page}页`
+                  : "选中",
+        ]);
+        downloadBlob(blob, filename);
     } finally {
         loadingRef.value = false;
     }
@@ -262,6 +305,12 @@ onMounted(async () => {
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();
+});
+
+usePageRefresh(async () => {
+    await fetchPlatformOptions();
+    await fetchShopOptions();
+    await fetchData();
 });
 </script>
 

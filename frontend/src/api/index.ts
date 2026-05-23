@@ -191,6 +191,18 @@ export async function post<T>(url: string, data?: any): Promise<T> {
 }
 
 /**
+ * Multipart form upload
+ */
+export async function uploadForm<T>(url: string, data: FormData): Promise<T> {
+    const response = await service.post<ApiResponse<T>>(url, data, {
+        headers: {
+            "Content-Type": "multipart/form-data",
+        },
+    });
+    return response.data.data;
+}
+
+/**
  * PUT request
  */
 export async function put<T>(url: string, data?: any): Promise<T> {

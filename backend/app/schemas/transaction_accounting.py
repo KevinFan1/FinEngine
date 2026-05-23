@@ -62,10 +62,12 @@ class TransactionRuleCreate(BaseModel):
     category_id: int
     platform_code: str | None = Field(None, max_length=50)
     transaction_direction: str = Field(..., min_length=1, max_length=20)
+    transaction_scene: str | None = Field(None, max_length=200)
     remark_field: str = Field("备注", min_length=1, max_length=100)
     direction_field: str = Field("动账方向", min_length=1, max_length=100)
-    match_type: str = Field("contains", pattern="^(exact|contains|regex)$")
-    remark_pattern: str = Field(..., min_length=1, max_length=1000)
+    match_type: str = Field("none", pattern="^(none|exact|contains|not_contains)$")
+    remark_pattern: str = Field("", max_length=1000)
+    remark_exclude_pattern: str = Field("", max_length=1000)
     amount_field: str = Field(..., min_length=1, max_length=100)
     result_direction: str = Field("original", pattern="^(original|positive|negative|directional)$")
     priority: int = Field(100, ge=0)
@@ -77,10 +79,12 @@ class TransactionRuleUpdate(BaseModel):
     category_id: int | None = None
     platform_code: str | None = Field(None, max_length=50)
     transaction_direction: str | None = Field(None, min_length=1, max_length=20)
+    transaction_scene: str | None = Field(None, max_length=200)
     remark_field: str | None = Field(None, min_length=1, max_length=100)
     direction_field: str | None = Field(None, min_length=1, max_length=100)
-    match_type: str | None = Field(None, pattern="^(exact|contains|regex)$")
-    remark_pattern: str | None = Field(None, min_length=1, max_length=1000)
+    match_type: str | None = Field(None, pattern="^(none|exact|contains|not_contains)$")
+    remark_pattern: str | None = Field(None, max_length=1000)
+    remark_exclude_pattern: str | None = Field(None, max_length=1000)
     amount_field: str | None = Field(None, min_length=1, max_length=100)
     result_direction: str | None = Field(None, pattern="^(original|positive|negative|directional)$")
     priority: int | None = Field(None, ge=0)
@@ -93,10 +97,12 @@ class TransactionRuleOut(BaseModel):
     category_id: int
     platform_code: str | None
     transaction_direction: str
+    transaction_scene: str | None
     remark_field: str
     direction_field: str
     match_type: str
     remark_pattern: str
+    remark_exclude_pattern: str
     amount_field: str
     result_direction: str
     priority: int
@@ -227,7 +233,6 @@ class TransactionDetailOut(BaseModel):
     reclassification_name: str | None = None
     cash_flow_group_name: str | None = None
     total_amount: Decimal | None = None
-    update_time: datetime | None = None
     created_at: datetime
 
     class Config:

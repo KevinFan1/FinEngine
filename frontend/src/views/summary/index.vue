@@ -490,7 +490,12 @@ import {
 } from "@/api/summary";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
-import { formatMoney, getPlatformLabel } from "@/utils/format";
+import {
+    buildExportFilename,
+    formatMoney,
+    getPlatformLabel,
+    summarizeFilenameValues,
+} from "@/utils/format";
 import {
     getFallbackPlatforms,
     getReportPlatformCode,
@@ -507,6 +512,7 @@ import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 
 const route = useRoute();
@@ -937,7 +943,20 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        link.download = `汇总明细_${formatMonthRangeLabel(searchForm.summaryMonthRange) || "全部业务年月"}_${formatMonthRangeLabel(searchForm.sourceMonthRange) || "全部核算年月"}_${scopeLabel}.xlsx`;
+        link.download = buildExportFilename([
+            formatMonthRangeLabel(searchForm.summaryMonthRange) ||
+                "全部业务年月",
+            formatMonthRangeLabel(searchForm.sourceMonthRange) ||
+                "全部核算年月",
+            `来源平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
+            `归集平台${summarizeFilenameValues(searchForm.reportPlatforms.map(getPlatformLabel), "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shops, "全部")}`,
+            searchForm.keyword.trim()
+                ? `关键词${searchForm.keyword.trim()}`
+                : "关键词全部",
+            "汇总明细",
+            scopeLabel,
+        ]);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -955,6 +974,12 @@ onMounted(async () => {
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();
+});
+
+usePageRefresh(async () => {
+    await fetchPlatformOptions();
+    await fetchShopOptions();
+    await fetchData();
 });
 
 function queryString(value: unknown): string {

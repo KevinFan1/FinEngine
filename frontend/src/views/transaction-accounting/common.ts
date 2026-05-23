@@ -23,7 +23,7 @@ export const directionOptions = [
 export const matchTypeOptions = [
     { label: "精准", value: "exact" },
     { label: "包含", value: "contains" },
-    { label: "正则", value: "regex" },
+    { label: "不包含", value: "not_contains" },
 ];
 
 export const resultDirectionOptions = [

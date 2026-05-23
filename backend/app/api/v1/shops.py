@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, Request
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
-from app.schemas.shop import ShopCreate, ShopOut, ShopUpdate
+from app.schemas.shop import ShopCreate, ShopImportResult, ShopOut, ShopUpdate
 from app.services.shop_service import ShopService
 
 router = APIRouter()
@@ -40,6 +43,43 @@ async def list_shops(
     )
 
 
+@router.get("/import-template")
+async def download_shop_import_template(
+    current_user: User = Depends(get_current_user),
+):
+    buffer = ShopService.build_import_template()
+    filename = "店铺资料导入模板.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.post("/import", response_model=ApiResponse[ShopImportResult])
+async def import_shops(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    content = await file.read()
+    if not content:
+        return ApiResponse(code=400, message="导入文件不能为空")
+    try:
+        result = await ShopService.import_shops(
+            db,
+            content=content,
+            filename=file.filename or "",
+            operator=current_user,
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except ValueError as e:
+        return ApiResponse(code=400, message=str(e))
+    return ApiResponse(data=result, message="导入完成")
+
+
 @router.post("", response_model=ApiResponse[ShopOut])
 async def create_shop(
     data: ShopCreate,
@@ -59,6 +99,23 @@ async def create_shop(
         return ApiResponse(data=ShopOut.model_validate(shop))
     except ValueError as e:
         return ApiResponse(code=400, message=str(e))
+
+
+@router.get("/{shop_id}", response_model=ApiResponse[ShopOut])
+async def get_shop(
+    shop_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        shop = await ShopService.get_shop(db, shop_id)
+        if shop:
+            ShopService.validate_shop_scope(shop=shop, operator=current_user)
+    except ValueError as e:
+        return ApiResponse(code=404, message=str(e))
+    if not shop:
+        return ApiResponse(code=404, message="店铺不存在")
+    return ApiResponse(data=ShopOut.model_validate(shop))
 
 
 @router.put("/{shop_id}", response_model=ApiResponse[ShopOut])

@@ -1,11 +1,23 @@
-import { get, post, put, del } from './index'
+import { del, downloadBlob, get, post, put, uploadForm } from './index'
 
 export interface Shop {
   id: number
   platform_name: string
   shop_name: string
   shop_color?: string
-  entity_name?: string
+  tax_no?: string
+  merchant?: string
+  registered_address?: string
+  legal_person?: string
+  previous_name?: string
+  store_long_id?: string
+  store_short_id?: string
+  settlement_period?: string
+  primary_account?: string
+  anchor?: string
+  shop_type?: string
+  purpose?: string
+  former_name?: string
   remark?: string
   status: number
   created_at: string
@@ -15,9 +27,21 @@ export interface Shop {
 export interface ShopForm {
   platform_name: string
   shop_name: string
-  shop_color?: string
-  entity_name?: string
-  remark?: string
+  shop_color?: string | null
+  tax_no?: string | null
+  merchant?: string | null
+  registered_address?: string | null
+  legal_person?: string | null
+  previous_name?: string | null
+  store_long_id?: string | null
+  store_short_id?: string | null
+  settlement_period?: string | null
+  primary_account?: string | null
+  anchor?: string | null
+  shop_type?: string | null
+  purpose?: string | null
+  former_name?: string | null
+  remark?: string | null
 }
 
 export interface ShopListParams {
@@ -27,8 +51,25 @@ export interface ShopListParams {
   platform_name?: string
 }
 
+export interface ShopImportError {
+  row: number
+  message: string
+}
+
+export interface ShopImportResult {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  errors: ShopImportError[]
+}
+
 export function getShopList(params: ShopListParams) {
   return get<{ items: Shop[]; total: number }>('/shops', params as Record<string, any>)
+}
+
+export function getShopDetail(id: number) {
+  return get<Shop>(`/shops/${id}`)
 }
 
 export function createShop(data: ShopForm) {
@@ -41,4 +82,14 @@ export function updateShop(id: number, data: Partial<ShopForm> & { status?: numb
 
 export function deleteShop(id: number) {
   return del<void>(`/shops/${id}`)
+}
+
+export function downloadShopImportTemplate() {
+  return downloadBlob('/shops/import-template')
+}
+
+export function importShops(file: File) {
+  const data = new FormData()
+  data.append('file', file)
+  return uploadForm<ShopImportResult>('/shops/import', data)
 }

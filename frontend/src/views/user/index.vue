@@ -330,6 +330,7 @@ import { formatDateTime, getRoleLabel } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
 import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
 const userStore = useUserStore()
@@ -651,6 +652,8 @@ onMounted(() => {
     fetchOrgOptions()
   }
 })
+
+usePageRefresh(fetchData)
 </script>
 
 <style scoped lang="scss">

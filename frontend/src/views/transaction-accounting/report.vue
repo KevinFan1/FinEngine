@@ -272,9 +272,14 @@ import {
     monthRangeLabel,
     splitUploadMonthRange,
 } from "./common";
-import { getPlatformLabel } from "@/utils/format";
+import {
+    buildExportFilename,
+    getPlatformLabel,
+    summarizeFilenameValues,
+} from "@/utils/format";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import {
     getFallbackPlatforms,
     getReportPlatformCode,
@@ -494,6 +499,14 @@ function handleSubjectChange() {
     );
 }
 
+function subjectName(id: number) {
+    return subjects.value.find((subject) => subject.id === id)?.name || String(id);
+}
+
+function categoryName(id: number) {
+    return categories.value.find((category) => category.id === id)?.name || String(id);
+}
+
 async function removeFilterTag(tag: ReportFilterTag) {
     if (tag.key === "year") {
         searchForm.year = currentYear;
@@ -537,7 +550,16 @@ async function handleExport() {
     exportLoading.value = true;
     try {
         const blob = await exportTransactionAnnualSummaryExcel(queryParams());
-        downloadBlob(blob, `资金报表_${searchForm.year}年.xlsx`);
+        const filename = buildExportFilename([
+            `${searchForm.year}年`,
+            monthRangeLabel(searchForm.uploadMonthRange) || "全部核算年月",
+            `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shopNames, "全部")}`,
+            `科目${summarizeFilenameValues(searchForm.subjectIds.map(subjectName), "全部")}`,
+            `重分类${summarizeFilenameValues(searchForm.categoryIds.map(categoryName), "全部")}`,
+            "资金报表",
+        ]);
+        downloadBlob(blob, filename);
         ElMessage.success("导出成功");
     } finally {
         exportLoading.value = false;
@@ -567,6 +589,11 @@ function rowHasNonZeroAmount(row: TransactionAnnualSummaryRow) {
 }
 
 onMounted(async () => {
+    await loadOptions();
+    await fetchData();
+});
+
+usePageRefresh(async () => {
     await loadOptions();
     await fetchData();
 });

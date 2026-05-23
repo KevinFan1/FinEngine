@@ -224,6 +224,7 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils
 import { useUserStore } from '@/stores/user'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
 import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
 const userStore = useUserStore()
@@ -381,6 +382,8 @@ function openDetailDrawer(row: AuditLog) {
 onMounted(() => {
   fetchData()
 })
+
+usePageRefresh(fetchData)
 </script>
 
 <style scoped lang="scss">

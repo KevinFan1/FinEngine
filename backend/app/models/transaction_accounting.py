@@ -59,7 +59,10 @@ class TransactionRule(SoftDeleteMixin, Base):
             "category_id",
             "platform_code",
             "transaction_direction",
+            "transaction_scene",
+            "match_type",
             "remark_pattern",
+            "remark_exclude_pattern",
             "amount_field",
             "result_direction",
             unique=True,
@@ -73,10 +76,12 @@ class TransactionRule(SoftDeleteMixin, Base):
     category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_categories.id"), nullable=False, comment="分类ID")
     platform_code: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="平台编码，空表示通用")
     transaction_direction: Mapped[str] = mapped_column(String(20), nullable=False, comment="动账方向")
+    transaction_scene: Mapped[str | None] = mapped_column(String(200), nullable=True, comment="动账场景，空字符串表示空场景，空值表示不限制")
     remark_field: Mapped[str] = mapped_column(String(100), default="备注", comment="备注字段名")
     direction_field: Mapped[str] = mapped_column(String(100), default="动账方向", comment="方向字段名")
-    match_type: Mapped[str] = mapped_column(String(20), default="contains", comment="匹配方式：精确/包含/正则")
-    remark_pattern: Mapped[str] = mapped_column(String(1000), nullable=False, comment="备注匹配内容")
+    match_type: Mapped[str] = mapped_column(String(20), default="none", comment="备注信息匹配方式：none/exact/contains/not_contains")
+    remark_pattern: Mapped[str] = mapped_column(String(1000), nullable=False, default="", comment="备注信息匹配内容；match_type=none 时可为空")
+    remark_exclude_pattern: Mapped[str] = mapped_column(String(1000), nullable=False, default="", comment="备注排除内容；备注包含任一内容则不匹配")
     amount_field: Mapped[str] = mapped_column(String(100), nullable=False, comment="取数字段名")
     result_direction: Mapped[str] = mapped_column(String(30), default="original", comment="结果方向：原始/正值/负值/按方向")
     priority: Mapped[int] = mapped_column(Integer, default=100, comment="优先级，数字越小越先匹配")

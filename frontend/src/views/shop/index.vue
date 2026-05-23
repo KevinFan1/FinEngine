@@ -10,7 +10,7 @@
         <el-form-item label="搜索">
           <el-input
             v-model="searchForm.keyword"
-            placeholder="店铺名称/主体名称"
+            placeholder="店铺名称/商户/税号/主播"
             clearable
             style="width: 280px"
             @keyup.enter="fetchData"
@@ -49,9 +49,25 @@
             <span class="card-header-title">店铺列表</span>
             <span class="shop-count">共 {{ pagination.total }} 条</span>
           </div>
-          <el-button type="primary" @click="handleAdd">
-            <el-icon><Plus /></el-icon> 新增店铺
-          </el-button>
+          <div class="shop-header-actions">
+            <el-button :loading="downloadingTemplate" @click="handleDownloadTemplate">
+              <el-icon><Download /></el-icon> 下载模板
+            </el-button>
+            <el-upload
+              action="#"
+              accept=".xlsx,.xlsm"
+              :show-file-list="false"
+              :auto-upload="false"
+              :on-change="handleImportFileChange"
+            >
+              <el-button :loading="importing">
+                <el-icon><Upload /></el-icon> 导入店铺
+              </el-button>
+            </el-upload>
+            <el-button type="primary" @click="handleAdd">
+              <el-icon><Plus /></el-icon> 新增店铺
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -76,8 +92,15 @@
           </template>
         </el-table-column>
         <el-table-column prop="shop_name" label="店铺名称" min-width="180" />
-        <el-table-column prop="entity_name" label="主体名称" min-width="180">
-          <template #default="{ row }">{{ row.entity_name || '-' }}</template>
+        <el-table-column
+          v-for="field in tableProfileFields"
+          :key="field.prop"
+          :prop="field.prop"
+          :label="field.label"
+          :min-width="field.width"
+          show-overflow-tooltip
+        >
+          <template #default="{ row }">{{ formatEmpty(row[field.prop]) }}</template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="200">
           <template #default="{ row }">{{ row.remark || '-' }}</template>
@@ -115,7 +138,7 @@
     <el-drawer
       v-model="drawerVisible"
       :title="drawerTitle"
-      size="480px"
+      size="640px"
       append-to-body
       destroy-on-close
       :close-on-click-modal="false"
@@ -125,7 +148,7 @@
           <div>
             <span class="detail-kicker">SHOP #{{ selectedShop.id }}</span>
             <h3>{{ selectedShop.shop_name }}</h3>
-            <p>{{ selectedShop.entity_name || '未填写主体名称' }}</p>
+            <p>{{ selectedShop.merchant || '未填写商户' }}</p>
           </div>
           <div class="detail-badge-row">
             <PlatformBadge :platform="selectedShop.platform_name" />
@@ -136,6 +159,18 @@
             <el-tag :type="selectedShop.status === 1 ? 'success' : 'danger'" size="small">
               {{ selectedShop.status === 1 ? '启用' : '禁用' }}
             </el-tag>
+          </div>
+        </section>
+
+        <section class="detail-card">
+          <div class="detail-card-header">
+            <span>店铺资料</span>
+          </div>
+          <div class="detail-grid">
+            <div v-for="field in shopProfileFields" :key="field.prop" class="detail-item">
+              <span class="detail-label">{{ field.label }}</span>
+              <strong>{{ formatEmpty(selectedShop[field.prop]) }}</strong>
+            </div>
           </div>
         </section>
 
@@ -162,27 +197,39 @@
           <p class="detail-note">{{ selectedShop.remark || '-' }}</p>
         </section>
       </div>
-      <el-form v-else ref="formRef" :model="form" :rules="rules" label-width="80px">
-        <el-form-item label="平台" prop="platform_name">
-          <el-select v-model="form.platform_name" placeholder="选择平台" style="width: 100%">
-            <el-option v-for="p in platformOptions" :key="p.value" :label="p.label" :value="p.value">
-              <PlatformBadge :platform="p.value" />
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="店铺名称" prop="shop_name">
-          <el-input v-model="form.shop_name" placeholder="输入店铺名称" maxlength="200" show-word-limit />
-        </el-form-item>
-        <el-form-item label="店铺颜色" prop="shop_color">
-          <el-input v-model="form.shop_color" placeholder="#F59E0B，留空则自动分配" maxlength="20">
-            <template #prefix>
-              <span class="color-input-prefix" :style="shopColorStyle(form.shop_color)"></span>
-            </template>
-          </el-input>
-        </el-form-item>
-        <el-form-item label="主体名称" prop="entity_name">
-          <el-input v-model="form.entity_name" placeholder="输入主体名称（选填）" maxlength="200" show-word-limit />
-        </el-form-item>
+      <el-form v-else ref="formRef" :model="form" :rules="rules" label-position="top" class="shop-edit-form">
+        <div class="shop-form-grid">
+          <el-form-item label="平台" prop="platform_name">
+            <el-select v-model="form.platform_name" placeholder="选择平台" style="width: 100%">
+              <el-option v-for="p in platformOptions" :key="p.value" :label="p.label" :value="p.value">
+                <PlatformBadge :platform="p.value" />
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="店铺名称" prop="shop_name">
+            <el-input v-model="form.shop_name" placeholder="输入店铺名称" maxlength="200" show-word-limit />
+          </el-form-item>
+          <el-form-item label="店铺颜色" prop="shop_color">
+            <el-input v-model="form.shop_color" placeholder="#F59E0B，留空则自动分配" maxlength="20">
+              <template #prefix>
+                <span class="color-input-prefix" :style="shopColorStyle(form.shop_color)"></span>
+              </template>
+            </el-input>
+          </el-form-item>
+          <el-form-item
+            v-for="field in shopProfileFields"
+            :key="field.prop"
+            :label="field.label"
+            :prop="field.prop"
+          >
+            <el-input
+              v-model="form[field.prop]"
+              :placeholder="`${field.label}（选填）`"
+              :maxlength="field.max"
+              show-word-limit
+            />
+          </el-form-item>
+        </div>
         <el-form-item label="备注" prop="remark">
           <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="备注信息（选填）" maxlength="2000" show-word-limit />
         </el-form-item>
@@ -192,6 +239,49 @@
         <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
       </div>
     </el-drawer>
+
+    <el-dialog v-model="importResultVisible" title="导入结果" width="620px">
+      <div v-if="importResult" class="import-result">
+        <div class="import-summary">
+          <div>
+            <span>读取</span>
+            <strong>{{ importResult.total }}</strong>
+          </div>
+          <div>
+            <span>新增</span>
+            <strong>{{ importResult.created }}</strong>
+          </div>
+          <div>
+            <span>更新</span>
+            <strong>{{ importResult.updated }}</strong>
+          </div>
+          <div>
+            <span>跳过</span>
+            <strong>{{ importResult.skipped }}</strong>
+          </div>
+        </div>
+        <el-alert
+          v-if="importResult.errors.length"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="部分行未导入，请修正后重新导入。当前组织内，平台和店铺名共同决定唯一店铺。"
+        />
+        <el-table
+          v-if="importResult.errors.length"
+          :data="importResult.errors"
+          class="summary-table import-error-table"
+          border
+          height="260"
+        >
+          <el-table-column prop="row" label="行号" width="90" align="center" />
+          <el-table-column prop="message" label="原因" min-width="360" show-overflow-tooltip />
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="importResultVisible = false">知道了</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -199,8 +289,19 @@
 defineOptions({ name: 'Shops' })
 
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { getShopList, createShop, updateShop, deleteShop, type Shop } from '@/api/shop'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadFile as ElementUploadFile } from 'element-plus'
+import {
+  createShop,
+  deleteShop,
+  downloadShopImportTemplate,
+  getShopDetail,
+  getShopList,
+  importShops,
+  updateShop,
+  type Shop,
+  type ShopForm,
+  type ShopImportResult,
+} from '@/api/shop'
 import { getPlatformList, type Platform } from '@/api/platform'
 import { formatDateTime } from '@/utils/format'
 import { getFallbackPlatforms, toReportPlatformOptions, type PlatformOption } from '@/utils/platform'
@@ -208,10 +309,37 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils
 import PlatformBadge from '@/components/PlatformBadge.vue'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
 import SearchCardIntro from '@/components/SearchCardIntro.vue'
+import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
 const platforms = ref<Platform[]>(getFallbackPlatforms())
 const platformOptions = ref<PlatformOption[]>(toReportPlatformOptions(platforms.value))
+
+const shopProfileFields = [
+  { prop: 'tax_no', label: '税号', max: 100, width: 150 },
+  { prop: 'merchant', label: '商户', max: 200, width: 180 },
+  { prop: 'registered_address', label: '注册地址', max: 500, width: 220 },
+  { prop: 'legal_person', label: '法人', max: 100, width: 120 },
+  { prop: 'previous_name', label: '曾用名', max: 200, width: 160 },
+  { prop: 'store_long_id', label: 'store_long_id', max: 100, width: 170 },
+  { prop: 'store_short_id', label: 'store_short_id', max: 100, width: 170 },
+  { prop: 'settlement_period', label: 'settlement_period', max: 100, width: 180 },
+  { prop: 'primary_account', label: 'primary_account', max: 200, width: 180 },
+  { prop: 'anchor', label: '主播', max: 100, width: 120 },
+  { prop: 'shop_type', label: '类型', max: 100, width: 120 },
+  { prop: 'purpose', label: 'purpose', max: 200, width: 160 },
+  { prop: 'former_name', label: 'former_name', max: 200, width: 170 },
+] as const
+
+type ShopProfileFieldKey = typeof shopProfileFields[number]['prop']
+type ShopFormState = {
+  platform_name: string
+  shop_name: string
+  shop_color: string
+  remark: string
+} & Record<ShopProfileFieldKey, string>
+
+const tableProfileFields = shopProfileFields
 
 // Search
 const searchForm = reactive({
@@ -250,12 +378,28 @@ const editId = ref<number | null>(null)
 const selectedShop = ref<Shop | null>(null)
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+const importing = ref(false)
+const downloadingTemplate = ref(false)
+const importResultVisible = ref(false)
+const importResult = ref<ShopImportResult | null>(null)
 
-const form = reactive({
+const form = reactive<ShopFormState>({
   platform_name: '',
   shop_name: '',
   shop_color: '',
-  entity_name: '',
+  tax_no: '',
+  merchant: '',
+  registered_address: '',
+  legal_person: '',
+  previous_name: '',
+  store_long_id: '',
+  store_short_id: '',
+  settlement_period: '',
+  primary_account: '',
+  anchor: '',
+  shop_type: '',
+  purpose: '',
+  former_name: '',
   remark: '',
 })
 
@@ -270,9 +414,12 @@ const rules: FormRules = {
   shop_color: [
     { max: 20, message: '店铺颜色最多 20 个字符', trigger: 'blur' },
   ],
-  entity_name: [
-    { max: 200, message: '主体名称最多 200 个字符', trigger: 'blur' },
-  ],
+  ...Object.fromEntries(
+    shopProfileFields.map((field) => [
+      field.prop,
+      [{ max: field.max, message: `${field.label}最多 ${field.max} 个字符`, trigger: 'blur' }],
+    ]),
+  ),
   remark: [
     { max: 2000, message: '备注最多 2000 个字符', trigger: 'blur' },
   ],
@@ -335,18 +482,19 @@ function handleAdd() {
   isEdit.value = false
   editId.value = null
   selectedShop.value = null
-  form.platform_name = ''
-  form.shop_name = ''
-  form.shop_color = ''
-  form.entity_name = ''
-  form.remark = ''
+  resetForm()
   drawerVisible.value = true
 }
 
-function handleView(row: Shop) {
+async function handleView(row: Shop) {
   drawerMode.value = 'detail'
   selectedShop.value = row
   drawerVisible.value = true
+  try {
+    selectedShop.value = await getShopDetail(row.id)
+  } catch {
+    // Error handled by interceptor
+  }
 }
 
 function handleEdit(row: Shop) {
@@ -357,7 +505,9 @@ function handleEdit(row: Shop) {
   form.platform_name = row.platform_name
   form.shop_name = row.shop_name
   form.shop_color = row.shop_color || ''
-  form.entity_name = row.entity_name || ''
+  shopProfileFields.forEach((field) => {
+    form[field.prop] = String(row[field.prop] || '')
+  })
   form.remark = row.remark || ''
   drawerVisible.value = true
 }
@@ -378,29 +528,46 @@ function shopColorStyle(color?: string) {
   }
 }
 
+function resetForm() {
+  form.platform_name = ''
+  form.shop_name = ''
+  form.shop_color = ''
+  shopProfileFields.forEach((field) => {
+    form[field.prop] = ''
+  })
+  form.remark = ''
+}
+
+function emptyToNull(value: string) {
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function buildSubmitPayload(): ShopForm {
+  const payload: ShopForm = {
+    platform_name: form.platform_name,
+    shop_name: form.shop_name.trim(),
+    shop_color: emptyToNull(form.shop_color),
+    remark: emptyToNull(form.remark),
+  }
+  shopProfileFields.forEach((field) => {
+    payload[field.prop] = emptyToNull(form[field.prop])
+  })
+  return payload
+}
+
 async function handleSubmit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
   submitting.value = true
   try {
+    const payload = buildSubmitPayload()
     if (isEdit.value && editId.value) {
-      await updateShop(editId.value, {
-        platform_name: form.platform_name,
-        shop_name: form.shop_name,
-        shop_color: form.shop_color || undefined,
-        entity_name: form.entity_name || undefined,
-        remark: form.remark || undefined,
-      })
+      await updateShop(editId.value, payload)
       ElMessage.success('更新成功')
     } else {
-      await createShop({
-        platform_name: form.platform_name,
-        shop_name: form.shop_name,
-        shop_color: form.shop_color || undefined,
-        entity_name: form.entity_name || undefined,
-        remark: form.remark || undefined,
-      })
+      await createShop(payload)
       ElMessage.success('创建成功')
     }
     drawerVisible.value = false
@@ -409,6 +576,54 @@ async function handleSubmit() {
     // Error handled by interceptor
   } finally {
     submitting.value = false
+  }
+}
+
+function formatEmpty(value?: string | null) {
+  return value || '-'
+}
+
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+async function handleDownloadTemplate() {
+  downloadingTemplate.value = true
+  try {
+    const blob = await downloadShopImportTemplate()
+    saveBlob(blob, '店铺资料导入模板.xlsx')
+  } catch {
+    // Error handled by interceptor
+  } finally {
+    downloadingTemplate.value = false
+  }
+}
+
+async function handleImportFileChange(uploadFile: ElementUploadFile) {
+  const rawFile = uploadFile.raw
+  if (!rawFile) return
+  importing.value = true
+  try {
+    const result = await importShops(rawFile)
+    importResult.value = result
+    importResultVisible.value = true
+    if (result.errors.length) {
+      ElMessage.warning(`导入完成，${result.errors.length} 行需要修正`)
+    } else {
+      ElMessage.success(`导入完成：新增 ${result.created}，更新 ${result.updated}`)
+    }
+    fetchData()
+  } catch {
+    // Error handled by interceptor
+  } finally {
+    importing.value = false
   }
 }
 
@@ -431,6 +646,11 @@ onMounted(async () => {
   await fetchPlatformOptions()
   fetchData()
 })
+
+usePageRefresh(async () => {
+  await fetchPlatformOptions()
+  await fetchData()
+})
 </script>
 
 <style scoped lang="scss">
@@ -446,6 +666,17 @@ onMounted(async () => {
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.shop-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  :deep(.el-upload) {
+    display: inline-flex;
+  }
 }
 
 .shop-table-card {
@@ -464,6 +695,16 @@ onMounted(async () => {
   padding: 14px 20px;
   background: var(--bg-elevated);
   border-top: 1px solid var(--border-light);
+}
+
+.shop-edit-form {
+  padding-bottom: 8px;
+}
+
+.shop-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
 }
 
 .detail-panel {
@@ -563,12 +804,11 @@ onMounted(async () => {
   background: var(--bg-elevated);
 
   strong {
-    overflow: hidden;
     color: var(--text-primary);
     font-size: 13px;
     font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -586,9 +826,56 @@ onMounted(async () => {
   word-break: break-word;
 }
 
+.import-result {
+  display: grid;
+  gap: 12px;
+}
+
+.import-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+
+  div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border-light);
+    border-radius: calc(var(--radius-card) - 2px);
+    background: var(--bg-elevated);
+  }
+
+  span {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  strong {
+    color: var(--text-primary);
+    font-size: 20px;
+    line-height: 1.2;
+  }
+}
+
+.import-error-table {
+  margin-top: 2px;
+}
+
 @media (max-width: 768px) {
+  .shop-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .shop-form-grid,
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .import-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

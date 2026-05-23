@@ -534,6 +534,7 @@ import {
     PAGE_SIZE_OPTIONS,
     PAGINATION_LAYOUT,
 } from "@/utils/pagination";
+import { usePageRefresh } from "@/composables/pageRefresh";
 
 interface DictFormState {
     platform_id: number | null;
@@ -1112,6 +1113,11 @@ async function handleDelete(row: CategoryDict) {
 }
 
 onMounted(async () => {
+    await fetchPlatformOptions();
+    await fetchData();
+});
+
+usePageRefresh(async () => {
     await fetchPlatformOptions();
     await fetchData();
 });

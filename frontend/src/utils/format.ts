@@ -117,6 +117,46 @@ export function formatMoney(amount: number | null | undefined): string {
 }
 
 /**
+ * Normalize a filename fragment.
+ */
+export function sanitizeFilenamePart(
+    value: string | number | null | undefined,
+): string {
+    if (value === null || value === undefined) return "";
+    const text = String(value).trim();
+    if (!text) return "";
+    return text.replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, " ");
+}
+
+/**
+ * Build a safe export filename from ordered parts.
+ */
+export function buildExportFilename(
+    parts: Array<string | number | null | undefined>,
+    extension = "xlsx",
+): string {
+    const safeParts = parts
+        .map((part) => sanitizeFilenamePart(part))
+        .filter(Boolean);
+    const safeExtension = extension.replace(/^\.+/, "") || "xlsx";
+    return `${safeParts.join("_")}.${safeExtension}`;
+}
+
+/**
+ * Compact a multi-select label for filenames.
+ */
+export function summarizeFilenameValues(
+    values: Array<string | number | null | undefined>,
+    emptyLabel: string,
+    maxItems = 2,
+): string {
+    const labels = values.map((item) => sanitizeFilenamePart(item)).filter(Boolean);
+    if (!labels.length) return emptyLabel;
+    if (labels.length <= maxItems) return labels.join("+");
+    return `${labels.slice(0, maxItems).join("+")}等${labels.length}项`;
+}
+
+/**
  * Format currency (CNY) with ¥ symbol
  */
 export function formatCurrency(amount: number | null | undefined): string {

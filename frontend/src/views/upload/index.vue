@@ -896,6 +896,7 @@ import { getOrganizationList, type Organization } from "@/api/organization";
 import { getShopList, type Shop as ShopRecord } from "@/api/shop";
 import { checkUploadQuota } from "@/api/quota";
 import { useUserStore } from "@/stores/user";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
@@ -1361,7 +1362,6 @@ async function loadFileSpecs() {
         // Silently fail - will show "待识别" for all
     }
 }
-loadFileSpecs();
 
 async function loadOrgOptions() {
     if (!userStore.isSuperAdmin) return;
@@ -1380,12 +1380,20 @@ async function loadOrgOptions() {
         orgLoading.value = false;
     }
 }
-loadOrgOptions();
+
+async function refreshPage() {
+    await loadFileSpecs();
+    await loadOrgOptions();
+}
+
+void refreshPage();
 
 async function ensureFileSpecsLoaded() {
     if (fileSpecs.value.length > 0) return;
     await loadFileSpecs();
 }
+
+usePageRefresh(refreshPage);
 
 // File input trigger
 function triggerFileInput() {

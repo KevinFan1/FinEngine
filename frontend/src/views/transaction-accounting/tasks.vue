@@ -109,12 +109,34 @@
                             <el-icon><Loading /></el-icon>
                             有任务运行中，自动刷新中...
                         </el-tag>
+                        <div v-if="selectedCount > 0" class="batch-actions">
+                            <span class="batch-actions-count">已选 {{ selectedCount }} 条</span>
+                            <el-button
+                                size="small"
+                                type="primary"
+                                :disabled="selectedRecalculableRows.length === 0"
+                                :loading="batchRecalculating"
+                                @click="handleBatchRecalculate"
+                            >
+                                批量重新统计
+                            </el-button>
+                        </div>
                         <el-button @click="fetchData">刷新</el-button>
                     </div>
                 </div>
             </template>
 
-            <el-table class="summary-table roomy-table task-table" :data="tableData" v-loading="loading" stripe border height="calc(100vh - 278px)">
+            <el-table
+                class="summary-table roomy-table task-table"
+                :data="tableData"
+                v-loading="loading"
+                stripe
+                border
+                height="calc(100vh - 278px)"
+                row-key="id"
+                @selection-change="handleSelectionChange"
+            >
+                <el-table-column type="selection" width="46" fixed="left" />
                 <el-table-column label="序号" width="70" align="center">
                     <template #default="{ $index }">
                         {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
@@ -315,10 +337,17 @@ import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
-import { listTransactionTasks, rerunTransactionTask, type TransactionTask } from "@/api/transactionAccounting";
+import {
+    batchRecalculateTransactionTasks,
+    listTransactionTasks,
+    rerunTransactionTask,
+    type TransactionTask,
+    type TransactionTaskBatchActionResult,
+} from "@/api/transactionAccounting";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { formatDateTime, getPlatformLabel } from "@/utils/format";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import {
     getFallbackPlatforms,
@@ -339,6 +368,8 @@ const loading = ref(false);
 const tableData = ref<TransactionTask[]>([]);
 const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
 const rerunningTaskId = ref<number | null>(null);
+const batchRecalculating = ref(false);
+const selectedRows = ref<TransactionTask[]>([]);
 const taskDetailDrawerVisible = ref(false);
 const taskDetail = ref<TransactionTask | null>(null);
 const searchForm = reactive({
@@ -400,6 +431,11 @@ const shopColorByName = computed(() => {
     });
     return map;
 });
+
+const selectedCount = computed(() => selectedRows.value.length);
+const selectedRecalculableRows = computed(() =>
+    selectedRows.value.filter((row) => canRecalculate(row)),
+);
 
 interface TaskFilterTag extends ActiveFilterTag {
     key: "monthRange" | "platforms" | "statuses" | "shopNames" | "keyword";
@@ -464,6 +500,8 @@ async function fetchData() {
         const data = await listTransactionTasks(queryParams());
         tableData.value = data.items;
         pagination.total = data.total;
+        const selectedIds = new Set(selectedRows.value.map((row) => row.id));
+        selectedRows.value = tableData.value.filter((row) => selectedIds.has(row.id));
     } finally {
         loading.value = false;
     }
@@ -545,6 +583,44 @@ async function rerunTask(row: TransactionTask) {
     }
 }
 
+function handleSelectionChange(rows: TransactionTask[]) {
+    selectedRows.value = rows;
+}
+
+function showBatchResult(result: TransactionTaskBatchActionResult) {
+    if (result.failed_count > 0) {
+        const firstFailure = result.failed_items[0];
+        ElMessage.warning(
+            `已重新提交统计任务 ${result.success_count} 个，失败 ${result.failed_count} 个${
+                firstFailure ? `：${firstFailure.message}` : ""
+            }`,
+        );
+        return;
+    }
+    ElMessage.success(`已重新提交统计任务 ${result.success_count} 个`);
+}
+
+async function handleBatchRecalculate() {
+    const rows = selectedRecalculableRows.value;
+    if (!rows.length) {
+        ElMessage.warning("请选择可重新统计的任务");
+        return;
+    }
+
+    batchRecalculating.value = true;
+    stopAutoRefresh();
+    try {
+        const result = await batchRecalculateTransactionTasks(rows.map((row) => row.id));
+        showBatchResult(result);
+        await fetchData();
+    } catch {
+        await fetchData();
+    } finally {
+        batchRecalculating.value = false;
+        startAutoRefresh();
+    }
+}
+
 function openTaskDetail(row: TransactionTask) {
     taskDetail.value = row;
     taskDetailDrawerVisible.value = true;
@@ -576,6 +652,8 @@ onMounted(async () => {
 onUnmounted(() => {
     stopAutoRefresh();
 });
+
+usePageRefresh(fetchData);
 </script>
 
 <style scoped lang="scss">

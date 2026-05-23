@@ -81,6 +81,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import { changeMyPassword, getUserInfo, updateMyProfile } from "@/api/auth";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import { usePageRefresh } from "@/composables/pageRefresh";
 import { useUserStore } from "@/stores/user";
 import { getRoleLabel } from "@/utils/format";
 
@@ -173,6 +174,8 @@ watch(
 onMounted(async () => {
   await refreshUser();
 });
+
+usePageRefresh(refreshUser);
 </script>
 
 <style scoped lang="scss">

@@ -1,8 +1,9 @@
 import pytest
+from openpyxl import load_workbook
 
 from app.models.shop import Shop
 from app.schemas.shop import ShopCreate
-from app.services.shop_service import ShopService
+from app.services.shop_service import SHOP_IMPORT_HEADERS, ShopService
 
 
 class _ScalarResult:
@@ -108,6 +109,27 @@ async def test_create_shop_uses_atomic_insert(monkeypatch: pytest.MonkeyPatch) -
     assert len(db.statements) == 1
     assert getattr(db.statements[0], "is_insert", False)
     assert len(audit_calls) == 1
+
+
+def test_shop_import_template_marks_unique_key_headers() -> None:
+    workbook = load_workbook(ShopService.build_import_template())
+    sheet = workbook["店铺导入模板"]
+
+    headers = [sheet.cell(row=1, column=index).value for index in range(1, len(SHOP_IMPORT_HEADERS) + 1)]
+
+    assert headers == list(SHOP_IMPORT_HEADERS)
+    assert "组织" not in headers
+    for column_index in (1, 2):
+        comment = sheet.cell(row=1, column=column_index).comment
+        assert comment is not None
+        assert "唯一" in comment.text
+
+
+def test_shop_import_header_aliases_keep_chinese_and_english_former_names_distinct() -> None:
+    header_map = ShopService._parse_import_headers(("平台", "店铺名", "曾用名", "former_name"))
+
+    assert header_map["previous_name"] == 2
+    assert header_map["former_name"] == 3
 
 
 @pytest.mark.asyncio

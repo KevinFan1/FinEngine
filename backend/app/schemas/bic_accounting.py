@@ -65,11 +65,14 @@ class BicDetailOut(BaseModel):
     org_id: int
     shop_id: int | None = None
     platform_code: str
+    store_short_id: str | None = None
+    service_provider: str
     shop_name: str
-    accounting_year: int
-    accounting_month: int
     qic_warehouse: str
-    row_count: int
+    merchant: str | None = None
+    tax_no: str | None = None
+    shop_type: str | None = None
+    registered_address: str | None = None
     total_amount: Decimal
     created_at: datetime
 
@@ -84,10 +87,16 @@ class BicReportOut(BaseModel):
     org_id: int
     shop_id: int | None = None
     platform_code: str
+    store_short_id: str | None = None
+    service_provider: str
     shop_name: str
     accounting_year: int
     accounting_month: int
     row_count: int
+    merchant: str | None = None
+    tax_no: str | None = None
+    shop_type: str | None = None
+    registered_address: str | None = None
     total_amount: Decimal
     created_at: datetime
 

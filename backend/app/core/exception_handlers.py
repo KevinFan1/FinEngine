@@ -37,7 +37,6 @@ FIELD_LABELS = {
     "shop_id": "店铺",
     "shop_name": "店铺名称",
     "shop_color": "店铺颜色",
-    "entity_name": "主体名称",
     "captcha_id": "验证码",
     "captcha_code": "验证码",
     "batch_id": "上传批次",

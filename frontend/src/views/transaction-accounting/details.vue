@@ -255,11 +255,6 @@
                         }}</span></template
                     >
                 </el-table-column>
-                <!-- <el-table-column prop="update_time" label="最新统计时间" min-width="172" class-name="created-time-column detail-edge-column" header-class-name="detail-edge-column">
-                    <template #default="{ row }">
-                        <span class="text-tertiary">{{ formatDateTime(row.update_time) }}</span>
-                    </template>
-                </el-table-column> -->
             </el-table>
 
             <div class="pagination-area">
@@ -279,7 +274,7 @@
 </template>
 
 <script setup lang="ts">
-defineOptions({ name: "TransactionDetails" });
+defineOptions({ name: "TransactionSummaries" });
 
 import { ElMessage } from "element-plus";
 import type { TableInstance } from "element-plus";
@@ -311,7 +306,11 @@ import {
     monthRangeLabel,
     splitMonthRange,
 } from "./common";
-import { formatDateTime, getPlatformLabel } from "@/utils/format";
+import {
+    buildExportFilename,
+    getPlatformLabel,
+    summarizeFilenameValues,
+} from "@/utils/format";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import {
@@ -320,6 +319,7 @@ import {
     toSourcePlatformOptions,
     type PlatformOption,
 } from "@/utils/platform";
+import { usePageRefresh } from "@/composables/pageRefresh";
 
 const loading = ref(false);
 const tableRef = ref<TableInstance>();
@@ -556,6 +556,14 @@ function handleSubjectChange() {
     );
 }
 
+function subjectName(id: number) {
+    return subjects.value.find((subject) => subject.id === id)?.name || String(id);
+}
+
+function categoryName(id: number) {
+    return categories.value.find((category) => category.id === id)?.name || String(id);
+}
+
 function handleSelectionChange(rows: TransactionDetail[]) {
     selectedRows.value = rows;
 }
@@ -599,7 +607,16 @@ async function handleExport(scope: TransactionExportScope) {
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        downloadBlob(blob, `资金明细_${scopeLabel}.xlsx`);
+        const filename = buildExportFilename([
+            monthRangeLabel(searchForm.businessMonthRange) || "全部业务年月",
+            `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shopNames, "全部")}`,
+            `科目${summarizeFilenameValues(searchForm.subjectIds.map(subjectName), "全部")}`,
+            `重分类${summarizeFilenameValues(searchForm.categoryIds.map(categoryName), "全部")}`,
+            "资金明细",
+            scopeLabel,
+        ]);
+        downloadBlob(blob, filename);
         ElMessage.success("导出成功");
     } finally {
         loadingRef.value = false;
@@ -607,6 +624,11 @@ async function handleExport(scope: TransactionExportScope) {
 }
 
 onMounted(async () => {
+    await loadOptions();
+    await fetchData();
+});
+
+usePageRefresh(async () => {
     await loadOptions();
     await fetchData();
 });

@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from openpyxl import load_workbook
@@ -8,7 +7,6 @@ from app.services.transaction_accounting_service import TransactionAccountingSer
 
 
 def test_detail_export_headers_skip_upload_month_and_include_total_category() -> None:
-    update_time = datetime(2026, 5, 20, 9, 30, 15, tzinfo=timezone.utc)
     detail = TransactionDetail(
         id=1,
         task_id=10,
@@ -34,7 +32,6 @@ def test_detail_export_headers_skip_upload_month_and_include_total_category() ->
     detail.cash_flow_group_name = "经营活动现金流入"
     detail.subject_name = "收到其他与经营相关的收入"
     detail.category_name = "平台补贴"
-    detail.update_time = update_time
 
     workbook_buffer = TransactionAccountingService._build_detail_workbook([detail])
     workbook = load_workbook(workbook_buffer)
@@ -49,7 +46,6 @@ def test_detail_export_headers_skip_upload_month_and_include_total_category() ->
         "科目",
         "重分类",
         "汇总数值",
-        "最新统计时间",
     ]
     assert [cell.value for cell in worksheet[2]] == [
         1,
@@ -60,5 +56,4 @@ def test_detail_export_headers_skip_upload_month_and_include_total_category() ->
         "收到其他与经营相关的收入",
         "平台补贴",
         120.25,
-        "2026-05-20 17:30:15",
     ]

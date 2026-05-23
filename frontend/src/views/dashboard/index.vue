@@ -99,6 +99,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { getTaskList } from '@/api/task'
 import { getRoleLabel } from '@/utils/format'
+import { usePageRefresh } from '@/composables/pageRefresh'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -197,6 +198,8 @@ async function fetchStats() {
 onMounted(() => {
   fetchStats()
 })
+
+usePageRefresh(fetchStats)
 </script>
 
 <style scoped lang="scss">

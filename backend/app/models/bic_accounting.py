@@ -88,6 +88,7 @@ class BicDetail(SoftDeleteMixin, Base):
     __table_args__ = (
         Index("idx_fin_bic_details_task", "task_id"),
         Index("idx_fin_bic_details_org_period", "org_id", "accounting_year", "accounting_month"),
+        Index("idx_fin_bic_details_provider", "service_provider"),
         Index("idx_fin_bic_details_qic", "qic_warehouse"),
         {"comment": "BIC 核算明细汇总表"},
     )
@@ -101,6 +102,7 @@ class BicDetail(SoftDeleteMixin, Base):
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称")
     accounting_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算年份")
     accounting_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算月份")
+    service_provider: Mapped[str] = mapped_column(String(200), nullable=False, default="-", comment="服务商")
     qic_warehouse: Mapped[str] = mapped_column(String(200), nullable=False, comment="QIC仓")
     row_count: Mapped[int] = mapped_column(Integer, default=0, comment="汇总行数")
     total_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="结算金额合计")
@@ -113,6 +115,7 @@ class BicReportRow(SoftDeleteMixin, Base):
     __table_args__ = (
         Index("idx_fin_bic_report_task", "task_id"),
         Index("idx_fin_bic_report_org_period", "org_id", "accounting_year", "accounting_month"),
+        Index("idx_fin_bic_report_provider", "service_provider"),
         {"comment": "BIC 核算报表汇总表"},
     )
 
@@ -125,6 +128,7 @@ class BicReportRow(SoftDeleteMixin, Base):
     shop_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="店铺名称")
     accounting_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算年份")
     accounting_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算月份")
+    service_provider: Mapped[str] = mapped_column(String(200), nullable=False, default="-", comment="服务商")
     row_count: Mapped[int] = mapped_column(Integer, default=0, comment="汇总行数")
     total_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="结算金额合计")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")

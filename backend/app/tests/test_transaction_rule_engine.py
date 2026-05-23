@@ -1,7 +1,9 @@
 from decimal import Decimal
 from datetime import datetime
 import json
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 from openpyxl import Workbook
 import pytest
@@ -11,7 +13,10 @@ from app.services.transaction_rule_engine import (
     evaluate_transaction_row,
 )
 from app.services.transaction_accounting_service import TransactionAccountingService
-from app.services.transaction_accounting_seed_service import DEFAULT_TRANSACTION_RULE_ROWS
+from app.config.transaction_accounting_rules import (
+    TRANSACTION_ACCOUNTING_PENDING_RULES,
+    TRANSACTION_ACCOUNTING_RULE_SPECS,
+)
 from app.models.transaction_accounting import (
     TransactionCategory,
     TransactionSubject,
@@ -27,9 +32,11 @@ def make_rule(
     priority: int = 100,
     match_type: str = "contains",
     remark_pattern: str = "订单结算",
+    transaction_scene: str | None = None,
     transaction_direction: str = "入账",
     amount_field: str = "动账金额",
     result_direction: str = "original",
+    remark_exclude_pattern: str = "",
     subject_id: int = 1,
     category_id: int = 10,
 ) -> TransactionRuleCandidate:
@@ -39,9 +46,12 @@ def make_rule(
         category_id=category_id,
         transaction_direction=transaction_direction,
         direction_field="动账方向",
+        scene_field="动账场景",
         remark_field="备注",
         match_type=match_type,
+        transaction_scene=transaction_scene,
         remark_pattern=remark_pattern,
+        remark_exclude_pattern=remark_exclude_pattern,
         amount_field=amount_field,
         result_direction=result_direction,
         priority=priority,
@@ -69,22 +79,54 @@ def test_evaluate_transaction_row_uses_highest_priority_matching_rule() -> None:
     assert result.calculated_amount == Decimal("12.30")
 
 
-def test_evaluate_transaction_row_supports_exact_contains_and_regex() -> None:
+def test_evaluate_transaction_row_supports_exact_contains_and_not_contains() -> None:
     exact_row = {"方向": "出账", "备注": "已退款", "金额": "20"}
     contains_row = {"方向": "出账", "备注": "平台补贴扣回", "金额": "30"}
-    regex_row = {"方向": "出账", "备注": "订单号 123 退款金额 199.00 元", "金额": "40"}
+    not_contains_row = {"方向": "出账", "备注": "仲裁申诉通过打款", "金额": "40"}
+    excluded_row = {"方向": "出账", "备注": "打款，订单号 123", "金额": "50"}
     rules = [
         make_rule(rule_id=1, match_type="exact", remark_pattern="已退款", transaction_direction="出账", amount_field="金额"),
-        make_rule(rule_id=2, match_type="contains", remark_pattern="补贴扣回", transaction_direction="出账", amount_field="金额"),
-        make_rule(rule_id=3, match_type="regex", remark_pattern=r"退款金额\s+\d+", transaction_direction="出账", amount_field="金额"),
+        make_rule(rule_id=2, match_type="contains", remark_pattern="平台,扣回", transaction_direction="出账", amount_field="金额"),
+        make_rule(rule_id=3, match_type="not_contains", remark_pattern="订单号,流水号", transaction_direction="出账", amount_field="金额"),
     ]
 
     assert evaluate_transaction_row(row=exact_row, row_number=1, rules=rules, direction_field="方向", remark_field="备注").rule_id == 1
     assert evaluate_transaction_row(row=contains_row, row_number=2, rules=rules, direction_field="方向", remark_field="备注").rule_id == 2
-    assert evaluate_transaction_row(row=regex_row, row_number=3, rules=rules, direction_field="方向", remark_field="备注").rule_id == 3
+    assert evaluate_transaction_row(row=not_contains_row, row_number=3, rules=rules, direction_field="方向", remark_field="备注").rule_id == 3
+    assert evaluate_transaction_row(row=excluded_row, row_number=4, rules=[rules[2]], direction_field="方向", remark_field="备注").status == "unmatched"
 
 
-def test_evaluate_transaction_row_matches_against_canonical_chinese_remark() -> None:
+def test_evaluate_transaction_row_matches_scene_and_falls_back_to_dongzhang_amount() -> None:
+    row = {
+        "动账方向": "出账",
+        "动账场景": "平台赔付",
+        "备注": "仲裁申诉通过打款",
+        "动账金额": "88.50",
+    }
+    rule = make_rule(
+        rule_id=4,
+        transaction_direction="出账",
+        transaction_scene="平台赔付",
+        match_type="contains",
+        remark_pattern="仲裁申诉通过打款",
+        amount_field="实际平台补贴",
+    )
+
+    result = evaluate_transaction_row(
+        row=row,
+        row_number=4,
+        rules=[rule],
+        direction_field="动账方向",
+        remark_field="备注",
+    )
+
+    assert result.status == "matched"
+    assert result.amount_field == "动账金额"
+    assert result.original_amount == Decimal("88.50")
+    assert result.calculated_amount == Decimal("88.50")
+
+
+def test_evaluate_transaction_row_uses_raw_remark_text_without_keyword_canonicalization() -> None:
     row = {
         "动账方向": "出账",
         "备注": "订单号 6946267909343417830，退款金额 199.00 元",
@@ -105,8 +147,38 @@ def test_evaluate_transaction_row_matches_against_canonical_chinese_remark() -> 
         remark_field="备注",
     )
 
-    assert result.status == "matched"
-    assert result.rule_id == 8
+    assert result.status == "unmatched"
+    assert result.rule_id is None
+
+
+def test_evaluate_transaction_row_excludes_remark_contains_patterns() -> None:
+    rule = make_rule(
+        rule_id=9,
+        transaction_direction="出账",
+        match_type="contains",
+        remark_pattern="打款",
+        remark_exclude_pattern="订单号,流水号",
+    )
+
+    matched_result = evaluate_transaction_row(
+        row={"动账方向": "出账", "备注": "仲裁申诉通过打款", "动账金额": "20"},
+        row_number=1,
+        rules=[rule],
+        direction_field="动账方向",
+        remark_field="备注",
+    )
+    excluded_result = evaluate_transaction_row(
+        row={"动账方向": "出账", "备注": "打款，订单号 123", "动账金额": "20"},
+        row_number=2,
+        rules=[rule],
+        direction_field="动账方向",
+        remark_field="备注",
+    )
+
+    assert matched_result.status == "matched"
+    assert matched_result.rule_id == 9
+    assert excluded_result.status == "unmatched"
+    assert excluded_result.rule_id is None
 
 
 def test_evaluate_transaction_row_returns_unmatched_without_summary_amount() -> None:
@@ -229,24 +301,19 @@ def test_parse_transaction_filename_uses_existing_upload_naming_rule() -> None:
 
 
 def test_default_transaction_accounting_seed_rules_are_structured_from_spec() -> None:
-    subject_names = list(dict.fromkeys(rule.subject for rule in DEFAULT_TRANSACTION_RULE_ROWS))
-    category_keys = list(dict.fromkeys((rule.subject, rule.category) for rule in DEFAULT_TRANSACTION_RULE_ROWS))
+    all_specs = [*TRANSACTION_ACCOUNTING_RULE_SPECS, *TRANSACTION_ACCOUNTING_PENDING_RULES]
+    subject_names = list(dict.fromkeys(rule.subject for rule in all_specs))
+    category_keys = list(dict.fromkeys((rule.subject, rule.category) for rule in all_specs))
 
-    assert len(DEFAULT_TRANSACTION_RULE_ROWS) == 51
+    assert len(TRANSACTION_ACCOUNTING_RULE_SPECS) == 36
+    assert len(TRANSACTION_ACCOUNTING_PENDING_RULES) == 11
+    assert len(all_specs) == 47
     assert len(subject_names) == 8
     assert len(category_keys) == 17
-    assert all(rule.remark_pattern for rule in DEFAULT_TRANSACTION_RULE_ROWS)
-    assert {rule.result_direction for rule in DEFAULT_TRANSACTION_RULE_ROWS} == {"positive", "negative"}
-
-
-def test_default_transaction_accounting_seed_rules_store_canonical_remark_patterns() -> None:
-    refund_rule = next(rule for rule in DEFAULT_TRANSACTION_RULE_ROWS if rule.raw_remark.startswith("订单号 6946267909343417830"))
-    compensation_rule = next(rule for rule in DEFAULT_TRANSACTION_RULE_ROWS if rule.raw_remark.startswith("撤销"))
-    bic_rule = next(rule for rule in DEFAULT_TRANSACTION_RULE_ROWS if rule.raw_remark.startswith("结算单号73568870277929"))
-
-    assert refund_rule.remark_pattern == "订单号退款金额元"
-    assert compensation_rule.remark_pattern == "撤销因订单存在发货超时问题对消费者进行赔付"
-    assert bic_rule.remark_pattern == "结算单号供应链费用"
+    assert all(rule.match_type == "none" or rule.remark_pattern for rule in all_specs)
+    assert any(rule.match_type == "not_contains" for rule in TRANSACTION_ACCOUNTING_RULE_SPECS)
+    assert {rule.result_direction for rule in TRANSACTION_ACCOUNTING_RULE_SPECS} == {"positive", "negative"}
+    assert any(rule.enabled is False for rule in TRANSACTION_ACCOUNTING_PENDING_RULES)
 
 
 class _FakeScalars:
@@ -320,8 +387,79 @@ class _TransactionAccountingSession:
         return None
 
 
+class _ListDetailsResult:
+    def __init__(self, *, scalar_value: int = 0, rows: list[object] | None = None) -> None:
+        self._scalar_value = scalar_value
+        self._rows = rows or []
+
+    def scalar(self) -> int:
+        return self._scalar_value
+
+    def all(self) -> list[object]:
+        return self._rows
+
+
+class _ListDetailsSession:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    async def execute(self, stmt):
+        try:
+            statement = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        except Exception:
+            statement = str(stmt)
+        self.statements.append(statement)
+        if "count(" in statement:
+            return _ListDetailsResult(scalar_value=0)
+        return _ListDetailsResult(rows=[])
+
+
 @pytest.mark.asyncio
-async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_rows(monkeypatch) -> None:
+async def test_list_details_defaults_to_matched_classified_rows() -> None:
+    db = _ListDetailsSession()
+
+    await TransactionAccountingService.list_details(
+        db,  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),
+    )
+
+    statement_text = "\n".join(db.statements)
+    assert "fin_transaction_details.status = 'matched'" in statement_text
+    assert "fin_transaction_details.subject_id IS NOT NULL" in statement_text
+    assert "fin_transaction_details.category_id IS NOT NULL" in statement_text
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_filters_queued_status() -> None:
+    db = _ListDetailsSession()
+
+    await TransactionAccountingService.list_tasks(
+        db,  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),
+        status="queued",
+    )
+
+    statement_text = "\n".join(db.statements)
+    assert "fin_transaction_tasks.status IN ('queued')" in statement_text
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_supports_multiple_status_filters() -> None:
+    db = _ListDetailsSession()
+
+    await TransactionAccountingService.list_tasks(
+        db,  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),
+        status="queued,processing",
+    )
+
+    statement_text = "\n".join(db.statements)
+    assert "fin_transaction_tasks.status IN ('queued', 'processing')" in statement_text
+
+
+@pytest.mark.asyncio
+async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_rows(monkeypatch, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="finengine.transaction_accounting")
     task = TransactionTask(id=10, file_id=20, org_id=1, user_id=2, status="queued", progress=0)
     upload_file = TransactionUploadFile(
         id=20,
@@ -418,6 +556,9 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
         (1, 11, Decimal("100.00")),
         (2, 21, Decimal("3.50")),
     }
+    assert sum("transaction_accounting.rule_result" in record.message for record in caplog.records) == 2
+    assert sum("transaction_accounting.category_result" in record.message for record in caplog.records) == 2
+    assert not any("transaction_accounting.row_multi_rule_match" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -495,6 +636,87 @@ async def test_execute_task_aggregates_detail_rows_during_processing(monkeypatch
     assert len(summary_rows) == 1
     assert summary_rows[0].total_amount == Decimal("130.00")
     assert task.result_summary["汇总分组数"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_task_records_row_error_reasons_without_blank_detail_rows(monkeypatch) -> None:
+    task = TransactionTask(id=12, file_id=22, org_id=1, user_id=2, status="queued", progress=0)
+    upload_file = TransactionUploadFile(
+        id=22,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+    )
+    db = _TransactionAccountingSession(
+        task=task,
+        upload_file=upload_file,
+        subjects=[],
+        categories=[],
+    )
+    rows = [
+        {
+            "动账时间": datetime(2026, 3, 15, 10, 0, 0),
+            "动账方向": "入账",
+            "动账场景": "未知场景",
+            "备注": "无法识别",
+            "动账金额": "12.00",
+        },
+        {
+            "动账时间": datetime(2026, 3, 16, 10, 0, 0),
+            "动账方向": "入账",
+            "动账场景": "订单结算",
+            "备注": "订单结算",
+            "订单实付应结": "abc",
+        },
+    ]
+    rules = [
+        make_rule(
+            rule_id=1,
+            priority=10,
+            subject_id=1,
+            category_id=11,
+            transaction_direction="入账",
+            transaction_scene="订单结算",
+            remark_pattern="订单结算",
+            amount_field="订单实付应结",
+            result_direction="positive",
+        )
+    ]
+
+    async def fake_load_rule_candidates(_db, *, platform_code: str | None) -> list[TransactionRuleCandidate]:
+        _ = platform_code
+        return rules
+
+    monkeypatch.setattr(
+        TransactionAccountingService,
+        "_load_douyin_dongzhang_rows_from_oss",
+        staticmethod(lambda _upload_file: (["动账时间", "动账方向", "动账场景", "备注", "动账金额", "订单实付应结"], rows)),
+    )
+    monkeypatch.setattr(
+        TransactionAccountingService,
+        "_load_rule_candidates",
+        staticmethod(fake_load_rule_candidates),
+    )
+
+    await TransactionAccountingService.execute_task(db, task_id=12)  # type: ignore[arg-type]
+
+    detail_rows = [item for item in db.added_rows if item.__class__.__name__ == "TransactionDetail"]
+
+    assert task.status == "partial_success"
+    assert task.matched_rows == 0
+    assert task.unmatched_rows == 1
+    assert task.failed_rows == 1
+    assert len(detail_rows) == 0
+    assert "第 2 行：未匹配分类" in (task.error_message or "")
+    assert "第 3 行：取数字段 [订单实付应结] 金额无法解析" in (task.error_message or "")
+    assert task.result_summary is not None
+    assert task.result_summary["错误明细"] == (task.error_message or "").splitlines()
+    assert any("动账场景=未知场景" in message for message in task.result_summary["错误明细"])
 
 
 @pytest.mark.asyncio

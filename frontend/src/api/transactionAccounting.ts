@@ -26,10 +26,12 @@ export interface TransactionRule {
     category_id: number;
     platform_code?: string | null;
     transaction_direction: string;
+    transaction_scene?: string | null;
     remark_field: string;
     direction_field: string;
-    match_type: "exact" | "contains" | "regex";
+    match_type: "none" | "exact" | "contains" | "not_contains";
     remark_pattern: string;
+    remark_exclude_pattern: string;
     amount_field: string;
     result_direction: "original" | "positive" | "negative" | "directional";
     priority: number;
@@ -101,6 +103,17 @@ export interface TransactionTask {
     updated_at: string;
 }
 
+export interface TransactionTaskBatchActionResult {
+    total: number;
+    success_count: number;
+    failed_count: number;
+    success_ids: number[];
+    failed_items: Array<{
+        task_id: number;
+        message: string;
+    }>;
+}
+
 export interface TransactionDetail {
     id: number;
     task_id: number;
@@ -128,7 +141,6 @@ export interface TransactionDetail {
     reclassification_name?: string | null;
     cash_flow_group_name?: string | null;
     total_amount?: string | null;
-    update_time?: string | null;
     created_at: string;
 }
 
@@ -340,6 +352,13 @@ export function listTransactionTasks(params: TransactionTaskListParams) {
 
 export function rerunTransactionTask(id: number) {
     return post<TransactionTask>(`/transaction-accounting/tasks/${id}/run`);
+}
+
+export function batchRecalculateTransactionTasks(taskIds: number[]) {
+    return post<TransactionTaskBatchActionResult>(
+        "/transaction-accounting/tasks/batch/recalculate",
+        { task_ids: taskIds },
+    );
 }
 
 export function listTransactionDetails(params: TransactionDetailListParams) {

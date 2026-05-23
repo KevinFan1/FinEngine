@@ -1,6 +1,7 @@
 """Service layer for the independent transaction-accounting flow."""
 
 import io
+import logging
 import re
 import tempfile
 from collections import defaultdict
@@ -88,6 +89,8 @@ TRANSACTION_PLATFORM_LABELS = {
 }
 
 TRANSACTION_RESULT_TASK_STATUSES = ("success", "partial_success")
+TRANSACTION_ERROR_SAMPLE_LIMIT = 20
+logger = logging.getLogger("finengine.transaction_accounting")
 
 
 @dataclass(frozen=True)
@@ -422,7 +425,15 @@ class TransactionAccountingService:
     async def create_rule(db: AsyncSession, *, data: TransactionRuleCreate, user: User) -> TransactionRule:
         category = await TransactionAccountingService._get_category_for_rule(db, category_id=data.category_id, subject_id=data.subject_id, user=user)
         _ = category
-        rule = TransactionRule(**data.model_dump())
+        values = data.model_dump()
+        values["remark_pattern"] = TransactionAccountingService._normalize_rule_match_config(
+            match_type=values["match_type"],
+            remark_pattern=values["remark_pattern"],
+        )
+        values["remark_exclude_pattern"] = TransactionAccountingService._normalize_rule_exclude_config(
+            values.get("remark_exclude_pattern")
+        )
+        rule = TransactionRule(**values)
         db.add(rule)
         await db.flush()
         await db.refresh(rule)
@@ -439,6 +450,20 @@ class TransactionAccountingService:
         category_id = int(values.get("category_id") or rule.category_id)
         if "subject_id" in values or "category_id" in values:
             await TransactionAccountingService._get_category_for_rule(db, category_id=category_id, subject_id=subject_id, user=user)
+        match_type = str(values.get("match_type") or rule.match_type)
+        remark_pattern_value = values["remark_pattern"] if "remark_pattern" in values and values["remark_pattern"] is not None else rule.remark_pattern
+        values["remark_pattern"] = TransactionAccountingService._normalize_rule_match_config(
+            match_type=match_type,
+            remark_pattern=str(remark_pattern_value),
+        )
+        exclude_pattern_value = (
+            values["remark_exclude_pattern"]
+            if "remark_exclude_pattern" in values and values["remark_exclude_pattern"] is not None
+            else rule.remark_exclude_pattern
+        )
+        values["remark_exclude_pattern"] = TransactionAccountingService._normalize_rule_exclude_config(
+            str(exclude_pattern_value)
+        )
         for key, value in values.items():
             setattr(rule, key, value)
         await db.flush()
@@ -640,7 +665,7 @@ class TransactionAccountingService:
         if scoped_org_id is not None:
             filters.append(TransactionTask.org_id == scoped_org_id)
         if status:
-            filters.append(TransactionTask.status == status)
+            filters.append(TransactionTask.status.in_(TransactionAccountingService._split_filter_values(status)))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(TransactionUploadFile.platform_code.in_(platform_codes))
@@ -732,6 +757,14 @@ class TransactionAccountingService:
             filters.append(TransactionDetail.task_id.in_(TransactionAccountingService._latest_result_task_ids_select()))
         if status:
             filters.append(TransactionDetail.status == status)
+        else:
+            filters.extend(
+                [
+                    TransactionDetail.status == "matched",
+                    TransactionDetail.subject_id.is_not(None),
+                    TransactionDetail.category_id.is_not(None),
+                ]
+            )
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(TransactionDetail.platform_code.in_(platform_codes))
@@ -793,7 +826,6 @@ class TransactionAccountingService:
                 TransactionCategory.name,
                 TransactionUploadFile.accounting_year,
                 TransactionUploadFile.accounting_month,
-                TransactionTask.updated_at,
                 cash_flow_groups.c.cash_flow_group_name,
             )
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionDetail.file_id)
@@ -826,12 +858,11 @@ class TransactionAccountingService:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)
         rows = []
-        for detail, subject_name, category_name, upload_year, upload_month, update_time, cash_flow_group_name in result.all():
+        for detail, subject_name, category_name, upload_year, upload_month, cash_flow_group_name in result.all():
             detail.subject_name = subject_name
             detail.category_name = category_name
             detail.upload_accounting_year = upload_year
             detail.upload_accounting_month = upload_month
-            detail.update_time = update_time
             detail.cash_flow_group_name = cash_flow_group_name
             detail.total_amount = detail.calculated_amount
             rows.append(detail)
@@ -1269,10 +1300,13 @@ class TransactionAccountingService:
             await db.execute(delete(TransactionSummaryRow).where(TransactionSummaryRow.task_id == task.id))
 
             summary_accumulator: dict[tuple[int, int, int | None, int | None], dict[str, object]] = {}
+            rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]] = {}
+            error_messages: list[str] = []
             counts = defaultdict(int)
             rule_map = {rule.id: rule for rule in rules}
             for offset, row in enumerate(data_rows, start=2):
                 direction_field = TransactionAccountingService._first_existing_field(row, [rule.direction_field for rule in rules], default="动账方向")
+                scene_field = TransactionAccountingService._first_existing_field(row, [rule.scene_field for rule in rules], default="动账场景")
                 remark_field = TransactionAccountingService._first_existing_field(row, [rule.remark_field for rule in rules], default="备注")
                 detail_year, detail_month, period_error = TransactionAccountingService._resolve_transaction_period(row)
                 evaluations = evaluate_transaction_row_matches(
@@ -1280,9 +1314,9 @@ class TransactionAccountingService:
                     row_number=offset,
                     rules=rules,
                     direction_field=direction_field,
+                    scene_field=scene_field,
                     remark_field=remark_field,
                 )
-
                 for evaluation in evaluations:
                     detail_evaluation = TransactionAccountingService._period_failed_result(evaluation=evaluation, message=period_error) if period_error else evaluation
                     counts[detail_evaluation.status] += 1
@@ -1298,7 +1332,31 @@ class TransactionAccountingService:
                         bucket["amount"] = bucket["amount"] + detail_evaluation.calculated_amount
                         bucket["count"] = int(bucket["count"]) + 1
                         bucket["first_row"] = min(int(bucket["first_row"]), offset)
+                        rule_key = (matched_rule.id, detail_year, detail_month)
+                        rule_bucket = rule_accumulator.setdefault(rule_key, {"amount": Decimal("0"), "count": 0, "first_row": offset})
+                        rule_bucket["amount"] = rule_bucket["amount"] + detail_evaluation.calculated_amount
+                        rule_bucket["count"] = int(rule_bucket["count"]) + 1
+                        rule_bucket["first_row"] = min(int(rule_bucket["first_row"]), offset)
+                        continue
 
+                    if detail_evaluation.status in {"unmatched", "failed"}:
+                        error_message = TransactionAccountingService._build_transaction_row_error_message(
+                            row=row,
+                            evaluation=detail_evaluation,
+                            direction_field=direction_field,
+                            scene_field=scene_field,
+                            remark_field=remark_field,
+                            period_error=period_error,
+                        )
+                        if len(error_messages) < TRANSACTION_ERROR_SAMPLE_LIMIT:
+                            error_messages.append(error_message)
+
+            TransactionAccountingService._log_rule_result_summaries(
+                task=task,
+                upload_file=upload_file,
+                rule_map=rule_map,
+                rule_accumulator=rule_accumulator,
+            )
             await TransactionAccountingService._create_aggregated_result_rows(
                 db,
                 task=task,
@@ -1311,7 +1369,7 @@ class TransactionAccountingService:
             task.unmatched_rows = counts["unmatched"]
             task.failed_rows = counts["failed"]
             task.progress = 100
-            task.status = "success" if task.failed_rows == 0 else "partial_success"
+            task.status = "success" if task.unmatched_rows == 0 and task.failed_rows == 0 else "partial_success"
             task.result_summary = {
                 "总行数": task.total_rows,
                 "匹配明细数": task.matched_rows,
@@ -1319,6 +1377,16 @@ class TransactionAccountingService:
                 "失败行数": task.failed_rows,
                 "汇总分组数": len(summary_accumulator),
             }
+            if error_messages:
+                hidden_error_count = task.unmatched_rows + task.failed_rows - len(error_messages)
+                task.result_summary["错误明细"] = error_messages
+                if hidden_error_count > 0:
+                    task.result_summary["错误明细截断提示"] = f"另有 {hidden_error_count} 条错误未展示，请查看任务错误信息或后台日志"
+                task.error_message = "\n".join(error_messages)
+                if hidden_error_count > 0:
+                    task.error_message += f"\n另有 {hidden_error_count} 条错误未展示，请查看任务错误信息或后台日志"
+            else:
+                task.error_message = None
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "processed"
         except Exception as exc:
@@ -1358,6 +1426,20 @@ class TransactionAccountingService:
         return category
 
     @staticmethod
+    def _normalize_rule_match_config(*, match_type: str, remark_pattern: str) -> str:
+        if match_type == "none":
+            return ""
+        if match_type not in {"exact", "contains", "not_contains"}:
+            raise ValueError("备注匹配方式不支持")
+        if not safe_str(remark_pattern):
+            raise ValueError("备注条件不能为空")
+        return remark_pattern
+
+    @staticmethod
+    def _normalize_rule_exclude_config(remark_exclude_pattern: str | None) -> str:
+        return safe_str(remark_exclude_pattern).strip()
+
+    @staticmethod
     async def _load_rule_candidates(db: AsyncSession, *, platform_code: str | None) -> list[TransactionRuleCandidate]:
         result = await db.execute(
             select(TransactionRule)
@@ -1375,9 +1457,12 @@ class TransactionAccountingService:
                 category_id=rule.category_id,
                 transaction_direction=rule.transaction_direction,
                 direction_field=rule.direction_field,
+                scene_field="动账场景",
                 remark_field=rule.remark_field,
                 match_type=rule.match_type,
+                transaction_scene=rule.transaction_scene,
                 remark_pattern=rule.remark_pattern,
+                remark_exclude_pattern=rule.remark_exclude_pattern,
                 amount_field=rule.amount_field,
                 result_direction=rule.result_direction,
                 priority=rule.priority,
@@ -1451,6 +1536,80 @@ class TransactionAccountingService:
             calculated_amount=Decimal("0"),
             error_message=message or "动账时间无法解析",
         )
+
+    @staticmethod
+    def _build_transaction_row_error_message(
+        *,
+        row: dict[str, object],
+        evaluation: TransactionEvaluationResult,
+        direction_field: str,
+        scene_field: str,
+        remark_field: str,
+        period_error: str | None,
+    ) -> str:
+        reason = safe_str(evaluation.error_message)
+        if evaluation.status == "unmatched" and reason == "未匹配到动账核算规则":
+            reason = "未匹配分类（未命中启用规则）"
+        if period_error and period_error not in reason:
+            reason = f"{period_error}；{reason}" if reason else period_error
+
+        parts = [f"第 {evaluation.row_number} 行：{reason or '处理失败'}"]
+        direction = safe_str(row.get(direction_field))
+        scene = safe_str(row.get(scene_field))
+        remark = safe_str(row.get(remark_field))
+        if direction:
+            parts.append(f"{direction_field}={direction}")
+        if scene:
+            parts.append(f"{scene_field}={scene}")
+        if remark:
+            parts.append(f"{remark_field}={remark}")
+        if evaluation.amount_field:
+            raw_amount = safe_str(row.get(evaluation.amount_field))
+            if raw_amount:
+                parts.append(f"{evaluation.amount_field}={raw_amount}")
+            else:
+                parts.append(f"取数字段={evaluation.amount_field}")
+        return "；".join(parts)
+
+    @staticmethod
+    def _short_log_text(value: str, *, limit: int = 120) -> str:
+        text = safe_str(value)
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit]}..."
+
+    @staticmethod
+    def _log_rule_result_summaries(
+        *,
+        task: TransactionTask,
+        upload_file: TransactionUploadFile,
+        rule_map: dict[int, TransactionRuleCandidate],
+        rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]],
+    ) -> None:
+        for (rule_id, accounting_year, accounting_month), bucket in sorted(rule_accumulator.items()):
+            rule = rule_map.get(rule_id)
+            if rule is None:
+                continue
+            logger.info(
+                "transaction_accounting.rule_result task_id=%s file_id=%s platform=%s shop=%s rule_id=%s subject_id=%s category_id=%s direction=%s scene=%s match_type=%s remark=%s amount_field=%s result_direction=%s accounting_period=%s row_count=%s total_amount=%s first_row=%s",
+                task.id,
+                upload_file.id,
+                upload_file.platform_code,
+                upload_file.shop_name,
+                rule.id,
+                rule.subject_id,
+                rule.category_id,
+                rule.transaction_direction,
+                safe_str(rule.transaction_scene),
+                rule.match_type,
+                TransactionAccountingService._short_log_text(rule.remark_pattern),
+                rule.amount_field,
+                rule.result_direction,
+                TransactionAccountingService._format_month(accounting_year, accounting_month),
+                int(bucket["count"]),
+                bucket["amount"],
+                int(bucket["first_row"]),
+            )
 
     @staticmethod
     def _json_safe_raw_row(row: dict[str, object]) -> dict[str, object]:
@@ -1847,7 +2006,6 @@ class TransactionAccountingService:
                     getattr(detail, "subject_name", None) or "",
                     getattr(detail, "category_name", None) or "",
                     float(detail.calculated_amount or 0),
-                    # TransactionAccountingService._format_datetime(getattr(detail, "update_time", None)),
                 ]
             )
         return TransactionAccountingService._finalize_workbook(workbook)
@@ -1931,6 +2089,21 @@ class TransactionAccountingService:
             amount = bucket["amount"]
             row_count = int(bucket["count"])
             first_row = int(bucket["first_row"])
+            logger.info(
+                "transaction_accounting.category_result task_id=%s file_id=%s platform=%s shop=%s subject_id=%s subject=%s category_id=%s category=%s accounting_period=%s row_count=%s total_amount=%s first_row=%s",
+                task.id,
+                upload_file.id,
+                upload_file.platform_code,
+                upload_file.shop_name,
+                subject_id,
+                subject.name,
+                category_id,
+                category.name,
+                TransactionAccountingService._format_month(accounting_year, accounting_month),
+                row_count,
+                amount,
+                first_row,
+            )
             detail_rows.append(
                 TransactionDetail(
                     task_id=task.id,

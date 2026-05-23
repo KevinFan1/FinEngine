@@ -27,6 +27,18 @@ export interface BicTask {
     created_at: string;
     updated_at: string;
 }
+
+export interface BicTaskBatchActionResult {
+    total: number;
+    success_count: number;
+    failed_count: number;
+    success_ids: number[];
+    failed_items: Array<{
+        task_id: number;
+        message: string;
+    }>;
+}
+
 export type BicExportScope = "all" | "current_page" | "selected";
 
 export interface BicDetail {
@@ -34,12 +46,16 @@ export interface BicDetail {
     task_id: number;
     file_id: number;
     org_id: number;
+    shop_id?: number | null;
     platform_code: string;
+    store_short_id?: string | null;
+    service_provider: string;
     shop_name: string;
-    accounting_year: number;
-    accounting_month: number;
     qic_warehouse: string;
-    row_count: number;
+    merchant?: string | null;
+    tax_no?: string | null;
+    shop_type?: string | null;
+    registered_address?: string | null;
     total_amount: string;
     created_at: string;
 }
@@ -49,11 +65,18 @@ export interface BicReport {
     task_id: number;
     file_id: number;
     org_id: number;
+    shop_id?: number | null;
     platform_code: string;
+    store_short_id?: string | null;
+    service_provider: string;
     shop_name: string;
     accounting_year: number;
     accounting_month: number;
     row_count: number;
+    merchant?: string | null;
+    tax_no?: string | null;
+    shop_type?: string | null;
+    registered_address?: string | null;
     total_amount: string;
     created_at: string;
 }
@@ -77,6 +100,7 @@ export interface BicDetailListParams {
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    service_provider?: string;
     qic_warehouse?: string;
     accounting_year?: number;
     accounting_month?: number;
@@ -92,6 +116,7 @@ export interface BicReportListParams {
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    service_provider?: string;
     accounting_year?: number;
     accounting_month?: number;
     accounting_start_year?: number;
@@ -113,6 +138,13 @@ export function listBicTasks(params: BicTaskListParams) {
 
 export function rerunBicTask(id: number) {
     return post<BicTask>(`/bic-accounting/tasks/${id}/run`);
+}
+
+export function batchRecalculateBicTasks(taskIds: number[]) {
+    return post<BicTaskBatchActionResult>(
+        "/bic-accounting/tasks/batch/recalculate",
+        { task_ids: taskIds },
+    );
 }
 
 export function listBicDetails(params: BicDetailListParams) {

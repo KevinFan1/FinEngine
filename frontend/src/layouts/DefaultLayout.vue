@@ -132,6 +132,20 @@
                 <div class="header-right">
                     <QuotaWarning />
 
+                    <el-tooltip content="刷新当前页" placement="bottom">
+                        <button
+                            class="refresh-btn"
+                            :class="{ 'is-loading': isRefreshingCurrentPage }"
+                            type="button"
+                            aria-label="刷新当前页"
+                            :aria-busy="isRefreshingCurrentPage"
+                            :disabled="isRefreshingCurrentPage"
+                            @click="refreshCurrentPage"
+                        >
+                            <el-icon><Refresh /></el-icon>
+                        </button>
+                    </el-tooltip>
+
                     <!-- Theme toggle button -->
                     <el-tooltip
                         :content="
@@ -234,6 +248,14 @@
                 <button
                     type="button"
                     class="tab-context-menu__item"
+                    @click="refreshContextTab"
+                >
+                    <el-icon><Refresh /></el-icon>
+                    刷新当前页
+                </button>
+                <button
+                    type="button"
+                    class="tab-context-menu__item"
                     :disabled="!tabContextMenu.tab?.closable"
                     @click="closeContextTab"
                 >
@@ -259,7 +281,7 @@
             <main class="content" @click="hideTabContextMenu">
                 <router-view v-slot="{ Component }">
                     <keep-alive :include="cachedRouteNames">
-                        <component :is="Component" />
+                        <component :is="Component" :key="routeViewKey" />
                     </keep-alive>
                 </router-view>
             </main>
@@ -346,7 +368,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, type Component } from "vue";
+import { computed, nextTick, provide, ref, watch, type Component } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -358,12 +380,18 @@ import {
     Money,
     OfficeBuilding,
     QuestionFilled,
+    Refresh,
     Setting,
     Shop,
     Upload,
     User,
     Wallet,
 } from "@element-plus/icons-vue";
+import {
+    pageRefreshKey,
+    type PageRefreshHandler,
+    type PageRefreshRegistry,
+} from "@/composables/pageRefresh";
 import { useAppStore, type Tab } from "@/stores/app";
 import { useUserStore } from "@/stores/user";
 import { useThemeStore } from "@/stores/theme";
@@ -378,6 +406,29 @@ const userStore = useUserStore();
 const themeStore = useThemeStore();
 const guideDrawerVisible = ref(false);
 const forcePasswordVisible = ref(false);
+const isRefreshingCurrentPage = ref(false);
+const routeRefreshNonce = ref(0);
+const refreshingRouteName = ref<string | null>(null);
+const pageRefreshHandlers = new Map<string, PageRefreshHandler>();
+
+const pageRefreshRegistry: PageRefreshRegistry = {
+    register(routeKey, handler) {
+        pageRefreshHandlers.set(routeKey, handler);
+    },
+    unregister(routeKey, handler) {
+        if (pageRefreshHandlers.get(routeKey) === handler) {
+            pageRefreshHandlers.delete(routeKey);
+        }
+    },
+    async refresh(routeKey) {
+        const handler = pageRefreshHandlers.get(routeKey);
+        if (!handler) return false;
+        await handler();
+        return true;
+    },
+};
+
+provide(pageRefreshKey, pageRefreshRegistry);
 
 const tabContextMenu = ref<{
     visible: boolean;
@@ -545,8 +596,19 @@ const cachedRouteNames = computed(() => {
     if (!appStore.tagCacheEnabled) return [];
     return appStore.visitedTabs
         .map((tab) => tab.name)
-        .filter((name): name is string => Boolean(name));
+        .filter(
+            (name): name is string =>
+                Boolean(name) && name !== refreshingRouteName.value,
+        );
 });
+
+const currentRouteName = computed(() =>
+    route.name ? String(route.name) : route.path,
+);
+
+const routeViewKey = computed(
+    () => `${currentRouteName.value}:${routeRefreshNonce.value}`,
+);
 
 const avatarLetter = computed(() => {
     const name =
@@ -698,8 +760,8 @@ function closeTab(tab: Tab) {
 }
 
 function openTabContextMenu(event: MouseEvent, tab: Tab) {
-    const menuWidth = 128;
-    const menuHeight = 118;
+    const menuWidth = 148;
+    const menuHeight = 152;
     tabContextMenu.value = {
         visible: true,
         x: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
@@ -735,6 +797,45 @@ function closeAllContextTabs() {
         router.push("/dashboard");
     }
     hideTabContextMenu();
+}
+
+async function refreshRouteFallback() {
+    const routeName = currentRouteName.value;
+    if (!routeName) return;
+
+    refreshingRouteName.value = routeName;
+    await nextTick();
+    routeRefreshNonce.value += 1;
+    refreshingRouteName.value = null;
+    await nextTick();
+}
+
+async function refreshCurrentPage() {
+    if (isRefreshingCurrentPage.value) return;
+
+    isRefreshingCurrentPage.value = true;
+    try {
+        const handled = await pageRefreshRegistry.refresh(
+            currentRouteName.value,
+        );
+        if (!handled) {
+            await refreshRouteFallback();
+        }
+    } finally {
+        isRefreshingCurrentPage.value = false;
+    }
+}
+
+async function refreshContextTab() {
+    const tab = tabContextMenu.value.tab;
+    if (!tab) return;
+
+    hideTabContextMenu();
+    if (tab.path !== route.path) {
+        await router.push(tab.fullPath || tab.path);
+        await nextTick();
+    }
+    await refreshCurrentPage();
 }
 
 function handleTagCacheToggle(value: string | number | boolean) {
@@ -1055,6 +1156,42 @@ function handleCommand(command: string) {
         gap: 14px;
         flex-shrink: 0;
 
+        .refresh-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: var(--radius-btn);
+            font-size: 16px;
+            box-shadow: var(--shadow-sm);
+            transition:
+                border-color 0.12s,
+                background-color 0.12s,
+                color 0.12s,
+                opacity 0.12s;
+
+            &:hover:not(:disabled) {
+                color: var(--primary);
+                border-color: var(--primary);
+                background: var(--primary-light);
+            }
+
+            &:disabled {
+                cursor: progress;
+                opacity: 0.72;
+            }
+
+            &.is-loading .el-icon {
+                animation: spin 0.7s linear infinite;
+            }
+        }
+
         .theme-toggle {
             height: 32px;
             padding: 0 10px;
@@ -1200,7 +1337,7 @@ function handleCommand(command: string) {
 .tab-context-menu {
     position: fixed;
     z-index: 2200;
-    min-width: 128px;
+    min-width: 148px;
     padding: 6px;
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -1213,6 +1350,7 @@ function handleCommand(command: string) {
     height: 32px;
     display: flex;
     align-items: center;
+    gap: 8px;
     padding: 0 10px;
     border: 0;
     border-radius: 6px;
@@ -1234,6 +1372,11 @@ function handleCommand(command: string) {
     &:disabled {
         color: var(--text-disabled);
         cursor: not-allowed;
+    }
+
+    .el-icon {
+        font-size: 14px;
+        flex-shrink: 0;
     }
 }
 
@@ -1512,5 +1655,11 @@ function handleCommand(command: string) {
 .fade-text-enter-from,
 .fade-text-leave-to {
     opacity: 0;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 </style>

@@ -200,6 +200,8 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         return (
             "下单时间",
             "动账时间",
+            "动账方向",
+            "动账场景",
             "备注",
             "动账金额",
             "订单实付应结",

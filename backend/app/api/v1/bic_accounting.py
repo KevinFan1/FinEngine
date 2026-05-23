@@ -4,17 +4,30 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user, require_org_admin_or_above
-from app.models.bic_accounting import BicUploadFile
+from app.models.bic_accounting import BicTask, BicUploadFile
 from app.models.user import User
 from app.schemas.bic_accounting import BicDetailOut, BicReportOut, BicTaskOut
 from app.schemas.common import ApiResponse, PageResponse
 from app.services.bic_accounting_service import BicAccountingService
 
 router = APIRouter()
+
+
+class BicTaskBatchActionIn(BaseModel):
+    task_ids: list[int]
+
+
+class BicTaskBatchActionOut(BaseModel):
+    total: int
+    success_count: int
+    failed_count: int
+    success_ids: list[int]
+    failed_items: list[dict[str, object]]
 
 
 def _task_out(task, upload_file) -> BicTaskOut:
@@ -130,6 +143,63 @@ async def rerun_task(
     return ApiResponse(data=_task_out(task, upload_file))
 
 
+@router.post("/tasks/batch/recalculate", response_model=ApiResponse[BicTaskBatchActionOut])
+async def batch_recalculate_tasks(
+    body: BicTaskBatchActionIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_org_admin_or_above),
+    db: AsyncSession = Depends(get_async_session),
+):
+    task_ids = list(dict.fromkeys(body.task_ids))
+    if not task_ids:
+        return ApiResponse(code=400, message="请选择任务")
+    if len(task_ids) > 100:
+        return ApiResponse(code=400, message="单次最多操作 100 个任务")
+
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    success_ids: list[int] = []
+    failed_items: list[dict[str, object]] = []
+    for task_id in task_ids:
+        task = await db.get(BicTask, task_id)
+        if task is None or task.is_deleted:
+            failed_items.append({"task_id": task_id, "message": "任务不存在"})
+            continue
+        if current_user.role != "superadmin" and task.org_id != current_user.org_id:
+            failed_items.append({"task_id": task_id, "message": "数据不存在或无权访问"})
+            continue
+        if task.status in {"queued", "processing"}:
+            failed_items.append({"task_id": task_id, "message": "排队中或运行中的任务不能重新统计"})
+            continue
+
+        try:
+            rerun = await BicAccountingService.rerun_task(
+                db,
+                task_id=task_id,
+                user=current_user,
+                ip=ip,
+                user_agent=ua,
+            )
+        except ValueError as exc:
+            failed_items.append({"task_id": task_id, "message": str(exc)})
+            continue
+        if rerun is None:
+            failed_items.append({"task_id": task_id, "message": "任务不存在"})
+            continue
+        success_ids.append(rerun.id)
+
+    data = BicTaskBatchActionOut(
+        total=len(task_ids),
+        success_count=len(success_ids),
+        failed_count=len(failed_items),
+        success_ids=success_ids,
+        failed_items=failed_items,
+    )
+    message = "操作完成" if not failed_items else f"成功 {data.success_count} 个，失败 {data.failed_count} 个"
+    return ApiResponse(data=data, message=message)
+
+
 @router.get("/details", response_model=ApiResponse[PageResponse[BicDetailOut]])
 async def list_details(
     page: int = Query(1, ge=1),
@@ -138,6 +208,7 @@ async def list_details(
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    service_provider: str | None = Query(None),
     qic_warehouse: str | None = Query(None),
     accounting_year: int | None = Query(None),
     accounting_month: int | None = Query(None),
@@ -157,6 +228,7 @@ async def list_details(
         platform_code=platform_code,
         shop_name=shop_name,
         shop_id=shop_id,
+        service_provider=service_provider,
         qic_warehouse=qic_warehouse,
         accounting_year=accounting_year,
         accounting_month=accounting_month,
@@ -177,6 +249,7 @@ async def export_details(
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    service_provider: str | None = Query(None),
     qic_warehouse: str | None = Query(None),
     accounting_year: int | None = Query(None),
     accounting_month: int | None = Query(None),
@@ -197,6 +270,7 @@ async def export_details(
         platform_code=platform_code,
         shop_name=shop_name,
         shop_id=shop_id,
+        service_provider=service_provider,
         qic_warehouse=qic_warehouse,
         accounting_year=accounting_year,
         accounting_month=accounting_month,
@@ -216,6 +290,7 @@ async def list_reports(
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    service_provider: str | None = Query(None),
     accounting_year: int | None = Query(None),
     accounting_month: int | None = Query(None),
     accounting_start_year: int | None = Query(None),
@@ -234,6 +309,7 @@ async def list_reports(
         platform_code=platform_code,
         shop_name=shop_name,
         shop_id=shop_id,
+        service_provider=service_provider,
         accounting_year=accounting_year,
         accounting_month=accounting_month,
         accounting_start_year=accounting_start_year,
@@ -253,6 +329,7 @@ async def export_reports(
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    service_provider: str | None = Query(None),
     accounting_year: int | None = Query(None),
     accounting_month: int | None = Query(None),
     accounting_start_year: int | None = Query(None),
@@ -272,6 +349,7 @@ async def export_reports(
         platform_code=platform_code,
         shop_name=shop_name,
         shop_id=shop_id,
+        service_provider=service_provider,
         accounting_year=accounting_year,
         accounting_month=accounting_month,
         accounting_start_year=accounting_start_year,

@@ -25,8 +25,8 @@ from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
 from app.utils.money import safe_decimal
 
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
-BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "店铺", "核算年月", "QIC仓", "结算金额"]
-BIC_REPORT_EXPORT_HEADERS = ["序号", "平台", "店铺", "核算年月", "结算金额"]
+BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
+BIC_REPORT_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
 BIC_RESULT_TASK_STATUSES = ("success", "partial_success")
 
 
@@ -375,6 +375,7 @@ class BicAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        service_provider: str | None = None,
         qic_warehouse: str | None = None,
         accounting_year: int | None = None,
         accounting_month: int | None = None,
@@ -385,7 +386,7 @@ class BicAccountingService:
         ids: list[int] | None = None,
         page: int | None = 1,
         page_size: int | None = 50,
-    ) -> tuple[list[BicDetail], int]:
+    ) -> tuple[list[dict[str, object]], int]:
         filters = [BicDetail.is_deleted.is_(False)]
         scoped_org_id = BicAccountingService.resolve_org_id(user=user, requested_org_id=org_id)
         if scoped_org_id is not None:
@@ -401,6 +402,9 @@ class BicAccountingService:
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicDetail.platform_code.in_(platform_codes))
+        service_provider_values = TransactionAccountingService._split_filter_values(service_provider)
+        if service_provider_values:
+            filters.append(BicDetail.service_provider.in_(service_provider_values))
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicDetail.shop_name.in_(shop_names))
@@ -424,12 +428,31 @@ class BicAccountingService:
         )
 
         stmt = (
-            select(BicDetail)
+            select(
+                BicDetail.id.label("id"),
+                BicDetail.task_id.label("task_id"),
+                BicDetail.file_id.label("file_id"),
+                BicDetail.org_id.label("org_id"),
+                BicDetail.shop_id.label("shop_id"),
+                BicDetail.platform_code.label("platform_code"),
+                BicDetail.service_provider.label("service_provider"),
+                BicDetail.shop_name.label("shop_name"),
+                BicDetail.qic_warehouse.label("qic_warehouse"),
+                BicDetail.total_amount.label("total_amount"),
+                BicDetail.created_at.label("created_at"),
+                Shop.store_short_id.label("store_short_id"),
+                Shop.merchant.label("merchant"),
+                Shop.tax_no.label("tax_no"),
+                Shop.shop_type.label("shop_type"),
+                Shop.registered_address.label("registered_address"),
+            )
+            .outerjoin(Shop, Shop.id == BicDetail.shop_id)
             .where(*filters)
             .order_by(
                 BicDetail.accounting_year.desc(),
                 BicDetail.accounting_month.desc(),
                 BicDetail.platform_code,
+                BicDetail.service_provider,
                 BicDetail.shop_id,
                 BicDetail.shop_name,
                 BicDetail.qic_warehouse,
@@ -440,7 +463,7 @@ class BicAccountingService:
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)
-        return list(result.scalars().all()), total
+        return [dict(row) for row in result.mappings().all()], total
 
     @staticmethod
     async def list_reports(
@@ -452,6 +475,7 @@ class BicAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        service_provider: str | None = None,
         accounting_year: int | None = None,
         accounting_month: int | None = None,
         accounting_start_year: int | None = None,
@@ -461,7 +485,7 @@ class BicAccountingService:
         ids: list[int] | None = None,
         page: int | None = 1,
         page_size: int | None = 50,
-    ) -> tuple[list[BicReportRow], int]:
+    ) -> tuple[list[dict[str, object]], int]:
         filters = [BicReportRow.is_deleted.is_(False)]
         scoped_org_id = BicAccountingService.resolve_org_id(user=user, requested_org_id=org_id)
         if scoped_org_id is not None:
@@ -477,6 +501,9 @@ class BicAccountingService:
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicReportRow.platform_code.in_(platform_codes))
+        service_provider_values = TransactionAccountingService._split_filter_values(service_provider)
+        if service_provider_values:
+            filters.append(BicReportRow.service_provider.in_(service_provider_values))
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicReportRow.shop_name.in_(shop_names))
@@ -497,12 +524,33 @@ class BicAccountingService:
         )
 
         stmt = (
-            select(BicReportRow)
+            select(
+                BicReportRow.id.label("id"),
+                BicReportRow.task_id.label("task_id"),
+                BicReportRow.file_id.label("file_id"),
+                BicReportRow.org_id.label("org_id"),
+                BicReportRow.shop_id.label("shop_id"),
+                BicReportRow.platform_code.label("platform_code"),
+                BicReportRow.service_provider.label("service_provider"),
+                BicReportRow.shop_name.label("shop_name"),
+                BicReportRow.accounting_year.label("accounting_year"),
+                BicReportRow.accounting_month.label("accounting_month"),
+                BicReportRow.row_count.label("row_count"),
+                BicReportRow.total_amount.label("total_amount"),
+                BicReportRow.created_at.label("created_at"),
+                Shop.store_short_id.label("store_short_id"),
+                Shop.merchant.label("merchant"),
+                Shop.tax_no.label("tax_no"),
+                Shop.shop_type.label("shop_type"),
+                Shop.registered_address.label("registered_address"),
+            )
+            .outerjoin(Shop, Shop.id == BicReportRow.shop_id)
             .where(*filters)
             .order_by(
                 BicReportRow.accounting_year.desc(),
                 BicReportRow.accounting_month.desc(),
                 BicReportRow.platform_code,
+                BicReportRow.service_provider,
                 BicReportRow.shop_id,
                 BicReportRow.shop_name,
             )
@@ -512,7 +560,7 @@ class BicAccountingService:
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)
-        return list(result.scalars().all()), total
+        return [dict(row) for row in result.mappings().all()], total
 
     @staticmethod
     async def execute_task(db: AsyncSession, *, task_id: int) -> BicTask:
@@ -612,20 +660,15 @@ class BicAccountingService:
         )
         db.add_all(detail_rows)
 
-        report_total = sum((safe_decimal(row.total_amount) for row in detail_rows), Decimal("0"))
-        report_row = BicReportRow(
-            task_id=task.id,
-            file_id=upload_file.id,
-            org_id=task.org_id,
-            shop_id=shop_id,
+        report_rows = BicAccountingService._build_report_rows(
+            task=task,
+            upload_file=upload_file,
+            detail_rows=detail_rows,
             platform_code=platform_code,
+            shop_id=shop_id,
             shop_name=shop_name,
-            accounting_year=int(upload_file.accounting_year),
-            accounting_month=int(upload_file.accounting_month),
-            row_count=sum(row.row_count for row in detail_rows),
-            total_amount=report_total,
         )
-        db.add(report_row)
+        db.add_all(report_rows)
         await db.flush()
 
         return {
@@ -634,8 +677,10 @@ class BicAccountingService:
             "success_rows": parse_result.get("success_rows", 0),
             "failed_rows": parse_result.get("failed_rows", 0),
             "groups": len(detail_rows),
+            "report_groups": len(report_rows),
             "detail_ids": [row.id for row in detail_rows],
-            "report_id": report_row.id,
+            "report_ids": [row.id for row in report_rows],
+            "report_id": report_rows[0].id if report_rows else None,
             "errors": parse_result.get("errors", [])[:10],
         }
 
@@ -675,6 +720,7 @@ class BicAccountingService:
                         continue
                     result["bic_rows"].append(
                         {
+                            "service_provider": safe_str(vals.get("服务商")) or "-",
                             "qic_warehouse": safe_str(vals.get("QIC仓")) or "-",
                             "amount": safe_decimal(vals.get("结算金额")),
                             "fee_item": BIC_TARGET_FEE_ITEM,
@@ -697,10 +743,12 @@ class BicAccountingService:
         shop_id: int | None,
         shop_name: str,
     ) -> list[BicDetail]:
-        groups: dict[str, dict[str, object]] = {}
+        groups: dict[tuple[str, str], dict[str, object]] = {}
         for row in rows:
+            service_provider = safe_str(row.get("service_provider")) or "-"
             qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
-            group = groups.setdefault(qic_warehouse, {"amount": Decimal("0"), "row_count": 0, "raw_rows": []})
+            group_key = (service_provider, qic_warehouse)
+            group = groups.setdefault(group_key, {"amount": Decimal("0"), "row_count": 0, "raw_rows": []})
             group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.get("amount"))
             group["row_count"] = int(group["row_count"]) + 1
             raw_rows = group["raw_rows"]
@@ -714,6 +762,7 @@ class BicAccountingService:
                 org_id=task.org_id,
                 shop_id=shop_id,
                 platform_code=platform_code,
+                service_provider=service_provider,
                 shop_name=shop_name,
                 accounting_year=int(upload_file.accounting_year),
                 accounting_month=int(upload_file.accounting_month),
@@ -722,7 +771,58 @@ class BicAccountingService:
                 total_amount=safe_decimal(group["amount"]),
                 raw_rows=group["raw_rows"],
             )
-            for qic_warehouse, group in groups.items()
+            for (service_provider, qic_warehouse), group in groups.items()
+        ]
+
+    @staticmethod
+    def _build_report_rows(
+        *,
+        task: BicTask,
+        upload_file: BicUploadFile,
+        detail_rows: list[BicDetail],
+        platform_code: str,
+        shop_id: int | None,
+        shop_name: str,
+    ) -> list[BicReportRow]:
+        if not detail_rows:
+            return [
+                BicReportRow(
+                    task_id=task.id,
+                    file_id=upload_file.id,
+                    org_id=task.org_id,
+                    shop_id=shop_id,
+                    platform_code=platform_code,
+                    service_provider="-",
+                    shop_name=shop_name,
+                    accounting_year=int(upload_file.accounting_year),
+                    accounting_month=int(upload_file.accounting_month),
+                    row_count=0,
+                    total_amount=Decimal("0"),
+                )
+            ]
+
+        groups: dict[str, dict[str, object]] = {}
+        for row in detail_rows:
+            service_provider = safe_str(row.service_provider) or "-"
+            group = groups.setdefault(service_provider, {"amount": Decimal("0"), "row_count": 0})
+            group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.total_amount)
+            group["row_count"] = int(group["row_count"]) + int(row.row_count or 0)
+
+        return [
+            BicReportRow(
+                task_id=task.id,
+                file_id=upload_file.id,
+                org_id=task.org_id,
+                shop_id=shop_id,
+                platform_code=platform_code,
+                service_provider=service_provider,
+                shop_name=shop_name,
+                accounting_year=int(upload_file.accounting_year),
+                accounting_month=int(upload_file.accounting_month),
+                row_count=int(group["row_count"]),
+                total_amount=safe_decimal(group["amount"]),
+            )
+            for service_provider, group in groups.items()
         ]
 
     @staticmethod
@@ -736,7 +836,7 @@ class BicAccountingService:
         return BicAccountingService._build_report_workbook(rows)
 
     @staticmethod
-    def _build_detail_workbook(rows: list[BicDetail]) -> io.BytesIO:
+    def _build_detail_workbook(rows: list[dict[str, object]]) -> io.BytesIO:
         workbook = Workbook()
         worksheet = workbook.active
         worksheet.title = "BIC明细"
@@ -745,11 +845,16 @@ class BicAccountingService:
             worksheet.append(
                 [
                     index,
-                    TransactionAccountingService._format_platform(row.platform_code),
-                    row.shop_name,
-                    TransactionAccountingService._format_month(row.accounting_year, row.accounting_month),
-                    row.qic_warehouse,
-                    float(row.total_amount or 0),
+                    TransactionAccountingService._format_platform(str(row.get("platform_code") or "")),
+                    row.get("service_provider") or "",
+                    row.get("store_short_id") or "",
+                    row.get("shop_name") or "",
+                    row.get("qic_warehouse") or "",
+                    row.get("merchant") or "",
+                    row.get("tax_no") or "",
+                    row.get("shop_type") or "",
+                    row.get("registered_address") or "",
+                    float(row.get("total_amount") or 0),
                 ]
             )
         buffer = io.BytesIO()
@@ -758,7 +863,7 @@ class BicAccountingService:
         return buffer
 
     @staticmethod
-    def _build_report_workbook(rows: list[BicReportRow]) -> io.BytesIO:
+    def _build_report_workbook(rows: list[dict[str, object]]) -> io.BytesIO:
         workbook = Workbook()
         worksheet = workbook.active
         worksheet.title = "BIC报表"
@@ -767,10 +872,15 @@ class BicAccountingService:
             worksheet.append(
                 [
                     index,
-                    TransactionAccountingService._format_platform(row.platform_code),
-                    row.shop_name,
-                    TransactionAccountingService._format_month(row.accounting_year, row.accounting_month),
-                    float(row.total_amount or 0),
+                    TransactionAccountingService._format_platform(str(row.get("platform_code") or "")),
+                    row.get("service_provider") or "",
+                    row.get("store_short_id") or "",
+                    row.get("shop_name") or "",
+                    row.get("merchant") or "",
+                    row.get("tax_no") or "",
+                    row.get("shop_type") or "",
+                    row.get("registered_address") or "",
+                    float(row.get("total_amount") or 0),
                 ]
             )
         buffer = io.BytesIO()

@@ -1,10 +1,9 @@
 """Rule engine for the independent transaction-accounting flow."""
 
-import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-from app.tasks.processors.base import canonical_remark, safe_str
+from app.tasks.processors.base import safe_str
 
 ZERO = Decimal("0")
 
@@ -15,13 +14,16 @@ class TransactionRuleCandidate:
     subject_id: int
     category_id: int
     transaction_direction: str
-    direction_field: str
-    remark_field: str
-    match_type: str
-    remark_pattern: str
-    amount_field: str
-    result_direction: str
-    priority: int
+    direction_field: str = "动账方向"
+    scene_field: str = "动账场景"
+    remark_field: str = "备注"
+    match_type: str = "none"
+    transaction_scene: str | None = None
+    remark_pattern: str = ""
+    remark_exclude_pattern: str = ""
+    amount_field: str = "动账金额"
+    result_direction: str = "original"
+    priority: int = 100
 
 
 @dataclass(frozen=True)
@@ -43,13 +45,15 @@ def evaluate_transaction_row(
     row_number: int,
     rules: list[TransactionRuleCandidate],
     direction_field: str,
-    remark_field: str,
+    scene_field: str = "动账场景",
+    remark_field: str = "备注",
 ) -> TransactionEvaluationResult:
     results = evaluate_transaction_row_matches(
         row=row,
         row_number=row_number,
         rules=rules,
         direction_field=direction_field,
+        scene_field=scene_field,
         remark_field=remark_field,
     )
     return results[0]
@@ -61,12 +65,13 @@ def evaluate_transaction_row_matches(
     row_number: int,
     rules: list[TransactionRuleCandidate],
     direction_field: str,
-    remark_field: str,
+    scene_field: str = "动账场景",
+    remark_field: str = "备注",
 ) -> list[TransactionEvaluationResult]:
     direction = safe_str(row.get(direction_field))
-    remark = canonical_remark(safe_str(row.get(remark_field)))
-    print(remark)
-    matched_rules = _match_rules(direction=direction, remark=remark, rules=rules)
+    scene = safe_str(row.get(scene_field))
+    remark = safe_str(row.get(remark_field))
+    matched_rules = _match_rules(direction=direction, scene=scene, remark=remark, rules=rules)
     if not matched_rules:
         return [
             TransactionEvaluationResult(
@@ -84,23 +89,14 @@ def evaluate_transaction_row_matches(
 
     results = []
     for matched_rule in matched_rules:
-        if matched_rule.amount_field not in row:
-            results.append(
-                _failed_result(
-                    row_number=row_number,
-                    rule=matched_rule,
-                    message=f"取数字段 [{matched_rule.amount_field}] 不存在",
-                )
-            )
-            continue
-
-        parsed_amount = _parse_amount(row.get(matched_rule.amount_field))
+        amount_field, parsed_amount, error_message = _resolve_amount_value(row=row, amount_field=matched_rule.amount_field)
         if parsed_amount is None:
             results.append(
                 _failed_result(
                     row_number=row_number,
                     rule=matched_rule,
-                    message=f"取数字段 [{matched_rule.amount_field}] 金额无法解析",
+                    amount_field=amount_field,
+                    message=error_message or f"取数字段 [{amount_field}] 金额无法解析",
                 )
             )
             continue
@@ -112,7 +108,7 @@ def evaluate_transaction_row_matches(
                 rule_id=matched_rule.id,
                 subject_id=matched_rule.subject_id,
                 category_id=matched_rule.category_id,
-                amount_field=matched_rule.amount_field,
+                amount_field=amount_field,
                 original_amount=parsed_amount,
                 calculated_amount=_apply_result_direction(
                     amount=parsed_amount,
@@ -127,10 +123,11 @@ def evaluate_transaction_row_matches(
 def _match_rule(
     *,
     direction: str,
+    scene: str,
     remark: str,
     rules: list[TransactionRuleCandidate],
 ) -> TransactionRuleCandidate | None:
-    candidates = _match_rules(direction=direction, remark=remark, rules=rules)
+    candidates = _match_rules(direction=direction, scene=scene, remark=remark, rules=rules)
     if not candidates:
         return None
     return candidates[0]
@@ -139,27 +136,61 @@ def _match_rule(
 def _match_rules(
     *,
     direction: str,
+    scene: str,
     remark: str,
     rules: list[TransactionRuleCandidate],
 ) -> list[TransactionRuleCandidate]:
-    candidates = [rule for rule in rules if safe_str(rule.transaction_direction) == direction and _remark_matches(rule=rule, remark=remark)]
+    candidates = [
+        rule
+        for rule in rules
+        if safe_str(rule.transaction_direction) == direction
+        and _scene_matches(rule=rule, scene=scene)
+        and _remark_matches(rule=rule, remark=remark)
+    ]
     return sorted(candidates, key=lambda rule: (rule.priority, rule.id))
 
 
+def _scene_matches(*, rule: TransactionRuleCandidate, scene: str) -> bool:
+    if rule.transaction_scene is None:
+        return True
+    return scene == safe_str(rule.transaction_scene)
+
+
 def _remark_matches(*, rule: TransactionRuleCandidate, remark: str) -> bool:
-    pattern = canonical_remark(safe_str(rule.remark_pattern))
+    if _remark_excludes(rule=rule, remark=remark):
+        return False
+
+    match_type = safe_str(rule.match_type) or "none"
+    if match_type == "none":
+        return True
+
+    pattern = safe_str(rule.remark_pattern)
     if not pattern:
         return False
 
-    match_type = safe_str(rule.match_type) or "contains"
     if match_type == "exact":
         return remark == pattern
-    if match_type == "regex":
-        try:
-            return re.search(pattern, remark) is not None
-        except re.error:
-            return False
-    return pattern in remark
+    if match_type == "contains":
+        patterns = _split_remark_patterns(pattern)
+        return bool(patterns) and all(item in remark for item in patterns)
+    if match_type == "not_contains":
+        patterns = _split_remark_patterns(pattern)
+        return bool(patterns) and all(item not in remark for item in patterns)
+    return False
+
+
+def _remark_excludes(*, rule: TransactionRuleCandidate, remark: str) -> bool:
+    patterns = _split_remark_patterns(rule.remark_exclude_pattern)
+    return any(pattern in remark for pattern in patterns)
+
+
+def _split_remark_patterns(pattern_text: str) -> list[str]:
+    text = safe_str(pattern_text)
+    if not text:
+        return []
+    for separator in ("\r\n", "\n", "\r", ",", "，", "、", ";", "；"):
+        text = text.replace(separator, "\n")
+    return [part.strip() for part in text.split("\n") if part.strip()]
 
 
 def _parse_amount(value: object) -> Decimal | None:
@@ -173,6 +204,32 @@ def _parse_amount(value: object) -> Decimal | None:
         return Decimal(normalized)
     except InvalidOperation:
         return None
+
+
+def _resolve_amount_value(
+    *,
+    row: dict[str, object],
+    amount_field: str,
+) -> tuple[str | None, Decimal | None, str | None]:
+    fallback_field = "动账金额"
+    candidates = [amount_field]
+    if amount_field != fallback_field:
+        candidates.append(fallback_field)
+
+    for index, field in enumerate(candidates):
+        if field not in row:
+            continue
+        raw_value = row.get(field)
+        if safe_str(raw_value) == "":
+            continue
+        parsed_amount = _parse_amount(raw_value)
+        if parsed_amount is not None:
+            return field, parsed_amount, None
+        return field, None, f"取数字段 [{field}] 金额无法解析"
+
+    if amount_field != fallback_field:
+        return fallback_field, None, f"取数字段 [{amount_field}] 不存在，且取数字段 [动账金额] 不存在"
+    return amount_field, None, f"取数字段 [{amount_field}] 不存在"
 
 
 def _apply_result_direction(
@@ -194,6 +251,7 @@ def _failed_result(
     *,
     row_number: int,
     rule: TransactionRuleCandidate,
+    amount_field: str | None,
     message: str,
 ) -> TransactionEvaluationResult:
     return TransactionEvaluationResult(
@@ -202,7 +260,7 @@ def _failed_result(
         rule_id=rule.id,
         subject_id=rule.subject_id,
         category_id=rule.category_id,
-        amount_field=rule.amount_field,
+        amount_field=amount_field or rule.amount_field,
         original_amount=ZERO,
         calculated_amount=ZERO,
         error_message=message,
