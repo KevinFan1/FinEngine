@@ -30,11 +30,12 @@ class BicTaskBatchActionOut(BaseModel):
     failed_items: list[dict[str, object]]
 
 
-def _task_out(task, upload_file) -> BicTaskOut:
-    return BicTaskOut(
+def _task_out(task, upload_file, org_name: str | None = None) -> BicTaskOut:
+    item = BicTaskOut(
         id=task.id,
         file_id=task.file_id,
         org_id=task.org_id,
+        org_name=org_name,
         user_id=task.user_id,
         shop_id=upload_file.shop_id,
         source_upload_file_id=upload_file.source_upload_file_id,
@@ -59,6 +60,7 @@ def _task_out(task, upload_file) -> BicTaskOut:
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
+    return item
 
 
 def _export_response(buffer, filename: str) -> StreamingResponse:
@@ -93,7 +95,7 @@ async def list_tasks(
     accounting_end_year: int | None = Query(None),
     accounting_end_month: int | None = Query(None),
     keyword: str | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -113,7 +115,7 @@ async def list_tasks(
         page=page,
         page_size=page_size,
     )
-    items = [_task_out(task, upload_file) for task, upload_file, _shop_color in rows]
+    items = [_task_out(task, upload_file, org_name) for task, upload_file, _shop_color, org_name in rows]
     return ApiResponse(data=PageResponse(items=items, total=total, page=page, page_size=page_size))
 
 
@@ -216,7 +218,7 @@ async def list_details(
     accounting_start_month: int | None = Query(None),
     accounting_end_year: int | None = Query(None),
     accounting_end_month: int | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -257,7 +259,7 @@ async def export_details(
     accounting_start_month: int | None = Query(None),
     accounting_end_year: int | None = Query(None),
     accounting_end_month: int | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -297,7 +299,7 @@ async def list_reports(
     accounting_start_month: int | None = Query(None),
     accounting_end_year: int | None = Query(None),
     accounting_end_month: int | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -336,7 +338,7 @@ async def export_reports(
     accounting_start_month: int | None = Query(None),
     accounting_end_year: int | None = Query(None),
     accounting_end_month: int | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):

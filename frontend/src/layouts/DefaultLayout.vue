@@ -373,6 +373,7 @@ import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { useRoute, useRouter } from "vue-router";
 import {
     Collection,
+    CollectionTag,
     DataAnalysis,
     Document,
     House,
@@ -528,6 +529,12 @@ const menuItems: MenuItem[] = [
                 roles: ["superadmin"],
             },
             {
+                path: "/transaction-major-categories",
+                title: "资金大分类",
+                icon: CollectionTag,
+                roles: ["superadmin"],
+            },
+            {
                 path: "/transaction-rules",
                 title: "资金重分类规则",
                 icon: Setting,
@@ -674,7 +681,7 @@ const guideSections = [
     },
     {
         title: "规则配置",
-        desc: "管理员在这里维护动账重分类字典和资金重分类规则，普通用户只需要按规则上传和核对。",
+        desc: "管理员在这里维护动账重分类字典、资金大分类和资金重分类规则，普通用户只需要按规则上传和核对。",
         tip: "管理员配置",
         roles: ["superadmin"],
     },

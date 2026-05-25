@@ -4,11 +4,12 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import or_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user
+from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.task import ProcessingTask
 from app.models.upload import UploadFile
@@ -16,6 +17,7 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.task import TaskListOut, TaskOut
 from app.services.platform_profile_service import resolve_platform_profile
+from app.utils.query_filters import split_int_filter_values
 
 router = APIRouter()
 TASK_ACTION_EXPIRE_DAYS = 30
@@ -25,16 +27,6 @@ def split_filter_values(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
-
-
-def split_int_filter_values(value: str | None) -> list[int]:
-    values: list[int] = []
-    for item in split_filter_values(value):
-        try:
-            values.append(int(item))
-        except ValueError:
-            continue
-    return values
 
 
 class TaskProgressOut(BaseModel):
@@ -78,15 +70,19 @@ async def list_tasks(
     parsed_month: int | None = Query(None),
     keyword: str | None = Query(None),
     batch_id: int | None = Query(None),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """List processing tasks with pagination and filters."""
     stmt = (
-        select(ProcessingTask, UploadFile, Shop.shop_color)
+        select(ProcessingTask, UploadFile, Shop.shop_color, Organization.name.label("org_name"))
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
         .outerjoin(Shop, UploadFile.shop_id == Shop.id)
+        .outerjoin(
+            Organization,
+            and_(Organization.id == ProcessingTask.org_id, Organization.is_deleted.is_(False)),
+        )
         .where(ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
         .order_by(ProcessingTask.id.desc())
     )
@@ -101,9 +97,11 @@ async def list_tasks(
     if current_user.role != "superadmin":
         stmt = stmt.where(ProcessingTask.org_id == current_user.org_id)
         count_stmt = count_stmt.where(ProcessingTask.org_id == current_user.org_id)
-    elif org_id is not None:
-        stmt = stmt.where(ProcessingTask.org_id == org_id)
-        count_stmt = count_stmt.where(ProcessingTask.org_id == org_id)
+    else:
+        org_ids = split_int_filter_values(org_id)
+        if org_ids:
+            stmt = stmt.where(ProcessingTask.org_id.in_(org_ids))
+            count_stmt = count_stmt.where(ProcessingTask.org_id.in_(org_ids))
 
     status_values = split_filter_values(status_filter)
     if status_values:
@@ -157,8 +155,8 @@ async def list_tasks(
     return ApiResponse(
         data=PageResponse(
             items=[
-                build_task_list_out(task, upload_file, shop_color)
-                for task, upload_file, shop_color in rows
+                build_task_list_out(task, upload_file, shop_color, org_name)
+                for task, upload_file, shop_color, org_name in rows
             ],
             total=total,
             page=page,
@@ -167,12 +165,19 @@ async def list_tasks(
     )
 
 
-def build_task_list_out(task: ProcessingTask, upload_file: UploadFile, shop_color: str | None = None) -> TaskListOut:
+def build_task_list_out(
+    task: ProcessingTask,
+    upload_file: UploadFile,
+    shop_color: str | None = None,
+    org_name: str | None = None,
+) -> TaskListOut:
     error_reason = task.error_reason or upload_file.error_message
     action_expired = is_task_expired(task)
     return TaskListOut(
         id=task.id,
         file_id=task.file_id,
+        org_id=task.org_id,
+        org_name=org_name,
         batch_id=upload_file.batch_id,
         filename=upload_file.original_name,
         platform=upload_file.source_platform_code or upload_file.detected_platform,
@@ -341,25 +346,35 @@ async def get_task(
 ):
     """Get task detail."""
     result = await db.execute(
-        select(ProcessingTask, UploadFile, Shop.shop_color)
+        select(ProcessingTask, UploadFile, Shop.shop_color, Organization.name.label("org_name"))
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
         .outerjoin(Shop, UploadFile.shop_id == Shop.id)
+        .outerjoin(
+            Organization,
+            and_(Organization.id == ProcessingTask.org_id, Organization.is_deleted.is_(False)),
+        )
         .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
     )
     row = result.one_or_none()
     if row is None:
         return ApiResponse(code=404, message="任务不存在")
 
-    task, upload_file, shop_color = row
+    task, upload_file, shop_color, org_name = row
     # Scope check
     if current_user.role != "superadmin" and task.org_id != current_user.org_id:
         return ApiResponse(code=403, message="无权访问该任务")
 
-    return ApiResponse(data=build_task_out(task, upload_file, shop_color))
+    return ApiResponse(data=build_task_out(task, upload_file, shop_color, org_name))
 
 
-def build_task_out(task: ProcessingTask, upload_file: UploadFile, shop_color: str | None = None) -> TaskOut:
+def build_task_out(
+    task: ProcessingTask,
+    upload_file: UploadFile,
+    shop_color: str | None = None,
+    org_name: str | None = None,
+) -> TaskOut:
     data = TaskOut.model_validate(task)
+    data.org_name = org_name
     data.batch_id = upload_file.batch_id
     data.filename = upload_file.original_name
     data.platform = upload_file.source_platform_code or upload_file.detected_platform

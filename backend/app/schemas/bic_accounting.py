@@ -30,6 +30,7 @@ class BicTaskOut(BaseModel):
     id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     user_id: int
     shop_id: int | None = None
     source_upload_file_id: int | None = None
@@ -63,6 +64,7 @@ class BicDetailOut(BaseModel):
     task_id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     shop_id: int | None = None
     platform_code: str
     store_short_id: str | None = None
@@ -85,6 +87,7 @@ class BicReportOut(BaseModel):
     task_id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     shop_id: int | None = None
     platform_code: str
     store_short_id: str | None = None

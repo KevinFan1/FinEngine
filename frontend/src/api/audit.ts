@@ -22,6 +22,7 @@ export interface AuditLog {
 export interface AuditLogListParams {
   page?: number
   page_size?: number
+  org_id?: number | string
   module?: string
   action?: string
   username?: string

@@ -11,6 +11,7 @@ from app.models.operation_log import OperationLog
 from app.models.user import User
 from app.schemas.audit import AuditLogOut
 from app.schemas.common import ApiResponse, PageResponse
+from app.utils.query_filters import split_int_filter_values
 
 router = APIRouter()
 
@@ -25,6 +26,7 @@ def split_filter_values(value: str | None) -> list[str]:
 async def list_audit_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
     module: str | None = Query(None),
     action: str | None = Query(None),
     user_id: int | None = Query(None),
@@ -50,6 +52,11 @@ async def list_audit_logs(
     if current_user.role != "superadmin":
         stmt = stmt.where(OperationLog.org_id == current_user.org_id)
         count_stmt = count_stmt.where(OperationLog.org_id == current_user.org_id)
+    else:
+        org_ids = split_int_filter_values(org_id)
+        if org_ids:
+            stmt = stmt.where(OperationLog.org_id.in_(org_ids))
+            count_stmt = count_stmt.where(OperationLog.org_id.in_(org_ids))
 
     module_values = split_filter_values(module)
     if module_values:

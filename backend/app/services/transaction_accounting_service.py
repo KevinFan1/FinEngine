@@ -17,9 +17,11 @@ from sqlalchemy.orm import aliased
 
 from app.core.database import register_after_commit
 from app.models.cash_flow import CashFlowItem
+from app.models.organization import Organization
 from app.models.transaction_accounting import (
     TransactionCategory,
     TransactionDetail,
+    TransactionMajorCategory,
     TransactionRule,
     TransactionSubject,
     TransactionSummaryRow,
@@ -30,6 +32,8 @@ from app.models.user import User
 from app.schemas.transaction_accounting import (
     TransactionCategoryCreate,
     TransactionCategoryUpdate,
+    TransactionMajorCategoryCreate,
+    TransactionMajorCategoryUpdate,
     TransactionRuleCreate,
     TransactionRuleUpdate,
     TransactionSubjectCreate,
@@ -43,6 +47,7 @@ from app.services.shop_service import ShopService
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
+from app.utils.query_filters import resolve_org_ids
 
 TRANSACTION_FILENAME_PATTERN = re.compile(
     r"^(?P<year>\d{2}|\d{4})年(?P<month>\d{1,2})月[ _](?P<type>动账)[ _](?P<shop>.+)\.(?:xlsx|xlsm|xls|csv)$",
@@ -105,7 +110,10 @@ class TransactionSummaryReportRow:
     task_id: int
     file_id: int
     org_id: int
+    org_name: str | None
     shop_id: int | None
+    major_category_id: int | None
+    major_category_name: str | None
     subject_id: int
     category_id: int
     subject_name: str
@@ -125,7 +133,7 @@ class TransactionSummaryReportRow:
 
 @dataclass(frozen=True)
 class AnnualSummaryAmount:
-    subject_name: str
+    cash_flow_item_id: int
     accounting_month: int
     total_amount: Decimal
 
@@ -213,26 +221,6 @@ class TransactionAccountingService:
             if current_task is not None:
                 return current_task
 
-        if shop_id is not None and upload_file.parsed_year is not None and upload_file.parsed_month is not None:
-            existing_business_file = await TransactionAccountingService._get_existing_business_upload_file(
-                db,
-                org_id=upload_file.org_id,
-                platform_code=source_platform,
-                shop_id=shop_id,
-                accounting_year=upload_file.parsed_year,
-                accounting_month=upload_file.parsed_month,
-            )
-            if existing_business_file is not None:
-                if shop_id is not None and existing_business_file.shop_id is None:
-                    existing_business_file.shop_id = shop_id
-                current_task = await TransactionAccountingService._get_latest_task_for_upload_file(
-                    db,
-                    file_id=existing_business_file.id,
-                )
-                if current_task is not None:
-                    return current_task
-                derived_upload_file = existing_business_file
-
         if derived_upload_file is None:
             derived_upload_file = TransactionUploadFile(
                 org_id=upload_file.org_id,
@@ -318,21 +306,141 @@ class TransactionAccountingService:
         register_after_commit(db, dispatch)
 
     @staticmethod
-    async def list_subjects(db: AsyncSession, *, user: User) -> list[TransactionSubject]:
+    async def list_major_categories(db: AsyncSession, *, user: User) -> list[TransactionMajorCategory]:
         _ = user
-        stmt = select(TransactionSubject).where(TransactionSubject.is_deleted.is_(False))
-        stmt = stmt.order_by(TransactionSubject.sort_order, TransactionSubject.id)
+        stmt = (
+            select(TransactionMajorCategory)
+            .where(TransactionMajorCategory.is_deleted.is_(False))
+            .order_by(TransactionMajorCategory.sort_order, TransactionMajorCategory.id)
+        )
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
     @staticmethod
+    async def create_major_category(
+        db: AsyncSession,
+        *,
+        data: TransactionMajorCategoryCreate,
+        user: User,
+    ) -> TransactionMajorCategory:
+        _ = user
+        item = TransactionMajorCategory(name=data.name, sort_order=data.sort_order, status=data.status)
+        db.add(item)
+        await db.flush()
+        await db.refresh(item)
+        return item
+
+    @staticmethod
+    async def update_major_category(
+        db: AsyncSession,
+        *,
+        major_category_id: int,
+        data: TransactionMajorCategoryUpdate,
+        user: User,
+    ) -> TransactionMajorCategory | None:
+        item = await db.get(TransactionMajorCategory, major_category_id)
+        if item is None or item.is_deleted:
+            return None
+        _ = user
+        values = data.model_dump(exclude_unset=True)
+        for key, value in values.items():
+            setattr(item, key, value)
+        await db.flush()
+        await db.refresh(item)
+        return item
+
+    @staticmethod
+    async def delete_major_category(db: AsyncSession, *, major_category_id: int, user: User) -> bool:
+        item = await db.get(TransactionMajorCategory, major_category_id)
+        if item is None or item.is_deleted:
+            return False
+        _ = user
+        subject_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(TransactionSubject)
+                .where(
+                    TransactionSubject.is_deleted.is_(False),
+                    TransactionSubject.major_category_id == major_category_id,
+                )
+            )
+        ).scalar_one()
+        if subject_count:
+            raise ValueError("大分类下仍有科目，不能删除")
+        item.is_deleted = True
+        item.deleted_at = datetime.now(timezone.utc)
+        await db.flush()
+        return True
+
+    @staticmethod
+    async def list_cash_flow_items(db: AsyncSession, *, user: User) -> list[CashFlowItem]:
+        _ = user
+        parent = aliased(CashFlowItem)
+        stmt = (
+            select(CashFlowItem, parent.name.label("parent_name"))
+            .outerjoin(parent, parent.id == CashFlowItem.parent_id)
+            .where(
+                CashFlowItem.is_deleted.is_(False),
+                CashFlowItem.status == 1,
+                CashFlowItem.level == 2,
+            )
+            .order_by(parent.sort_order, parent.id, CashFlowItem.sort_order, CashFlowItem.id)
+        )
+        result = await db.execute(stmt)
+        items: list[CashFlowItem] = []
+        for item, parent_name in result.all():
+            item.parent_name = parent_name
+            items.append(item)
+        return items
+
+    @staticmethod
+    async def list_subjects(db: AsyncSession, *, user: User) -> list[TransactionSubject]:
+        _ = user
+        major = aliased(TransactionMajorCategory)
+        cash_item = aliased(CashFlowItem)
+        stmt = (
+            select(
+                TransactionSubject,
+                major.name.label("major_category_name"),
+                cash_item.name.label("cash_flow_item_name"),
+            )
+            .outerjoin(major, major.id == TransactionSubject.major_category_id)
+            .outerjoin(cash_item, cash_item.id == TransactionSubject.cash_flow_item_id)
+            .where(TransactionSubject.is_deleted.is_(False))
+            .order_by(
+                major.sort_order.nullslast(),
+                major.id.nullslast(),
+                TransactionSubject.sort_order,
+                TransactionSubject.id,
+            )
+        )
+        result = await db.execute(stmt)
+        subjects: list[TransactionSubject] = []
+        for subject, major_category_name, cash_flow_item_name in result.all():
+            subject.major_category_name = major_category_name
+            subject.cash_flow_item_name = cash_flow_item_name
+            subjects.append(subject)
+        return subjects
+
+    @staticmethod
     async def create_subject(db: AsyncSession, *, data: TransactionSubjectCreate, user: User) -> TransactionSubject:
         _ = user
-        subject = TransactionSubject(name=data.name, sort_order=data.sort_order, status=data.status)
+        await TransactionAccountingService._validate_subject_links(
+            db,
+            major_category_id=data.major_category_id,
+            cash_flow_item_id=data.cash_flow_item_id,
+        )
+        subject = TransactionSubject(
+            name=data.name,
+            account_type=data.account_type,
+            major_category_id=data.major_category_id,
+            cash_flow_item_id=data.cash_flow_item_id,
+            sort_order=data.sort_order,
+            status=data.status,
+        )
         db.add(subject)
         await db.flush()
-        await db.refresh(subject)
-        return subject
+        return await TransactionAccountingService._load_subject_with_labels(db, subject.id)
 
     @staticmethod
     async def update_subject(db: AsyncSession, *, subject_id: int, data: TransactionSubjectUpdate, user: User) -> TransactionSubject | None:
@@ -341,11 +449,17 @@ class TransactionAccountingService:
             return None
         _ = user
         values = data.model_dump(exclude_unset=True)
+        major_category_id = values["major_category_id"] if "major_category_id" in values else subject.major_category_id
+        cash_flow_item_id = values["cash_flow_item_id"] if "cash_flow_item_id" in values else subject.cash_flow_item_id
+        await TransactionAccountingService._validate_subject_links(
+            db,
+            major_category_id=major_category_id,
+            cash_flow_item_id=cash_flow_item_id,
+        )
         for key, value in values.items():
             setattr(subject, key, value)
         await db.flush()
-        await db.refresh(subject)
-        return subject
+        return await TransactionAccountingService._load_subject_with_labels(db, subject.id)
 
     @staticmethod
     async def delete_subject(db: AsyncSession, *, subject_id: int, user: User) -> bool:
@@ -353,6 +467,18 @@ class TransactionAccountingService:
         if subject is None or subject.is_deleted:
             return False
         _ = user
+        category_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(TransactionCategory)
+                .where(
+                    TransactionCategory.is_deleted.is_(False),
+                    TransactionCategory.subject_id == subject_id,
+                )
+            )
+        ).scalar_one()
+        if category_count:
+            raise ValueError("科目下仍有重分类，不能删除")
         subject.is_deleted = True
         subject.deleted_at = datetime.now(timezone.utc)
         await db.flush()
@@ -403,6 +529,18 @@ class TransactionAccountingService:
         if category is None or category.is_deleted:
             return False
         _ = user
+        rule_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(TransactionRule)
+                .where(
+                    TransactionRule.is_deleted.is_(False),
+                    TransactionRule.category_id == category_id,
+                )
+            )
+        ).scalar_one()
+        if rule_count:
+            raise ValueError("重分类下仍有规则，不能删除")
         category.is_deleted = True
         category.deleted_at = datetime.now(timezone.utc)
         await db.flush()
@@ -416,8 +554,8 @@ class TransactionAccountingService:
             .join(TransactionSubject, TransactionSubject.id == TransactionRule.subject_id)
             .join(TransactionCategory, TransactionCategory.id == TransactionRule.category_id)
             .where(TransactionRule.is_deleted.is_(False))
+            .order_by(TransactionRule.priority, TransactionRule.id)
         )
-        stmt = stmt.order_by(TransactionRule.priority, TransactionRule.id)
         result = await db.execute(stmt)
         return list(result.all())
 
@@ -494,16 +632,6 @@ class TransactionAccountingService:
             platform_name=platform_code,
             shop_name=data.shop_name or parsed["shop"],
         )
-        existing_business_file = await TransactionAccountingService._get_existing_business_upload_file(
-            db,
-            org_id=scoped_org_id,
-            platform_code=platform_code,
-            shop_id=shop.id,
-            accounting_year=data.accounting_year or parsed["year"],
-            accounting_month=data.accounting_month or parsed["month"],
-        )
-        if existing_business_file is not None:
-            raise ValueError("该店铺该月份的动账任务已存在，请勿重复上传")
         upload_file = TransactionUploadFile(
             org_id=scoped_org_id,
             user_id=user.id,
@@ -602,8 +730,13 @@ class TransactionAccountingService:
         if task is None or task.is_deleted:
             return None
         TransactionAccountingService.validate_org_scope(org_id=task.org_id, user=user)
+        upload_file = await db.get(TransactionUploadFile, task.file_id)
+        if upload_file is None or upload_file.is_deleted:
+            raise ValueError("动账上传文件不存在")
+
         task.status = "queued"
         task.progress = 0
+        task.celery_task_id = None
         task.total_rows = 0
         task.matched_rows = 0
         task.unmatched_rows = 0
@@ -612,6 +745,8 @@ class TransactionAccountingService:
         task.result_summary = None
         task.started_at = None
         task.finished_at = None
+        upload_file.status = "uploaded"
+        upload_file.error_message = None
         await db.execute(delete(TransactionDetail).where(TransactionDetail.task_id == task.id))
         await db.execute(delete(TransactionSummaryRow).where(TransactionSummaryRow.task_id == task.id))
 
@@ -628,9 +763,9 @@ class TransactionAccountingService:
             target_id=task.id,
             ip=ip,
             user_agent=user_agent,
+            extra_data={"task_id": task.id, "file_id": upload_file.id},
         )
 
-        upload_file = await db.get(TransactionUploadFile, task.file_id)
         TransactionAccountingService.dispatch_task_after_commit(
             db,
             task=task,
@@ -659,11 +794,11 @@ class TransactionAccountingService:
         keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[tuple[TransactionTask, TransactionUploadFile]], int]:
-        scoped_org_id = TransactionAccountingService.resolve_org_id(user=user, requested_org_id=org_id) if user.role == "superadmin" and org_id else user.org_id
+    ) -> tuple[list[tuple[TransactionTask, TransactionUploadFile, str | None]], int]:
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         filters = [TransactionTask.is_deleted.is_(False), TransactionUploadFile.is_deleted.is_(False)]
-        if scoped_org_id is not None:
-            filters.append(TransactionTask.org_id == scoped_org_id)
+        if org_ids is not None:
+            filters.append(TransactionTask.org_id.in_(org_ids))
         if status:
             filters.append(TransactionTask.status.in_(TransactionAccountingService._split_filter_values(status)))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
@@ -698,8 +833,9 @@ class TransactionAccountingService:
                 )
             )
         stmt = (
-            select(TransactionTask, TransactionUploadFile)
+            select(TransactionTask, TransactionUploadFile, Organization.name.label("org_name"))
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionTask.file_id)
+            .outerjoin(Organization, Organization.id == TransactionTask.org_id)
             .where(*filters)
             .order_by(TransactionTask.id.desc())
         )
@@ -719,6 +855,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -739,7 +876,7 @@ class TransactionAccountingService:
         page: int | None = 1,
         page_size: int | None = 50,
     ) -> tuple[list[TransactionDetail], int]:
-        scoped_org_id = TransactionAccountingService.resolve_org_id(user=user, requested_org_id=org_id) if user.role == "superadmin" and org_id else user.org_id
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         if ids is not None and not ids:
             return [], 0
         filters = [
@@ -747,8 +884,16 @@ class TransactionAccountingService:
             TransactionUploadFile.is_deleted.is_(False),
             TransactionTask.is_deleted.is_(False),
         ]
-        if scoped_org_id is not None:
-            filters.append(TransactionDetail.org_id == scoped_org_id)
+        if org_ids is not None:
+            filters.append(TransactionDetail.org_id.in_(org_ids))
+        resolved_major_category_id = func.coalesce(
+            TransactionDetail.major_category_id,
+            TransactionSubject.major_category_id,
+        )
+        resolved_major_category_name = func.coalesce(
+            TransactionMajorCategory.name,
+            TransactionDetail.major_category_name,
+        )
         if ids is not None:
             filters.append(TransactionDetail.id.in_(ids))
         if task_id is not None:
@@ -773,6 +918,9 @@ class TransactionAccountingService:
             filters.append(TransactionDetail.shop_name.in_(shop_names))
         if shop_id is not None:
             filters.append(TransactionDetail.shop_id == shop_id)
+        major_category_ids = TransactionAccountingService._split_int_filter_values(major_category_id)
+        if major_category_ids:
+            filters.append(resolved_major_category_id.in_(major_category_ids))
         subject_ids = TransactionAccountingService._split_int_filter_values(subject_id)
         if subject_ids:
             filters.append(TransactionDetail.subject_id.in_(subject_ids))
@@ -811,6 +959,7 @@ class TransactionAccountingService:
             like_pattern = f"%{keyword.strip()}%"
             filters.append(
                 or_(
+                    resolved_major_category_name.ilike(like_pattern),
                     TransactionDetail.shop_name.ilike(like_pattern),
                     TransactionDetail.platform_code.ilike(like_pattern),
                     TransactionDetail.remark.ilike(like_pattern),
@@ -818,21 +967,23 @@ class TransactionAccountingService:
                     TransactionDetail.error_message.ilike(like_pattern),
                 )
             )
-        cash_flow_groups = TransactionAccountingService._cash_flow_group_subquery()
         stmt = (
             select(
                 TransactionDetail,
+                Organization.name.label("org_name"),
                 TransactionSubject.name,
+                resolved_major_category_id.label("resolved_major_category_id"),
+                resolved_major_category_name.label("resolved_major_category_name"),
                 TransactionCategory.name,
                 TransactionUploadFile.accounting_year,
                 TransactionUploadFile.accounting_month,
-                cash_flow_groups.c.cash_flow_group_name,
             )
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionDetail.file_id)
             .join(TransactionTask, TransactionTask.id == TransactionDetail.task_id)
             .outerjoin(TransactionSubject, TransactionSubject.id == TransactionDetail.subject_id)
+            .outerjoin(TransactionMajorCategory, TransactionMajorCategory.id == resolved_major_category_id)
             .outerjoin(TransactionCategory, TransactionCategory.id == TransactionDetail.category_id)
-            .outerjoin(cash_flow_groups, cash_flow_groups.c.subject_name == TransactionSubject.name)
+            .outerjoin(Organization, Organization.id == TransactionDetail.org_id)
             .where(*filters)
             .order_by(
                 TransactionUploadFile.accounting_year.desc().nullslast(),
@@ -842,6 +993,7 @@ class TransactionAccountingService:
                 TransactionDetail.platform_code,
                 TransactionDetail.shop_id,
                 TransactionDetail.shop_name,
+                resolved_major_category_name,
                 TransactionSubject.name,
                 TransactionCategory.name,
             )
@@ -851,6 +1003,8 @@ class TransactionAccountingService:
             .select_from(TransactionDetail)
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionDetail.file_id)
             .join(TransactionTask, TransactionTask.id == TransactionDetail.task_id)
+            .outerjoin(TransactionSubject, TransactionSubject.id == TransactionDetail.subject_id)
+            .outerjoin(TransactionMajorCategory, TransactionMajorCategory.id == resolved_major_category_id)
             .where(*filters)
         )
         total = (await db.execute(count_stmt)).scalar() or 0
@@ -858,12 +1012,24 @@ class TransactionAccountingService:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)
         rows = []
-        for detail, subject_name, category_name, upload_year, upload_month, cash_flow_group_name in result.all():
+        for (
+            detail,
+            org_name,
+            subject_name,
+            resolved_major_category_id_value,
+            resolved_major_category_name_value,
+            category_name,
+            upload_year,
+            upload_month,
+        ) in result.all():
+            detail.org_name = org_name
+            detail.major_category_id = resolved_major_category_id_value
+            detail.major_category_name = resolved_major_category_name_value
             detail.subject_name = subject_name
             detail.category_name = category_name
             detail.upload_accounting_year = upload_year
             detail.upload_accounting_month = upload_month
-            detail.cash_flow_group_name = cash_flow_group_name
+            detail.cash_flow_group_name = detail.major_category_name
             detail.total_amount = detail.calculated_amount
             rows.append(detail)
         return rows, total
@@ -878,6 +1044,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -898,12 +1065,12 @@ class TransactionAccountingService:
         page: int | None = None,
         page_size: int | None = None,
     ) -> tuple[list[TransactionSummaryReportRow], int]:
-        scoped_org_id = TransactionAccountingService.resolve_org_id(user=user, requested_org_id=org_id) if user.role == "superadmin" and org_id else user.org_id
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         if ids is not None and not ids:
             return [], 0
         filters = [TransactionSummaryRow.is_deleted.is_(False), TransactionUploadFile.is_deleted.is_(False)]
-        if scoped_org_id is not None:
-            filters.append(TransactionSummaryRow.org_id == scoped_org_id)
+        if org_ids is not None:
+            filters.append(TransactionSummaryRow.org_id.in_(org_ids))
         if task_id is not None:
             filters.append(TransactionSummaryRow.task_id == task_id)
         else:
@@ -916,6 +1083,9 @@ class TransactionAccountingService:
             filters.append(TransactionSummaryRow.shop_name.in_(shop_names))
         if shop_id is not None:
             filters.append(TransactionSummaryRow.shop_id == shop_id)
+        major_category_ids = TransactionAccountingService._split_int_filter_values(major_category_id)
+        if major_category_ids:
+            filters.append(TransactionSummaryRow.major_category_id.in_(major_category_ids))
         subject_ids = TransactionAccountingService._split_int_filter_values(subject_id)
         if subject_ids:
             filters.append(TransactionSummaryRow.subject_id.in_(subject_ids))
@@ -954,13 +1124,13 @@ class TransactionAccountingService:
             like_pattern = f"%{keyword.strip()}%"
             filters.append(
                 or_(
+                    TransactionSummaryRow.major_category_name.ilike(like_pattern),
                     TransactionSummaryRow.subject_name.ilike(like_pattern),
                     TransactionSummaryRow.category_name.ilike(like_pattern),
                     TransactionSummaryRow.shop_name.ilike(like_pattern),
                     TransactionSummaryRow.platform_code.ilike(like_pattern),
                 )
             )
-        cash_flow_groups = TransactionAccountingService._cash_flow_group_subquery()
         grouped_fields = [
             TransactionSummaryRow.org_id,
             TransactionSummaryRow.platform_code,
@@ -970,9 +1140,10 @@ class TransactionAccountingService:
             TransactionUploadFile.accounting_month,
             TransactionSummaryRow.accounting_year,
             TransactionSummaryRow.accounting_month,
+            TransactionSummaryRow.major_category_id,
+            TransactionSummaryRow.major_category_name,
             TransactionSummaryRow.subject_id,
             TransactionSummaryRow.subject_name,
-            cash_flow_groups.c.cash_flow_group_name,
         ]
         id_expr = func.min(TransactionSummaryRow.id)
         stmt = (
@@ -981,7 +1152,10 @@ class TransactionAccountingService:
                 func.min(TransactionSummaryRow.task_id).label("task_id"),
                 func.min(TransactionSummaryRow.file_id).label("file_id"),
                 TransactionSummaryRow.org_id.label("org_id"),
+                func.max(Organization.name).label("org_name"),
                 TransactionSummaryRow.shop_id.label("shop_id"),
+                TransactionSummaryRow.major_category_id.label("major_category_id"),
+                TransactionSummaryRow.major_category_name.label("major_category_name"),
                 TransactionSummaryRow.subject_id.label("subject_id"),
                 func.min(TransactionSummaryRow.category_id).label("category_id"),
                 TransactionSummaryRow.subject_name.label("subject_name"),
@@ -992,13 +1166,12 @@ class TransactionAccountingService:
                 TransactionUploadFile.accounting_month.label("upload_accounting_month"),
                 TransactionSummaryRow.accounting_year.label("accounting_year"),
                 TransactionSummaryRow.accounting_month.label("accounting_month"),
-                cash_flow_groups.c.cash_flow_group_name,
                 func.sum(TransactionSummaryRow.row_count).label("row_count"),
                 func.sum(TransactionSummaryRow.total_amount).label("total_amount"),
                 func.min(TransactionSummaryRow.created_at).label("created_at"),
             )
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionSummaryRow.file_id)
-            .outerjoin(cash_flow_groups, cash_flow_groups.c.subject_name == TransactionSummaryRow.subject_name)
+            .outerjoin(Organization, Organization.id == TransactionSummaryRow.org_id)
             .where(*filters)
             .group_by(*grouped_fields)
             .order_by(
@@ -1009,7 +1182,7 @@ class TransactionAccountingService:
                 TransactionSummaryRow.platform_code,
                 TransactionSummaryRow.shop_id,
                 TransactionSummaryRow.shop_name,
-                cash_flow_groups.c.cash_flow_group_name,
+                TransactionSummaryRow.major_category_name,
                 TransactionSummaryRow.subject_name,
             )
         )
@@ -1019,7 +1192,6 @@ class TransactionAccountingService:
             select(*grouped_fields)
             .select_from(TransactionSummaryRow)
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionSummaryRow.file_id)
-            .outerjoin(cash_flow_groups, cash_flow_groups.c.subject_name == TransactionSummaryRow.subject_name)
             .where(*filters)
             .group_by(*grouped_fields)
         )
@@ -1037,7 +1209,10 @@ class TransactionAccountingService:
                 task_id=row.task_id,
                 file_id=row.file_id,
                 org_id=row.org_id,
+                org_name=row.org_name,
                 shop_id=row.shop_id,
+                major_category_id=row.major_category_id,
+                major_category_name=row.major_category_name,
                 subject_id=row.subject_id,
                 category_id=row.category_id,
                 subject_name=row.subject_name,
@@ -1049,7 +1224,7 @@ class TransactionAccountingService:
                 upload_accounting_month=row.upload_accounting_month,
                 accounting_year=row.accounting_year,
                 accounting_month=row.accounting_month,
-                cash_flow_group_name=row.cash_flow_group_name,
+                cash_flow_group_name=row.major_category_name,
                 row_count=int(row.row_count or 0),
                 total_amount=row.total_amount or Decimal("0"),
                 created_at=row.created_at,
@@ -1069,6 +1244,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1090,6 +1266,7 @@ class TransactionAccountingService:
             platform_code=platform_code,
             shop_name=shop_name,
             shop_id=shop_id,
+            major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1119,6 +1296,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1139,6 +1317,7 @@ class TransactionAccountingService:
             platform_code=platform_code,
             shop_name=shop_name,
             shop_id=shop_id,
+            major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1163,6 +1342,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1192,6 +1372,7 @@ class TransactionAccountingService:
             platform_code=platform_code,
             shop_name=shop_name,
             shop_id=shop_id,
+            major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1224,6 +1405,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1252,6 +1434,7 @@ class TransactionAccountingService:
             platform_code=platform_code,
             shop_name=shop_name,
             shop_id=shop_id,
+            major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -1295,9 +1478,6 @@ class TransactionAccountingService:
             rules = await TransactionAccountingService._load_rule_candidates(db, platform_code=upload_file.platform_code)
             if not rules:
                 raise ValueError("未配置启用的动账核算规则")
-
-            await db.execute(delete(TransactionDetail).where(TransactionDetail.task_id == task.id))
-            await db.execute(delete(TransactionSummaryRow).where(TransactionSummaryRow.task_id == task.id))
 
             summary_accumulator: dict[tuple[int, int, int | None, int | None], dict[str, object]] = {}
             rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]] = {}
@@ -1357,6 +1537,8 @@ class TransactionAccountingService:
                 rule_map=rule_map,
                 rule_accumulator=rule_accumulator,
             )
+            await db.execute(delete(TransactionDetail).where(TransactionDetail.task_id == task.id))
+            await db.execute(delete(TransactionSummaryRow).where(TransactionSummaryRow.task_id == task.id))
             await TransactionAccountingService._create_aggregated_result_rows(
                 db,
                 task=task,
@@ -1406,6 +1588,53 @@ class TransactionAccountingService:
         await db.flush()
         await db.refresh(task)
         return task
+
+    @staticmethod
+    async def _load_subject_with_labels(db: AsyncSession, subject_id: int) -> TransactionSubject:
+        major = aliased(TransactionMajorCategory)
+        cash_item = aliased(CashFlowItem)
+        stmt = (
+            select(
+                TransactionSubject,
+                major.name.label("major_category_name"),
+                cash_item.name.label("cash_flow_item_name"),
+            )
+            .outerjoin(major, major.id == TransactionSubject.major_category_id)
+            .outerjoin(cash_item, cash_item.id == TransactionSubject.cash_flow_item_id)
+            .where(
+                TransactionSubject.id == subject_id,
+                TransactionSubject.is_deleted.is_(False),
+            )
+        )
+        result = await db.execute(stmt)
+        row = result.first()
+        if row is None:
+            raise ValueError("科目不存在")
+        subject, major_category_name, cash_flow_item_name = row
+        subject.major_category_name = major_category_name
+        subject.cash_flow_item_name = cash_flow_item_name
+        return subject
+
+    @staticmethod
+    async def _validate_subject_links(
+        db: AsyncSession,
+        *,
+        major_category_id: int | None,
+        cash_flow_item_id: int | None,
+    ) -> None:
+        if major_category_id is not None:
+            major_category = await db.get(TransactionMajorCategory, major_category_id)
+            if major_category is None or major_category.is_deleted:
+                raise ValueError("大分类不存在")
+        if cash_flow_item_id is not None:
+            cash_flow_item = await db.get(CashFlowItem, cash_flow_item_id)
+            if (
+                cash_flow_item is None
+                or getattr(cash_flow_item, "is_deleted", False)
+                or getattr(cash_flow_item, "status", 0) != 1
+                or cash_flow_item.level != 2
+            ):
+                raise ValueError("现金流项目不存在")
 
     @staticmethod
     async def _get_category_for_rule(db: AsyncSession, *, category_id: int, subject_id: int, user: User) -> TransactionCategory:
@@ -1660,30 +1889,6 @@ class TransactionAccountingService:
         return (await db.execute(stmt)).scalars().first()
 
     @staticmethod
-    async def _get_existing_business_upload_file(
-        db: AsyncSession,
-        *,
-        org_id: int,
-        platform_code: str,
-        shop_id: int,
-        accounting_year: int,
-        accounting_month: int,
-    ) -> TransactionUploadFile | None:
-        stmt = (
-            select(TransactionUploadFile)
-            .where(
-                TransactionUploadFile.org_id == org_id,
-                TransactionUploadFile.platform_code == platform_code,
-                TransactionUploadFile.shop_id == shop_id,
-                TransactionUploadFile.accounting_year == accounting_year,
-                TransactionUploadFile.accounting_month == accounting_month,
-                TransactionUploadFile.is_deleted.is_(False),
-            )
-            .order_by(TransactionUploadFile.id.desc())
-        )
-        return (await db.execute(stmt)).scalars().first()
-
-    @staticmethod
     def _latest_result_task_ids_select():
         return (
             select(func.max(TransactionTask.id).label("task_id"))
@@ -1738,6 +1943,7 @@ class TransactionAccountingService:
         platform_code: str | None = None,
         shop_name: str | None = None,
         shop_id: int | None = None,
+        major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
         transaction_direction: str | None = None,
@@ -1749,15 +1955,15 @@ class TransactionAccountingService:
         upload_accounting_end_month: int | None = None,
         keyword: str | None = None,
     ) -> list[AnnualSummaryAmount]:
-        scoped_org_id = TransactionAccountingService.resolve_org_id(user=user, requested_org_id=org_id) if user.role == "superadmin" and org_id else user.org_id
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         filters = [
             TransactionSummaryRow.is_deleted.is_(False),
             TransactionUploadFile.is_deleted.is_(False),
             TransactionSummaryRow.accounting_year == year,
             TransactionSummaryRow.accounting_month.is_not(None),
         ]
-        if scoped_org_id is not None:
-            filters.append(TransactionSummaryRow.org_id == scoped_org_id)
+        if org_ids is not None:
+            filters.append(TransactionSummaryRow.org_id.in_(org_ids))
         if task_id is not None:
             filters.append(TransactionSummaryRow.task_id == task_id)
         else:
@@ -1770,6 +1976,9 @@ class TransactionAccountingService:
             filters.append(TransactionSummaryRow.shop_name.in_(shop_names))
         if shop_id is not None:
             filters.append(TransactionSummaryRow.shop_id == shop_id)
+        major_category_ids = TransactionAccountingService._split_int_filter_values(major_category_id)
+        if major_category_ids:
+            filters.append(TransactionSummaryRow.major_category_id.in_(major_category_ids))
         subject_ids = TransactionAccountingService._split_int_filter_values(subject_id)
         if subject_ids:
             filters.append(TransactionSummaryRow.subject_id.in_(subject_ids))
@@ -1795,6 +2004,7 @@ class TransactionAccountingService:
             like_pattern = f"%{keyword.strip()}%"
             filters.append(
                 or_(
+                    TransactionSummaryRow.major_category_name.ilike(like_pattern),
                     TransactionSummaryRow.subject_name.ilike(like_pattern),
                     TransactionSummaryRow.category_name.ilike(like_pattern),
                     TransactionSummaryRow.shop_name.ilike(like_pattern),
@@ -1804,23 +2014,27 @@ class TransactionAccountingService:
 
         stmt = (
             select(
-                TransactionSummaryRow.subject_name,
+                TransactionSummaryRow.cash_flow_item_id,
                 TransactionSummaryRow.accounting_month,
                 func.sum(TransactionSummaryRow.total_amount).label("total_amount"),
             )
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionSummaryRow.file_id)
-            .where(*filters)
-            .group_by(TransactionSummaryRow.subject_name, TransactionSummaryRow.accounting_month)
+            .where(*filters, TransactionSummaryRow.cash_flow_item_id.is_not(None))
+            .group_by(TransactionSummaryRow.cash_flow_item_id, TransactionSummaryRow.accounting_month)
         )
         result = await db.execute(stmt)
         return [
             AnnualSummaryAmount(
-                subject_name=row.subject_name,
+                cash_flow_item_id=int(row.cash_flow_item_id),
                 accounting_month=int(row.accounting_month),
                 total_amount=row.total_amount or Decimal("0"),
             )
             for row in result.all()
-            if row.accounting_month is not None and 1 <= int(row.accounting_month) <= 12
+            if (
+                row.cash_flow_item_id is not None
+                and row.accounting_month is not None
+                and 1 <= int(row.accounting_month) <= 12
+            )
         ]
 
     @staticmethod
@@ -1831,11 +2045,13 @@ class TransactionAccountingService:
         amounts: list[AnnualSummaryAmount],
     ) -> list[TransactionAnnualSummaryReportRow]:
         month_keys = TransactionAccountingService._annual_month_keys(year)
-        amounts_by_subject: dict[str, dict[str, Decimal]] = defaultdict(lambda: {month: Decimal("0") for month in month_keys})
+        amounts_by_cash_item_id: dict[int, dict[str, Decimal]] = defaultdict(
+            lambda: {month: Decimal("0") for month in month_keys}
+        )
         for amount in amounts:
             month_key = f"{year}{int(amount.accounting_month):02d}"
-            if month_key in amounts_by_subject[amount.subject_name]:
-                amounts_by_subject[amount.subject_name][month_key] += amount.total_amount or Decimal("0")
+            if month_key in amounts_by_cash_item_id[amount.cash_flow_item_id]:
+                amounts_by_cash_item_id[amount.cash_flow_item_id][month_key] += amount.total_amount or Decimal("0")
 
         active_cash_items = [item for item in cash_items if not getattr(item, "is_deleted", False)]
         children_by_parent: dict[int, list[CashFlowItem]] = defaultdict(list)
@@ -1843,20 +2059,12 @@ class TransactionAccountingService:
             if item.parent_id is not None:
                 children_by_parent[int(item.parent_id)].append(item)
 
-        detail_occurrence: dict[str, int] = defaultdict(int)
-        duplicate_detail_totals = defaultdict(int)
-        for item in active_cash_items:
-            if item.level == 2:
-                duplicate_detail_totals[item.name] += 1
-
         rows_by_id: dict[int, TransactionAnnualSummaryReportRow] = {}
         ordered_items = sorted(active_cash_items, key=lambda item: (item.sort_order, item.id))
         for item in ordered_items:
             months = {month: Decimal("0") for month in month_keys}
             if item.level == 2:
-                detail_occurrence[item.name] += 1
-                if duplicate_detail_totals[item.name] == 1 or detail_occurrence[item.name] == duplicate_detail_totals[item.name]:
-                    months = dict(amounts_by_subject.get(item.name, months))
+                months = dict(amounts_by_cash_item_id.get(int(item.id), months))
             row = TransactionAnnualSummaryReportRow(
                 code=item.code,
                 name=item.name,
@@ -1881,8 +2089,6 @@ class TransactionAccountingService:
             if child_rows:
                 for month in month_keys:
                     row.months[month] = sum((child.months.get(month, Decimal("0")) for child in child_rows), Decimal("0"))
-            else:
-                row.months = dict(amounts_by_subject.get(item.name, row.months))
             row.total_amount = sum(row.months.values(), Decimal("0"))
 
         TransactionAccountingService._apply_annual_formula_rows(
@@ -2081,11 +2287,32 @@ class TransactionAccountingService:
         category_result = await db.execute(select(TransactionCategory).where(TransactionCategory.id.in_(category_ids)))
         subjects = {item.id: item for item in subject_result.scalars().all()}
         categories = {item.id: item for item in category_result.scalars().all()}
+        major_category_ids = {
+            int(item.major_category_id)
+            for item in subjects.values()
+            if item.major_category_id is not None
+        }
+        major_category_names: dict[int, str] = {}
+        if major_category_ids:
+            major_category_result = await db.execute(
+                select(TransactionMajorCategory.id, TransactionMajorCategory.name).where(
+                    TransactionMajorCategory.id.in_(major_category_ids)
+                )
+            )
+            major_category_names = {
+                int(item_id): item_name
+                for item_id, item_name in major_category_result.all()
+            }
         detail_rows = []
         summary_rows = []
         for (subject_id, category_id, accounting_year, accounting_month), bucket in summary_accumulator.items():
             subject = subjects[subject_id]
             category = categories[category_id]
+            major_category_name = (
+                major_category_names.get(int(subject.major_category_id))
+                if subject.major_category_id is not None
+                else None
+            )
             amount = bucket["amount"]
             row_count = int(bucket["count"])
             first_row = int(bucket["first_row"])
@@ -2109,6 +2336,8 @@ class TransactionAccountingService:
                     task_id=task.id,
                     file_id=upload_file.id,
                     org_id=task.org_id,
+                    major_category_id=subject.major_category_id,
+                    major_category_name=major_category_name,
                     subject_id=subject_id,
                     category_id=category_id,
                     rule_id=None,
@@ -2138,8 +2367,11 @@ class TransactionAccountingService:
                     task_id=task.id,
                     file_id=upload_file.id,
                     org_id=task.org_id,
+                    major_category_id=subject.major_category_id,
+                    major_category_name=major_category_name,
                     subject_id=subject_id,
                     category_id=category_id,
+                    cash_flow_item_id=subject.cash_flow_item_id,
                     subject_name=subject.name,
                     category_name=category.name,
                     transaction_direction=None,

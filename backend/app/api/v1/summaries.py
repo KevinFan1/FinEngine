@@ -13,6 +13,7 @@ from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.summary import SummaryOut, SummaryReportOut
 from app.services.audit_service import AuditService
 from app.services.summary_service import SummaryService
+from app.utils.query_filters import resolve_org_ids
 
 router = APIRouter()
 
@@ -86,17 +87,22 @@ async def list_summaries(
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
+    org_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Query financial summaries with filters."""
-    org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
+    org_ids = resolve_org_ids(
+        user_role=current_user.role,
+        user_org_id=current_user.org_id,
+        requested_org_id=org_id,
+    )
 
     summaries, total = await SummaryService.list_summaries(
         db,
-        org_id=org_id,
+        org_ids=org_ids,
         summary_year=summary_year,
         summary_month=summary_month,
         summary_start_year=summary_start_year,
@@ -145,14 +151,17 @@ async def list_summaries(
 def to_summary_out(summary) -> SummaryOut:
     """Map database summary fields to API/frontend field names."""
     shop_color = None
+    org_name = None
     if isinstance(summary, dict):
         shop_color = summary.get("shop_color")
+        org_name = summary.get("org_name")
         summary = summary.get("summary")
     source_platform_code = getattr(summary, "source_platform_code", None) or summary.platform_name
     report_platform_code = getattr(summary, "report_platform_code", None) or source_platform_code
     return SummaryOut(
         id=summary.id,
         org_id=summary.org_id,
+        org_name=org_name,
         shop_id=summary.shop_id,
         summary_year=summary.summary_year,
         summary_month=summary.summary_month,
@@ -217,13 +226,18 @@ async def list_report_summaries(
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
+    org_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Query accounting-month aggregated financial reports."""
-    org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
+    org_ids = resolve_org_ids(
+        user_role=current_user.role,
+        user_org_id=current_user.org_id,
+        requested_org_id=org_id,
+    )
     filter_year, filter_month = resolve_accounting_date_filters(
         accounting_year=accounting_year,
         accounting_month=accounting_month,
@@ -239,7 +253,7 @@ async def list_report_summaries(
 
     rows, total = await SummaryService.list_report_summaries(
         db,
-        org_id=org_id,
+        org_ids=org_ids,
         source_year=filter_year,
         source_month=filter_month,
         source_start_year=range_start_year,
@@ -272,10 +286,11 @@ def to_summary_report_out(row: dict) -> SummaryReportOut:
     report_platform_code = str(row.get("report_platform_code") or platform_name)
     shop_id = int(row.get("shop_id") or 0)
     shop_name = str(row.get("shop_name") or "")
-    record_id = f"{source_year}-{source_month}-{platform_name}-{shop_id}"
+    record_id = SummaryService.report_row_id(row)
     return SummaryReportOut(
         id=record_id,
         org_id=int(row.get("org_id") or 0),
+        org_name=row.get("org_name"),
         shop_id=shop_id,
         source_year=source_year,
         source_month=source_month,
@@ -341,6 +356,7 @@ async def export_report_summaries(
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
+    org_id: str | None = Query(None),
     scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None, description="Comma-separated report row IDs for selected export"),
     page: int = Query(1, ge=1),
@@ -349,7 +365,11 @@ async def export_report_summaries(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Export accounting-month aggregated reports to Excel."""
-    org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
+    org_ids = resolve_org_ids(
+        user_role=current_user.role,
+        user_org_id=current_user.org_id,
+        requested_org_id=org_id,
+    )
     selected_ids = parse_report_ids(ids) if scope == "selected" else None
     filter_year, filter_month = resolve_accounting_date_filters(
         accounting_year=accounting_year,
@@ -365,7 +385,7 @@ async def export_report_summaries(
     )
     buffer = await SummaryService.export_report_summaries(
         db,
-        org_id=org_id,
+        org_ids=org_ids,
         source_year=filter_year,
         source_month=filter_month,
         source_start_year=range_start_year,
@@ -464,6 +484,7 @@ async def export_summaries(
     shop_id: int | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
+    org_id: str | None = Query(None),
     scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None, description="Comma-separated summary IDs for selected export"),
     page: int = Query(1, ge=1),
@@ -472,12 +493,16 @@ async def export_summaries(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Export summaries to Excel. Returns a streaming .xlsx file."""
-    org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
+    org_ids = resolve_org_ids(
+        user_role=current_user.role,
+        user_org_id=current_user.org_id,
+        requested_org_id=org_id,
+    )
     selected_ids = parse_summary_ids(ids) if scope == "selected" else None
 
     buffer = await SummaryService.export_summaries(
         db,
-        org_id=org_id,
+        org_ids=org_ids,
         summary_year=summary_year,
         summary_month=summary_month,
         summary_start_year=summary_start_year,

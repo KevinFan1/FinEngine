@@ -1,1688 +1,1474 @@
 <template>
-    <div class="page-container reclass-page">
-        <el-card shadow="never" class="table-card rule-table-card">
-            <template #header>
-                <div class="page-toolbar">
-                    <div class="title-stack">
-                        <span class="page-kicker">TRANSACTION RECLASS</span>
-                        <div class="title-row">
-                            <h2>动账重分类</h2>
-                            <span class="count-text">
-                                显示 {{ visibleRuleGroups.length }} / {{ ruleGroups.length }} 个父级组
-                            </span>
-                        </div>
-                    </div>
-                    <div class="toolbar-actions">
-                        <el-input
-                            v-model="listSearchText"
-                            clearable
-                            class="group-search-input"
-                            placeholder="搜索科目、重分类、平台或规则条件"
-                        >
-                            <template #prefix>
-                                <el-icon><Search /></el-icon>
-                            </template>
-                        </el-input>
-                        <el-button @click="loadData">
-                            <el-icon><Refresh /></el-icon>
-                            刷新
-                        </el-button>
-                    </div>
-                </div>
-
-                <div class="overview-strip">
-                    <article class="overview-item">
-                        <span>父级科目组</span>
-                        <strong>{{ ruleGroups.length }}</strong>
-                        <small>按科目与平台聚合</small>
-                    </article>
-                    <article class="overview-item">
-                        <span>子级重分类</span>
-                        <strong>{{ totalCategoryCount }}</strong>
-                        <small>分类节点总数</small>
-                    </article>
-                    <article class="overview-item">
-                        <span>规则总数</span>
-                        <strong>{{ rules.length }}</strong>
-                        <small>全部规则明细</small>
-                    </article>
-                    <article class="overview-item">
-                        <span>启用规则</span>
-                        <strong>{{ enabledRuleCount }}</strong>
-                        <small>当前生效中</small>
-                    </article>
-                </div>
-            </template>
-
-            <div v-loading="loading" class="group-list-table">
-                <div class="group-list-head">
-                    <span>科目 / 平台</span>
-                    <span>状态与范围</span>
-                    <span>层级统计</span>
-                    <span>规则预览</span>
-                    <span>操作</span>
-                </div>
-
-                <section
-                    v-for="group in visibleRuleGroups"
-                    :key="group.key"
-                    class="group-list-group"
-                    :class="{ 'is-expanded': isGroupExpanded(group.key) }"
-                >
-                    <div class="group-list-parent">
-                        <button
-                            type="button"
-                            class="group-list-parent__main"
-                            @click="toggleGroupExpanded(group.key)"
-                        >
-                            <span class="group-list-parent__icon" aria-hidden="true">
-                                <el-icon>
-                                    <ArrowDown v-if="isGroupExpanded(group.key)" />
-                                    <ArrowRight v-else />
-                                </el-icon>
-                            </span>
-                            <div class="group-list-parent__copy">
-                                <div class="group-list-parent__title">
-                                    <strong>{{ group.subjectName }}</strong>
-                                    <span>科目 #{{ group.subjectId }}</span>
-                                </div>
-                                <div class="group-list-parent__meta">
-                                    <PlatformBadge
-                                        v-if="group.platformCode"
-                                        :platform="group.platformCode"
-                                    />
-                                    <el-tag v-else size="small" effect="plain">通用</el-tag>
-                                    <span>更新于 {{ formatDateTime(group.updatedAt) }}</span>
-                                </div>
-                            </div>
-                        </button>
-
-                        <div class="group-list-parent__status">
-                            <el-tag :type="groupStatusType(group.status)" size="small">
-                                {{ groupStatusLabel(group.status) }}
-                            </el-tag>
-                            <span>{{ group.platformCode ? "平台专属" : "通用规则" }}</span>
-                        </div>
-
-                        <div class="group-list-parent__summary">
-                            <span>{{ group.categoryItems.length }} 个重分类</span>
-                            <span>{{ group.rules.length }} 条规则</span>
-                        </div>
-
-                        <div class="group-list-parent__preview">
-                            <span>展开后查看该科目下的分类规则</span>
-                        </div>
-
-                        <div class="group-list-parent__actions">
-                            <el-button type="primary" link @click="openGroupDetail(group)">
-                                查看
-                            </el-button>
-                            <el-button type="primary" link @click="openGroupEditor(group)">
-                                编辑
-                            </el-button>
-                        </div>
-                    </div>
-
-                    <transition name="group-expand">
-                        <div v-show="isGroupExpanded(group.key)" class="group-list-children">
-                            <div
-                                v-for="category in group.categoryItems"
-                                :key="category.categoryId"
-                                class="group-list-child"
-                            >
-                                <button
-                                    type="button"
-                                    class="group-list-child__name"
-                                    @click="openGroupDetailByCategory(group, category.categoryId)"
-                                >
-                                    <span class="group-list-child__branch" aria-hidden="true"></span>
-                                    <div class="group-list-child__copy">
-                                        <strong>{{ category.categoryName }}</strong>
-                                        <span>排序 {{ category.sortOrder }}</span>
-                                    </div>
-                                </button>
-
-                                <div class="group-list-child__status">
-                                    <el-tag
-                                        :type="groupCategoryStatusType(category.status)"
-                                        size="small"
-                                        effect="plain"
-                                    >
-                                        {{ groupCategoryStatusLabel(category.status) }}
-                                    </el-tag>
-                                    <span>{{ category.ruleCount }} 条规则</span>
-                                </div>
-
-                                <div class="group-list-child__meta">
-                                    <span>{{ category.previewLines.length }} 条预览</span>
-                                </div>
-
-                                <div class="group-list-child__preview">
-                                    <span v-for="line in category.previewLines" :key="line">
-                                        {{ line }}
-                                    </span>
-                                </div>
-
-                                <div class="group-list-child__actions">
-                                    <el-button
-                                        type="primary"
-                                        link
-                                        @click="openGroupDetailByCategory(group, category.categoryId)"
-                                    >
-                                        查看
-                                    </el-button>
-                                    <el-button
-                                        type="primary"
-                                        link
-                                        @click="openGroupEditor(group, category.categoryId)"
-                                    >
-                                        编辑
-                                    </el-button>
-                                </div>
-                            </div>
-                        </div>
-                    </transition>
-                </section>
-
-                <el-empty
-                    v-if="!loading && !visibleRuleGroups.length"
-                    description="暂无动账重分类"
-                    :image-size="80"
+    <div class="page-container transaction-page split-rule-page">
+        <el-card shadow="never" class="search-card">
+            <div class="rule-toolbar">
+                <SearchCardIntro
+                    kicker="RULE TREE"
+                    title="资金重分类规则"
+                    tip="左侧只看科目和重分类，右侧专门维护当前重分类下的规则"
                 />
+                <div class="rule-toolbar__actions">
+                    <el-input
+                        v-model="searchText"
+                        clearable
+                        class="rule-search-input"
+                        placeholder="搜索科目、重分类或规则"
+                    >
+                        <template #prefix>
+                            <el-icon><Search /></el-icon>
+                        </template>
+                    </el-input>
+                    <el-button @click="loadData">
+                        <el-icon><Refresh /></el-icon>
+                        刷新
+                    </el-button>
+                    <el-button type="primary" :disabled="isBusy" @click="startCreateSubject">
+                        <el-icon><Plus /></el-icon>
+                        新增科目
+                    </el-button>
+                </div>
+            </div>
+
+            <div class="rule-summary">
+                共 {{ subjectNodes.length }} 个科目，{{ categories.length }} 个重分类，{{ rules.length }} 条规则
+                <span v-if="searchText.trim()">
+                    · 当前显示 {{ filteredCategoryCount }} 个重分类，{{ filteredRuleCount }} 条规则
+                </span>
             </div>
         </el-card>
 
-        <el-drawer
-            v-model="drawerVisible"
-            :title="drawerTitle"
-            size="min(1280px, 96vw)"
-            class="reclass-drawer"
-            append-to-body
-            destroy-on-close
-            :close-on-click-modal="false"
-        >
-            <div v-if="selectedGroup" class="group-drawer-panel">
-                <section class="group-summary-card">
-                    <div class="group-summary-main">
-                        <span class="detail-kicker">
-                            {{ drawerMode === "edit" ? "EDIT WORKBENCH" : "VIEW WORKBENCH" }}
-                        </span>
-                        <h3>{{ selectedGroup.subjectName }}</h3>
-                        <p class="group-summary-note">
-                            科目 #{{ selectedGroup.subjectId }} · {{ selectedGroupCategoryCount }} 个重分类 ·
-                            {{ selectedGroupRuleCount }} 条规则
-                        </p>
-                        <div class="detail-badge-row">
-                            <PlatformBadge
-                                v-if="selectedGroup.platformCode"
-                                :platform="selectedGroup.platformCode"
-                            />
-                            <el-tag v-else size="small" effect="plain">通用</el-tag>
-                            <el-tag :type="groupStatusType(selectedGroup.status)" size="small">
-                                {{ groupStatusLabel(selectedGroup.status) }}
-                            </el-tag>
-                        </div>
-                    </div>
-                    <div class="group-summary-side">
+        <div v-loading="loading" class="rule-workspace">
+            <el-card shadow="never" class="rule-tree-card">
+                <template #header>
+                    <div class="panel-header">
                         <div>
-                            <span>更新时间</span>
-                            <strong>{{ formatDateTime(selectedGroup.updatedAt) }}</strong>
+                            <span class="panel-header__title">层级</span>
+                            <span class="panel-header__meta">科目 -> 重分类</span>
                         </div>
-                        <div v-if="drawerMode === 'edit'">
-                            <span>状态</span>
-                            <el-radio-group v-model="groupStatusValue" size="small">
-                                <el-radio-button :label="1">启用</el-radio-button>
-                                <el-radio-button :label="0">停用</el-radio-button>
-                            </el-radio-group>
-                        </div>
+                        <span class="panel-header__count">
+                            {{ filteredSubjectNodes.length }} 个科目
+                        </span>
                     </div>
-                </section>
+                </template>
 
-                <section class="detail-card category-workbench">
-                    <div class="workbench-head">
-                        <div class="workbench-head__copy">
-                            <span class="detail-kicker">CATEGORY WORKSPACE</span>
-                            <div class="detail-card-header">
-                                <span>重分类规则</span>
-                                <span>{{ visibleCategoryPanels.length }} 类 · {{ visibleRuleTotal }} 条</span>
+                <div class="rule-tree">
+                    <template v-if="filteredSubjectNodes.length">
+                        <section
+                            v-for="subject in filteredSubjectNodes"
+                            :key="subject.key"
+                            class="tree-group"
+                        >
+                            <div class="tree-row tree-row--subject">
+                                <button
+                                    type="button"
+                                    class="tree-row__main"
+                                    @click="toggleExpandedSubject(subject.key)"
+                                >
+                                    <span class="tree-row__icon">
+                                        <el-icon v-if="subject.categories.length">
+                                            <ArrowDown
+                                                v-if="shouldExpandSubject(subject.key)"
+                                            />
+                                            <ArrowRight v-else />
+                                        </el-icon>
+                                    </span>
+                                    <span class="tree-row__copy">
+                                        <strong>{{ subject.subject.name }}</strong>
+                                        <small>
+                                            {{ subject.categories.length }} 个重分类 ·
+                                            {{ subject.ruleCount }} 条规则
+                                        </small>
+                                    </span>
+                                </button>
+
+                                <el-dropdown
+                                    trigger="click"
+                                    @command="
+                                        (command) =>
+                                            handleSubjectCommand(subject, String(command))
+                                    "
+                                >
+                                    <button
+                                        type="button"
+                                        class="tree-row__more"
+                                        :disabled="isBusy"
+                                    >
+                                        ···
+                                    </button>
+                                    <template #dropdown>
+                                        <el-dropdown-menu>
+                                            <el-dropdown-item command="create-category">
+                                                新增重分类
+                                            </el-dropdown-item>
+                                            <el-dropdown-item command="rename">
+                                                改名
+                                            </el-dropdown-item>
+                                            <el-dropdown-item command="delete">
+                                                删除
+                                            </el-dropdown-item>
+                                        </el-dropdown-menu>
+                                    </template>
+                                </el-dropdown>
                             </div>
+
+                            <div
+                                v-if="shouldExpandSubject(subject.key)"
+                                class="tree-group__children"
+                            >
+                                <div
+                                    v-for="category in subject.categories"
+                                    :key="category.key"
+                                    class="tree-row tree-row--category"
+                                    :class="{
+                                        'is-active': activeCategoryKey === category.key,
+                                    }"
+                                >
+                                    <button
+                                        type="button"
+                                        class="tree-row__main tree-row__main--category"
+                                        @click="selectCategory(category.key)"
+                                    >
+                                        <span class="tree-row__copy">
+                                            <strong>{{ category.category.name }}</strong>
+                                            <small>{{ categoryRuleText(category) }}</small>
+                                        </span>
+                                    </button>
+
+                                    <el-dropdown
+                                        trigger="click"
+                                        @command="
+                                            (command) =>
+                                                handleCategoryCommand(
+                                                    subject,
+                                                    category,
+                                                    String(command),
+                                                )
+                                        "
+                                    >
+                                        <button
+                                            type="button"
+                                            class="tree-row__more"
+                                            :disabled="isBusy"
+                                        >
+                                            ···
+                                        </button>
+                                        <template #dropdown>
+                                            <el-dropdown-menu>
+                                                <el-dropdown-item command="create-rule">
+                                                    新增规则
+                                                </el-dropdown-item>
+                                                <el-dropdown-item command="rename">
+                                                    改名
+                                                </el-dropdown-item>
+                                                <el-dropdown-item command="delete">
+                                                    删除
+                                                </el-dropdown-item>
+                                            </el-dropdown-menu>
+                                        </template>
+                                    </el-dropdown>
+                                </div>
+
+                                <div
+                                    v-if="!subject.categories.length"
+                                    class="tree-empty-row"
+                                >
+                                    暂无重分类
+                                </div>
+                            </div>
+                        </section>
+                    </template>
+
+                    <el-empty
+                        v-else
+                        :description="
+                            searchText.trim() ? '没有匹配到层级节点' : '暂无资金重分类规则'
+                        "
+                        :image-size="80"
+                    />
+                </div>
+            </el-card>
+
+            <el-card shadow="never" class="rule-detail-card">
+                <template #header>
+                    <div v-if="activeCategoryContext" class="detail-header">
+                        <div class="detail-header__copy">
+                            <span class="detail-header__eyebrow">
+                                {{ activeCategoryContext.subject.subject.name }}
+                            </span>
+                            <strong>{{ activeCategoryContext.category.category.name }}</strong>
+                            <small>{{ activeCategorySummary }}</small>
                         </div>
-                        <div class="workbench-head__tools">
-                            <el-input
-                                v-model="drawerSearchText"
-                                clearable
-                                class="drawer-search-input"
-                                placeholder="搜索重分类、场景、备注或表头"
-                            >
-                                <template #prefix>
-                                    <el-icon><Search /></el-icon>
-                                </template>
-                            </el-input>
+                        <div class="detail-header__actions">
                             <el-button
-                                v-if="drawerMode === 'edit'"
-                                class="add-keyword-btn"
                                 type="primary"
-                                @click="addRuleToActiveCategory"
+                                :disabled="isBusy"
+                                @click="
+                                    startCreateRule(
+                                        activeCategoryContext.subject,
+                                        activeCategoryContext.category,
+                                    )
+                                "
                             >
-                                <el-icon><Plus /></el-icon>
-                                添加规则
+                                新增规则
                             </el-button>
                         </div>
                     </div>
 
-                    <div v-if="visibleCategoryPanels.length" class="category-editor-layout">
-                        <aside class="category-sidebar" aria-label="重分类列表">
-                            <div class="category-sidebar__header">
-                                <span>重分类层级</span>
-                                <small>{{ visibleCategoryPanels.length }} 个节点</small>
-                            </div>
-                            <button
-                                v-for="panel in visibleCategoryPanels"
-                                :key="panel.categoryId"
-                                type="button"
-                                class="category-tab"
-                                :class="{ 'is-active': activeCategoryPanel?.categoryId === panel.categoryId }"
-                                @click="setActiveCategory(panel.categoryId)"
-                            >
-                                <div class="category-tab__copy">
-                                    <div class="category-tab__title">
-                                        <span>{{ panel.categoryName }}</span>
-                                        <el-tag
-                                            :type="categoryPanelStatusType(panel)"
-                                            size="small"
-                                            effect="plain"
-                                        >
-                                            {{ categoryPanelStatusLabel(panel) }}
-                                        </el-tag>
-                                    </div>
-                                    <div class="category-tab__meta">
-                                        <small>{{ categoryPanelRuleCount(panel) }} 条规则</small>
-                                        <small>排序 {{ panel.sortOrder }}</small>
-                                    </div>
-                                </div>
-                            </button>
-                        </aside>
+                    <div v-else class="panel-header">
+                        <div>
+                            <span class="panel-header__title">规则</span>
+                            <span class="panel-header__meta">请选择左侧重分类</span>
+                        </div>
+                    </div>
+                </template>
 
-                        <section
-                            v-if="activeCategoryPanel"
-                            class="keyword-workspace"
-                            aria-label="当前重分类规则"
-                        >
-                            <div class="keyword-workspace__head">
-                                <div class="keyword-workspace__copy">
-                                    <span>当前重分类</span>
-                                    <strong>{{ activeCategoryPanel.categoryName }}</strong>
-                                    <p>
-                                        {{
-                                            activeRuleItems.length
-                                                ? `${activeRuleItems.length} 条规则，重点查看触发条件与取值方式`
-                                                : "当前分类还没有规则，可以直接新增配置"
-                                        }}
-                                    </p>
-                                </div>
-                                <div class="keyword-workspace__meta">
-                                    <el-tag
-                                        :type="categoryPanelStatusType(activeCategoryPanel)"
-                                        size="small"
-                                        effect="plain"
-                                    >
-                                        {{ categoryPanelStatusLabel(activeCategoryPanel) }}
-                                    </el-tag>
-                                    <span>{{ activeRuleItems.length }} 条规则</span>
-                                </div>
-                            </div>
-
-                            <div v-if="activeRuleItems.length" class="rule-card-list">
-                                <article
-                                    v-for="(item, index) in activeRuleItems"
-                                    :key="item.key"
-                                    class="rule-card"
-                                    :class="`rule-card--${drawerMode}`"
-                                >
-                                    <div class="rule-card__head">
-                                        <div class="rule-card__title">
-                                            <span class="rule-card__index">规则 {{ index + 1 }}</span>
-                                            <strong>{{ ruleSequenceText(item) }}</strong>
-                                        </div>
-                                        <div class="rule-card__badges">
-                                            <el-tag size="small" effect="plain">
-                                                {{ item.amountField }}
-                                            </el-tag>
-                                            <el-tag size="small" effect="plain">
-                                                {{ resultDirectionLabel(item.resultDirection) }}
-                                            </el-tag>
-                                        </div>
-                                    </div>
-
-                                    <div v-if="drawerMode === 'detail'" class="rule-detail-grid">
-                                        <div class="rule-detail-block">
-                                            <span>出入账方向</span>
-                                            <strong>{{ item.transactionDirection }}</strong>
-                                        </div>
-                                        <div class="rule-detail-block">
-                                            <span>动账场景</span>
-                                            <strong>{{ sceneConditionText(item) }}</strong>
-                                        </div>
-                                        <div class="rule-detail-block">
-                                            <span>额外备注条件</span>
-                                            <strong>{{ remarkConditionText(item) }}</strong>
-                                        </div>
-                                        <div class="rule-detail-block">
-                                            <span>规则表头</span>
-                                            <strong>{{ item.amountField }}</strong>
-                                        </div>
-                                        <div class="rule-detail-block">
-                                            <span>取值方式</span>
-                                            <strong>{{ resultDirectionLabel(item.resultDirection) }}</strong>
-                                        </div>
-                                    </div>
-
-                                    <div v-else class="rule-editor-grid">
-                                        <label class="rule-editor-field">
-                                            <span>出入账方向</span>
-                                            <el-select
-                                                v-model="item.transactionDirection"
-                                                placeholder="方向"
-                                                style="width: 100%"
-                                            >
-                                                <el-option
-                                                    v-for="option in transactionDirectionOptions"
-                                                    :key="option.value"
-                                                    :label="option.label"
-                                                    :value="option.value"
-                                                />
-                                            </el-select>
-                                        </label>
-
-                                        <label class="rule-editor-field rule-editor-field--wide">
-                                            <span>动账场景</span>
-                                            <div
-                                                class="condition-stack"
-                                                :class="{
-                                                    'condition-stack--single':
-                                                        item.transactionSceneMode !== 'specific',
-                                                }"
-                                            >
-                                                <el-select
-                                                    v-model="item.transactionSceneMode"
-                                                    placeholder="场景"
-                                                    style="width: 100%"
-                                                    @change="handleSceneModeChange(item)"
-                                                >
-                                                    <el-option
-                                                        v-for="option in transactionSceneModeOptions"
-                                                        :key="option.value"
-                                                        :label="option.label"
-                                                        :value="option.value"
-                                                    />
-                                                </el-select>
-                                                <el-input
-                                                    v-if="item.transactionSceneMode === 'specific'"
-                                                    v-model="item.transactionSceneValue"
-                                                    maxlength="200"
-                                                    clearable
-                                                    placeholder="输入动账场景"
-                                                />
-                                            </div>
-                                        </label>
-
-                                        <label class="rule-editor-field rule-editor-field--wide">
-                                            <span>额外备注条件</span>
-                                            <div class="remark-condition-stack">
-                                                <div
-                                                    class="condition-stack"
-                                                    :class="{ 'condition-stack--single': item.matchType === 'none' }"
-                                                >
-                                                    <el-select
-                                                        v-model="item.matchType"
-                                                        placeholder="备注条件"
-                                                        style="width: 100%"
-                                                        @change="handleMatchTypeChange(item)"
-                                                    >
-                                                        <el-option
-                                                            v-for="option in matchTypeOptions"
-                                                            :key="option.value"
-                                                            :label="option.label"
-                                                            :value="option.value"
-                                                        />
-                                                    </el-select>
-                                                    <el-input
-                                                        v-if="item.matchType !== 'none'"
-                                                        v-model="item.remarkPattern"
-                                                        maxlength="1000"
-                                                        clearable
-                                                        :placeholder="remarkPatternPlaceholder(item.matchType)"
-                                                    />
-                                                </div>
-                                                <el-input
-                                                    v-model="item.remarkExcludePattern"
-                                                    maxlength="1000"
-                                                    clearable
-                                                    placeholder="额外不包含内容，多个用逗号分隔"
-                                                />
-                                            </div>
-                                        </label>
-
-                                        <label class="rule-editor-field">
-                                            <span>规则表头</span>
-                                            <el-input
-                                                v-model="item.amountField"
-                                                maxlength="100"
-                                                clearable
-                                                placeholder="输入表头"
-                                            />
-                                        </label>
-
-                                        <label class="rule-editor-field">
-                                            <span>取值方式</span>
-                                            <el-select
-                                                v-model="item.resultDirection"
-                                                placeholder="取值"
-                                                style="width: 100%"
-                                            >
-                                                <el-option
-                                                    v-for="option in resultDirectionSelectOptions"
-                                                    :key="option.value"
-                                                    :label="option.label"
-                                                    :value="option.value"
-                                                />
-                                            </el-select>
-                                        </label>
-
-                                        <el-button
-                                            class="rule-delete-btn"
-                                            circle
-                                            text
-                                            type="danger"
-                                            aria-label="删除规则"
-                                            @click="removeRule(activeCategoryPanel.categoryId, item.key)"
-                                        >
-                                            <el-icon><Close /></el-icon>
-                                        </el-button>
-                                    </div>
-                                </article>
-                            </div>
-
-                            <el-empty
-                                v-else
-                                :description="
-                                    drawerMode === 'edit'
-                                        ? '当前重分类还没有规则，点击添加规则开始配置'
-                                        : '当前重分类暂无规则'
-                                "
-                                :image-size="80"
-                            />
-                        </section>
+                <div v-if="activeCategoryContext" class="rule-list">
+                    <div class="rule-list__head">
+                        <span>平台</span>
+                        <span>规则说明</span>
+                        <span>结果</span>
+                        <span>操作</span>
                     </div>
 
+                    <div
+                        v-if="isCreatingRuleForActiveCategory"
+                        class="rule-list__row rule-list__row--editing"
+                    >
+                        <div class="rule-list__platform">
+                            {{ platformLabel(editingDraft.platform_code) }}
+                        </div>
+                        <div class="rule-list__condition">
+                            <div class="rule-editor">
+                                <span>方向</span>
+                                <el-select
+                                    v-model="editingDraft.transaction_direction"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--xs"
+                                >
+                                    <el-option
+                                        v-for="item in directionOptions"
+                                        :key="item.value"
+                                        :label="item.label"
+                                        :value="item.value"
+                                    />
+                                </el-select>
+
+                                <span>场景</span>
+                                <el-input
+                                    v-model="editingDraft.transaction_scene"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--sm"
+                                    placeholder="可留空"
+                                />
+
+                                <span>备注条件</span>
+                                <el-select
+                                    v-model="editingDraft.match_type"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--xs"
+                                >
+                                    <el-option
+                                        v-for="item in ruleMatchOptions"
+                                        :key="item.value"
+                                        :label="item.label"
+                                        :value="item.value"
+                                    />
+                                </el-select>
+                                <el-input
+                                    v-model="editingDraft.remark_pattern"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--sm"
+                                    placeholder="输入备注内容"
+                                />
+                            </div>
+                        </div>
+                        <div class="rule-list__result">
+                            <el-select
+                                v-model="editingDraft.result_direction"
+                                size="small"
+                                class="rule-editor__field rule-editor__field--sm"
+                            >
+                                <el-option
+                                    v-for="item in resultDirectionOptions"
+                                    :key="item.value"
+                                    :label="item.label"
+                                    :value="item.value"
+                                />
+                            </el-select>
+                        </div>
+                        <div class="rule-list__actions">
+                            <el-button type="primary" link @click="saveEditingRow">
+                                保存
+                            </el-button>
+                            <el-button link @click="cancelEditing">取消</el-button>
+                        </div>
+                    </div>
+
+                    <template
+                        v-for="rule in activeCategoryContext.category.rules"
+                        :key="rule.id"
+                    >
+                        <div
+                            class="rule-list__row"
+                            :class="{ 'rule-list__row--editing': isEditingRule(rule) }"
+                        >
+                            <template v-if="isEditingRule(rule)">
+                                <div class="rule-list__platform">
+                                    {{ platformLabel(editingDraft.platform_code) }}
+                                </div>
+                                <div class="rule-list__condition">
+                                    <div class="rule-editor">
+                                        <span>方向</span>
+                                        <el-select
+                                            v-model="editingDraft.transaction_direction"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--xs"
+                                        >
+                                            <el-option
+                                                v-for="item in directionOptions"
+                                                :key="item.value"
+                                                :label="item.label"
+                                                :value="item.value"
+                                            />
+                                        </el-select>
+
+                                        <span>场景</span>
+                                        <el-input
+                                            v-model="editingDraft.transaction_scene"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--sm"
+                                            placeholder="可留空"
+                                        />
+
+                                        <span>备注条件</span>
+                                        <el-select
+                                            v-model="editingDraft.match_type"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--xs"
+                                        >
+                                            <el-option
+                                                v-for="item in ruleMatchOptions"
+                                                :key="item.value"
+                                                :label="item.label"
+                                                :value="item.value"
+                                            />
+                                        </el-select>
+                                        <el-input
+                                            v-model="editingDraft.remark_pattern"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--sm"
+                                            placeholder="输入备注内容"
+                                        />
+                                    </div>
+                                </div>
+                                <div class="rule-list__result">
+                                    <el-select
+                                        v-model="editingDraft.result_direction"
+                                        size="small"
+                                        class="rule-editor__field rule-editor__field--sm"
+                                    >
+                                        <el-option
+                                            v-for="item in resultDirectionOptions"
+                                            :key="item.value"
+                                            :label="item.label"
+                                            :value="item.value"
+                                        />
+                                    </el-select>
+                                </div>
+                                <div class="rule-list__actions">
+                                    <el-button type="primary" link @click="saveEditingRow">
+                                        保存
+                                    </el-button>
+                                    <el-button link @click="cancelEditing">取消</el-button>
+                                </div>
+                            </template>
+
+                            <template v-else>
+                                <div class="rule-list__platform">
+                                    {{ platformLabel(rule.platform_code) }}
+                                </div>
+                                <div class="rule-list__condition">
+                                    <div class="rule-summary-text">
+                                        <strong>{{ ruleDirectionSentence(rule) }}</strong>
+                                        <span>{{ ruleRemarkSentence(rule) }}</span>
+                                    </div>
+                                </div>
+                                <div class="rule-list__result">
+                                    {{ resultDirectionText(rule.result_direction) }}
+                                </div>
+                                <div class="rule-list__actions">
+                                    <el-button
+                                        type="primary"
+                                        link
+                                        :disabled="isBusy"
+                                        @click="startEditRule(rule)"
+                                    >
+                                        编辑
+                                    </el-button>
+                                    <el-button
+                                        type="danger"
+                                        link
+                                        :disabled="isBusy"
+                                        @click="removeRule(rule)"
+                                    >
+                                        删除
+                                    </el-button>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
                     <el-empty
-                        v-else
-                        description="没有匹配的重分类或规则"
+                        v-if="
+                            !activeCategoryContext.category.rules.length &&
+                            !isCreatingRuleForActiveCategory
+                        "
+                        description="当前重分类暂无规则"
                         :image-size="80"
                     />
-                </section>
+                </div>
+
+                <div v-else class="rule-detail-empty">
+                    <el-empty
+                        description="请先在左侧选择一个重分类"
+                        :image-size="80"
+                    />
+                </div>
+            </el-card>
+        </div>
+
+        <el-dialog
+            v-model="nodeDialogVisible"
+            :title="nodeDialogTitle"
+            width="420px"
+            destroy-on-close
+        >
+            <div class="node-dialog">
+                <el-input
+                    v-model="nodeEditingDraft.name"
+                    maxlength="100"
+                    :placeholder="nodeDialogPlaceholder"
+                    @keyup.enter="saveNodeEditor"
+                />
+                <p class="node-dialog__tip">{{ nodeDialogTip }}</p>
             </div>
 
-            <div v-if="drawerMode === 'edit'" class="drawer-footer">
-                <el-button @click="drawerVisible = false">取消</el-button>
-                <el-button type="primary" :loading="submitting" @click="handleSubmitGroup">
-                    确定
-                </el-button>
-            </div>
-        </el-drawer>
+            <template #footer>
+                <el-button @click="nodeDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveNodeEditor">保存</el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
 <script setup lang="ts">
 defineOptions({ name: "TransactionRules" });
 
-import { computed, nextTick, onMounted, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { computed, onMounted, ref, watch } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import { usePageRefresh } from "@/composables/pageRefresh";
+import { getPlatformList, type Platform } from "@/api/platform";
 import {
+    createTransactionCategory,
     createTransactionRule,
+    createTransactionSubject,
+    deleteTransactionCategory,
     deleteTransactionRule,
+    deleteTransactionSubject,
     listTransactionCategories,
     listTransactionRules,
     listTransactionSubjects,
+    updateTransactionCategory,
+    updateTransactionRule,
+    updateTransactionSubject,
     type TransactionCategory,
     type TransactionRule,
     type TransactionSubject,
-    updateTransactionRule,
 } from "@/api/transactionAccounting";
-import { getPlatformList, type Platform } from "@/api/platform";
-import PlatformBadge from "@/components/PlatformBadge.vue";
-import { usePageRefresh } from "@/composables/pageRefresh";
-import { formatDateTime } from "@/utils/format";
+import { directionOptions, resultDirectionOptions } from "./common";
 import { getFallbackPlatforms } from "@/utils/platform";
 
-type RuleGroupStatus = "enabled" | "disabled" | "partial";
-type DrawerMode = "detail" | "edit";
+type RuleMatchType = "none" | "exact" | "contains" | "not_contains";
 
-interface RuleGroup {
+type SubjectNode = {
     key: string;
-    subjectId: number;
-    subjectName: string;
-    platformCode: string | null;
-    updatedAt: string;
-    status: RuleGroupStatus;
-    rules: TransactionRule[];
-    categoryItems: GroupCategorySummary[];
-}
-
-interface GroupCategorySummary {
-    categoryId: number;
-    categoryName: string;
-    sortOrder: number;
-    status: RuleGroupStatus;
+    subject: TransactionSubject;
+    categories: CategoryNode[];
     ruleCount: number;
-    previewLines: string[];
-    searchText: string;
-}
+};
 
-type RuleSceneMode = "any" | "specific" | "blank";
+type CategoryNode = {
+    key: string;
+    category: TransactionCategory;
+    rules: TransactionRule[];
+};
 
-interface RuleItem {
-    key: number;
-    ruleId?: number;
-    matchType: TransactionRule["match_type"];
-    remarkPattern: string;
-    remarkExcludePattern: string;
-    transactionDirection: string;
-    transactionSceneMode: RuleSceneMode;
-    transactionSceneValue: string;
-    amountField: string;
-    resultDirection: TransactionRule["result_direction"];
-    sourceRule?: TransactionRule;
-    deleted?: boolean;
-}
+type CategoryContext = {
+    subject: SubjectNode;
+    category: CategoryNode;
+};
 
-interface CategoryPanel {
-    categoryId: number;
-    categoryName: string;
-    sortOrder: number;
-    rules: RuleItem[];
-    templateRule?: TransactionRule;
-}
+type SubjectDraft = {
+    name: string;
+};
+
+type CategoryDraft = {
+    name: string;
+};
+
+type RuleDraft = {
+    subject_id: number;
+    category_id: number;
+    platform_code: string | null;
+    transaction_direction: string;
+    transaction_scene: string;
+    match_type: RuleMatchType;
+    remark_pattern: string;
+    result_direction: TransactionRule["result_direction"];
+    priority: number;
+    status: number;
+    remark_field: string;
+    direction_field: string;
+    amount_field: string;
+    remark_exclude_pattern: string;
+};
+
+type RuleEditingState =
+    | {
+          kind: "rule";
+          mode: "create";
+          parentKey: string;
+          draft: RuleDraft;
+      }
+    | {
+          kind: "rule";
+          mode: "edit";
+          rowKey: string;
+          ruleId: number;
+          draft: RuleDraft;
+      };
+
+type NodeEditorState =
+    | {
+          kind: "subject";
+          mode: "create";
+          draft: SubjectDraft;
+      }
+    | {
+          kind: "subject";
+          mode: "edit";
+          subjectId: number;
+          draft: SubjectDraft;
+      }
+    | {
+          kind: "category";
+          mode: "create";
+          parentSubjectId: number;
+          draft: CategoryDraft;
+      }
+    | {
+          kind: "category";
+          mode: "edit";
+          categoryId: number;
+          draft: CategoryDraft;
+      };
+
+const ruleMatchOptions: Array<{ label: string; value: RuleMatchType }> = [
+    { label: "等于", value: "exact" },
+    { label: "包含", value: "contains" },
+    { label: "不包含", value: "not_contains" },
+    { label: "不限", value: "none" },
+];
 
 const loading = ref(false);
-const submitting = ref(false);
+const searchText = ref("");
 const subjects = ref<TransactionSubject[]>([]);
 const categories = ref<TransactionCategory[]>([]);
 const rules = ref<TransactionRule[]>([]);
 const platforms = ref<Platform[]>(getFallbackPlatforms());
-const drawerVisible = ref(false);
-const drawerMode = ref<DrawerMode>("detail");
-const selectedGroupKey = ref("");
-const activeCategoryId = ref<number | null>(null);
-const drawerSearchText = ref("");
-const listSearchText = ref("");
-const categoryForms = ref<CategoryPanel[]>([]);
-const groupStatusValue = ref<0 | 1>(1);
-const keySeed = ref(1);
-const expandedGroupKeys = ref<string[]>([]);
+const editingState = ref<RuleEditingState | null>(null);
+const nodeEditor = ref<NodeEditorState | null>(null);
+const expandedSubjectKeys = ref<string[]>([]);
+const expansionInitialized = ref(false);
+const activeCategoryKey = ref<string | null>(null);
 
-const transactionDirectionOptions = [
-    { label: "入账", value: "入账" },
-    { label: "出账", value: "出账" },
-];
-
-const matchTypeOptions: Array<{
-    label: string;
-    value: TransactionRule["match_type"];
-}> = [
-    { label: "不限备注", value: "none" },
-    { label: "备注等于", value: "exact" },
-    { label: "备注包含", value: "contains" },
-    { label: "备注不包含", value: "not_contains" },
-];
-
-const transactionSceneModeOptions: Array<{
-    label: string;
-    value: RuleSceneMode;
-}> = [
-    { label: "不限场景", value: "any" },
-    { label: "指定场景", value: "specific" },
-    { label: "空白场景", value: "blank" },
-];
-
-const resultDirectionSelectOptions: Array<{
-    label: string;
-    value: TransactionRule["result_direction"];
-}> = [
-    { label: "原值", value: "original" },
-    { label: "取正", value: "positive" },
-    { label: "取负", value: "negative" },
-    { label: "按方向", value: "directional" },
-];
-
-const ruleGroups = computed<RuleGroup[]>(() => {
-    const groupMap = new Map<string, RuleGroup>();
-
-    rules.value.forEach((rule) => {
-        const platformCode = rule.platform_code || null;
-        const key = makeGroupKey(rule.subject_id, platformCode);
-        const current = groupMap.get(key);
-        if (current) {
-            current.rules.push(rule);
-            current.updatedAt = laterDate(current.updatedAt, rule.updated_at);
-            return;
+const editingDraft = computed<any>(() => editingState.value?.draft ?? {});
+const nodeEditingDraft = computed<any>(() => nodeEditor.value?.draft ?? {});
+const forceExpandAll = computed(() => Boolean(searchText.value.trim()));
+const isBusy = computed(
+    () => Boolean(editingState.value) || Boolean(nodeEditor.value),
+);
+const nodeDialogVisible = computed({
+    get: () => Boolean(nodeEditor.value),
+    set: (visible: boolean) => {
+        if (!visible) {
+            nodeEditor.value = null;
         }
+    },
+});
 
-        groupMap.set(key, {
-            key,
-            subjectId: rule.subject_id,
-            subjectName: ruleSubjectName(rule),
-            platformCode,
-            updatedAt: rule.updated_at,
-            status: "disabled",
-            rules: [rule],
-            categoryItems: [],
+const subjectNodes = computed<SubjectNode[]>(() => {
+    const ruleMap = new Map<number, TransactionRule[]>();
+    rules.value
+        .slice()
+        .sort((left, right) => left.priority - right.priority || left.id - right.id)
+        .forEach((rule) => {
+            const bucket = ruleMap.get(rule.category_id) || [];
+            bucket.push(rule);
+            ruleMap.set(rule.category_id, bucket);
         });
-    });
 
-    return Array.from(groupMap.values())
-        .map((group) => {
-            const categoryItems = buildGroupCategorySummaries(group.subjectId, group.rules);
-            return {
-                ...group,
-                status: resolveGroupStatus(group.rules),
-                categoryItems,
-            };
-        })
+    const categoryMap = new Map<number, CategoryNode[]>();
+    categories.value
+        .slice()
         .sort(
-            (a, b) =>
-                subjectSortOrder(a.subjectId) - subjectSortOrder(b.subjectId) ||
-                a.subjectName.localeCompare(b.subjectName, "zh-Hans-CN") ||
-                platformLabel(a.platformCode).localeCompare(platformLabel(b.platformCode), "zh-Hans-CN"),
-        );
+            (left, right) =>
+                Number(left.sort_order || 0) - Number(right.sort_order || 0) ||
+                left.id - right.id,
+        )
+        .forEach((category) => {
+            const bucket = categoryMap.get(category.subject_id) || [];
+            bucket.push({
+                key: categoryKey(category.id),
+                category,
+                rules: (ruleMap.get(category.id) || []).filter(
+                    (rule) => rule.subject_id === category.subject_id,
+                ),
+            });
+            categoryMap.set(category.subject_id, bucket);
+        });
+
+    return subjects.value
+        .slice()
+        .sort(
+            (left, right) =>
+                Number(left.sort_order || 0) - Number(right.sort_order || 0) ||
+                left.id - right.id,
+        )
+        .map((subject) => {
+            const subjectCategories = categoryMap.get(subject.id) || [];
+            return {
+                key: subjectKey(subject.id),
+                subject,
+                categories: subjectCategories,
+                ruleCount: subjectCategories.reduce(
+                    (sum, item) => sum + item.rules.length,
+                    0,
+                ),
+            };
+        });
 });
 
-const visibleRuleGroups = computed<RuleGroup[]>(() => {
-    const query = listSearchText.value.trim().toLowerCase();
-    if (!query) return ruleGroups.value;
-
-    return ruleGroups.value
-        .map((group) => {
-            const groupSearchText = [
-                group.subjectName,
-                String(group.subjectId),
-                platformLabel(group.platformCode),
-                groupStatusLabel(group.status),
-            ]
-                .join(" ")
-                .toLowerCase();
-            const matchedByGroup = groupSearchText.includes(query);
-            const categoryItems = matchedByGroup
-                ? group.categoryItems
-                : group.categoryItems.filter((item) => item.searchText.includes(query));
-            return { ...group, categoryItems };
-        })
-        .filter((group) => group.categoryItems.length);
+const filteredSubjectNodes = computed<SubjectNode[]>(() => {
+    const keyword = normalizeKeyword(searchText.value);
+    if (!keyword) return subjectNodes.value;
+    return subjectNodes.value
+        .map((subject) => filterSubjectNode(subject, keyword))
+        .filter((subject): subject is SubjectNode => Boolean(subject));
 });
 
-const totalCategoryCount = computed(() =>
-    ruleGroups.value.reduce((total, group) => total + group.categoryItems.length, 0),
+const categoryContexts = computed(() => flattenCategoryContexts(subjectNodes.value));
+const filteredCategoryContexts = computed(() =>
+    flattenCategoryContexts(filteredSubjectNodes.value),
 );
-const enabledRuleCount = computed(() => rules.value.filter((rule) => rule.status === 1).length);
-const selectedGroupRuleCount = computed(() =>
-    selectedGroup.value ? selectedGroup.value.rules.length : 0,
-);
-const selectedGroupCategoryCount = computed(() =>
-    selectedGroup.value ? selectedGroup.value.categoryItems.length : 0,
-);
-
-const selectedGroup = computed(() =>
-    ruleGroups.value.find((group) => group.key === selectedGroupKey.value) || null,
+const filteredCategoryCount = computed(() => filteredCategoryContexts.value.length);
+const filteredRuleCount = computed(() =>
+    filteredCategoryContexts.value.reduce(
+        (sum, item) => sum + item.category.rules.length,
+        0,
+    ),
 );
 
-const drawerTitle = computed(() => {
-    const base = drawerMode.value === "edit" ? "编辑动账重分类" : "动账重分类详情";
-    return selectedGroup.value ? `${base} · ${selectedGroup.value.subjectName}` : base;
-});
-
-const drawerCategoryPanels = computed<CategoryPanel[]>(() => {
-    const group = selectedGroup.value;
-    if (!group) return [];
-    if (drawerMode.value === "edit") {
-        return categoryForms.value;
-    }
-    return buildCategoryPanels(group, false);
-});
-
-const visibleCategoryPanels = computed<CategoryPanel[]>(() => {
-    const query = drawerSearchText.value.trim().toLowerCase();
-    const panels = drawerCategoryPanels.value
-        .map((panel) => ({
-            ...panel,
-            rules: activeRules(panel),
-        }))
-        .filter((panel) => drawerMode.value === "edit" || panel.rules.length);
-
-    if (!query) return panels;
-
-    return panels
-        .map((panel) => {
-            const categoryMatched = panel.categoryName.toLowerCase().includes(query);
-            const matchedRules = categoryMatched
-                ? panel.rules
-                : panel.rules.filter((item) => buildRuleSearchText(item).includes(query));
-            return { ...panel, rules: matchedRules };
-        })
-        .filter((panel) => panel.rules.length || panel.categoryName.toLowerCase().includes(query));
-});
-
-const activeCategoryPanel = computed(() => {
-    if (!visibleCategoryPanels.value.length) return null;
+const activeCategoryContext = computed<CategoryContext | null>(() => {
+    if (!filteredCategoryContexts.value.length) return null;
     return (
-        visibleCategoryPanels.value.find((panel) => panel.categoryId === activeCategoryId.value) ||
-        visibleCategoryPanels.value[0]
+        filteredCategoryContexts.value.find(
+            (item) => item.category.key === activeCategoryKey.value,
+        ) || filteredCategoryContexts.value[0]
     );
 });
 
-const activeRuleItems = computed(() => activeCategoryPanel.value?.rules || []);
-const visibleRuleTotal = computed(() =>
-    visibleCategoryPanels.value.reduce((total, panel) => total + panel.rules.length, 0),
+const activeCategoryFullContext = computed<CategoryContext | null>(() => {
+    const categoryId = activeCategoryContext.value?.category.category.id;
+    if (!categoryId) return null;
+    return (
+        categoryContexts.value.find(
+            (item) => item.category.category.id === categoryId,
+        ) || null
+    );
+});
+
+const activeCategorySummary = computed(() => {
+    if (!activeCategoryContext.value) return "";
+    const visibleCount = activeCategoryContext.value.category.rules.length;
+    const totalCount = activeCategoryFullContext.value?.category.rules.length ?? visibleCount;
+    return totalCount === visibleCount
+        ? `${totalCount} 条规则`
+        : `显示 ${visibleCount} / 共 ${totalCount} 条规则`;
+});
+
+const isCreatingRuleForActiveCategory = computed(
+    () =>
+        editingState.value?.kind === "rule" &&
+        editingState.value.mode === "create" &&
+        editingState.value.parentKey === activeCategoryContext.value?.category.key,
 );
 
-async function loadData() {
+const nodeDialogTitle = computed(() => {
+    if (!nodeEditor.value) return "";
+    if (nodeEditor.value.kind === "subject") {
+        return nodeEditor.value.mode === "create" ? "新增科目" : "修改科目名称";
+    }
+    return nodeEditor.value.mode === "create" ? "新增重分类" : "修改重分类名称";
+});
+
+const nodeDialogPlaceholder = computed(() => {
+    if (!nodeEditor.value) return "";
+    return nodeEditor.value.kind === "subject" ? "输入科目名称" : "输入重分类名称";
+});
+
+const nodeDialogTip = computed(() => {
+    if (!nodeEditor.value) return "";
+    if (nodeEditor.value.kind === "subject") {
+        return nodeEditor.value.mode === "create"
+            ? "新建后可以继续添加重分类和规则。"
+            : "这里只能修改科目名称。";
+    }
+    return nodeEditor.value.mode === "create"
+        ? "新重分类会挂在当前科目下。"
+        : "这里只能修改重分类名称。";
+});
+
+watch(
+    filteredCategoryContexts,
+    (contexts) => {
+        const hasSelection = contexts.some(
+            (item) => item.category.key === activeCategoryKey.value,
+        );
+        if (!hasSelection) {
+            activeCategoryKey.value = contexts[0]?.category.key ?? null;
+        }
+    },
+    { immediate: true },
+);
+
+function subjectKey(subjectId: number) {
+    return `subject:${subjectId}`;
+}
+
+function categoryKey(categoryId: number) {
+    return `category:${categoryId}`;
+}
+
+function ruleKey(ruleId: number) {
+    return `rule:${ruleId}`;
+}
+
+function flattenCategoryContexts(items: SubjectNode[]) {
+    return items.flatMap((subject) =>
+        subject.categories.map((category) => ({ subject, category })),
+    );
+}
+
+function normalizeKeyword(value: string | null | undefined) {
+    return String(value || "").trim().toLowerCase();
+}
+
+function matchesKeyword(keyword: string, ...values: Array<string | null | undefined>) {
+    return values.some((value) => normalizeKeyword(value).includes(keyword));
+}
+
+function filterSubjectNode(subject: SubjectNode, keyword: string): SubjectNode | null {
+    const matchedCategories = subject.categories
+        .map((category) => filterCategoryNode(category, keyword))
+        .filter((category): category is CategoryNode => Boolean(category));
+    if (
+        matchesKeyword(
+            keyword,
+            subject.subject.name,
+            subject.subject.cash_flow_item_name,
+        )
+    ) {
+        return subject;
+    }
+    if (!matchedCategories.length) return null;
+    return {
+        ...subject,
+        categories: matchedCategories,
+        ruleCount: matchedCategories.reduce(
+            (sum, item) => sum + item.rules.length,
+            0,
+        ),
+    };
+}
+
+function filterCategoryNode(category: CategoryNode, keyword: string): CategoryNode | null {
+    const matchedRules = category.rules.filter((rule) =>
+        matchesKeyword(
+            keyword,
+            category.category.name,
+            rule.transaction_direction,
+            rule.transaction_scene,
+            rule.remark_pattern,
+            platformLabel(rule.platform_code),
+            resultDirectionText(rule.result_direction),
+        ),
+    );
+    if (matchesKeyword(keyword, category.category.name)) {
+        return category;
+    }
+    if (!matchedRules.length) return null;
+    return {
+        ...category,
+        rules: matchedRules,
+    };
+}
+
+function shouldExpandSubject(key: string) {
+    return forceExpandAll.value || expandedSubjectKeys.value.includes(key);
+}
+
+function toggleExpandedSubject(key: string) {
+    expandedSubjectKeys.value = expandedSubjectKeys.value.includes(key)
+        ? expandedSubjectKeys.value.filter((item) => item !== key)
+        : [...expandedSubjectKeys.value, key];
+}
+
+function selectCategory(key: string) {
+    activeCategoryKey.value = key;
+}
+
+function categoryRuleText(category: CategoryNode) {
+    const total = categoryContexts.value.find(
+        (item) => item.category.category.id === category.category.id,
+    )?.category.rules.length;
+    if (!total || total === category.rules.length) {
+        return `${category.rules.length} 条规则`;
+    }
+    return `${category.rules.length} / ${total} 条规则`;
+}
+
+function handleSubjectCommand(subject: SubjectNode, command: string) {
+    if (command === "create-category") {
+        startCreateCategory(subject);
+        return;
+    }
+    if (command === "rename") {
+        startEditSubject(subject);
+        return;
+    }
+    if (command === "delete") {
+        void removeSubject(subject);
+    }
+}
+
+function handleCategoryCommand(
+    subject: SubjectNode,
+    category: CategoryNode,
+    command: string,
+) {
+    if (command === "create-rule") {
+        startCreateRule(subject, category);
+        return;
+    }
+    if (command === "rename") {
+        startEditCategory(category);
+        return;
+    }
+    if (command === "delete") {
+        void removeCategory(category);
+    }
+}
+
+function platformLabel(platformCode?: string | null) {
+    if (!platformCode) return "通用";
+    return (
+        platforms.value.find((item) => item.code === platformCode)?.name ||
+        platformCode
+    );
+}
+
+function resultDirectionText(value: TransactionRule["result_direction"]) {
+    return (
+        resultDirectionOptions.find((item) => item.value === value)?.label || value
+    );
+}
+
+function ruleDirectionSentence(rule: TransactionRule) {
+    const parts = [rule.transaction_direction];
+    parts.push(rule.transaction_scene ? `场景 ${rule.transaction_scene}` : "不限场景");
+    return parts.join(" · ");
+}
+
+function ruleRemarkSentence(rule: TransactionRule) {
+    return `备注 ${ruleRemarkSummary(rule)}`;
+}
+
+function ruleRemarkSummary(rule: TransactionRule) {
+    if (rule.match_type === "none") return "不限";
+    const matchLabel =
+        ruleMatchOptions.find((item) => item.value === rule.match_type)?.label ||
+        rule.match_type;
+    return `${matchLabel} ${rule.remark_pattern || ""}`.trim();
+}
+
+function isEditingRule(rule: TransactionRule) {
+    return (
+        editingState.value?.kind === "rule" &&
+        editingState.value.mode === "edit" &&
+        editingState.value.rowKey === ruleKey(rule.id)
+    );
+}
+
+function startCreateSubject() {
+    nodeEditor.value = {
+        kind: "subject",
+        mode: "create",
+        draft: {
+            name: "",
+        },
+    };
+}
+
+function startEditSubject(subject: SubjectNode) {
+    nodeEditor.value = {
+        kind: "subject",
+        mode: "edit",
+        subjectId: subject.subject.id,
+        draft: {
+            name: subject.subject.name,
+        },
+    };
+}
+
+function startCreateCategory(subject: SubjectNode) {
+    expandedSubjectKeys.value = Array.from(
+        new Set([...expandedSubjectKeys.value, subject.key]),
+    );
+    nodeEditor.value = {
+        kind: "category",
+        mode: "create",
+        parentSubjectId: subject.subject.id,
+        draft: {
+            name: "",
+        },
+    };
+}
+
+function startEditCategory(category: CategoryNode) {
+    nodeEditor.value = {
+        kind: "category",
+        mode: "edit",
+        categoryId: category.category.id,
+        draft: {
+            name: category.category.name,
+        },
+    };
+}
+
+function startCreateRule(subject: SubjectNode, category: CategoryNode) {
+    activeCategoryKey.value = category.key;
+    expandedSubjectKeys.value = Array.from(
+        new Set([...expandedSubjectKeys.value, subject.key]),
+    );
+    editingState.value = {
+        kind: "rule",
+        mode: "create",
+        parentKey: category.key,
+        draft: {
+            subject_id: subject.subject.id,
+            category_id: category.category.id,
+            platform_code: null,
+            transaction_direction: "入账",
+            transaction_scene: "",
+            match_type: "contains",
+            remark_pattern: "",
+            result_direction: "original",
+            priority: nextRulePriority(category),
+            status: 1,
+            remark_field: "备注",
+            direction_field: "动账方向",
+            amount_field: "动账金额",
+            remark_exclude_pattern: "",
+        },
+    };
+}
+
+function startEditRule(rule: TransactionRule) {
+    editingState.value = {
+        kind: "rule",
+        mode: "edit",
+        rowKey: ruleKey(rule.id),
+        ruleId: rule.id,
+        draft: {
+            subject_id: rule.subject_id,
+            category_id: rule.category_id,
+            platform_code: rule.platform_code ?? null,
+            transaction_direction: rule.transaction_direction,
+            transaction_scene: rule.transaction_scene || "",
+            match_type: rule.match_type as RuleMatchType,
+            remark_pattern: rule.remark_pattern || "",
+            result_direction: rule.result_direction,
+            priority: rule.priority,
+            status: rule.status,
+            remark_field: rule.remark_field || "备注",
+            direction_field: rule.direction_field || "动账方向",
+            amount_field: rule.amount_field || "动账金额",
+            remark_exclude_pattern: rule.remark_exclude_pattern || "",
+        },
+    };
+}
+
+function nextSubjectSortOrder() {
+    return (
+        Math.max(0, ...subjects.value.map((item) => Number(item.sort_order || 0))) +
+        10
+    );
+}
+
+function nextCategorySortOrder(subject: SubjectNode) {
+    return (
+        Math.max(
+            0,
+            ...subject.categories.map((item) => Number(item.category.sort_order || 0)),
+        ) + 10
+    );
+}
+
+function nextRulePriority(category: CategoryNode) {
+    return (
+        Math.max(0, ...categoryContexts.value
+            .find((item) => item.category.category.id === category.category.id)
+            ?.category.rules.map((item) => Number(item.priority || 0)) ?? [0]) + 10
+    );
+}
+
+function cancelEditing() {
+    editingState.value = null;
+}
+
+async function saveNodeEditor() {
+    if (!nodeEditor.value) return;
+    try {
+        if (nodeEditor.value.kind === "subject") {
+            const payload = normalizeNameDraft(nodeEditor.value.draft.name, "科目");
+            if (nodeEditor.value.mode === "create") {
+                await createTransactionSubject({
+                    ...payload,
+                    sort_order: nextSubjectSortOrder(),
+                    status: 1,
+                });
+                ElMessage.success("科目已新增");
+            } else {
+                await updateTransactionSubject(nodeEditor.value.subjectId, payload);
+                ElMessage.success("科目已更新");
+            }
+        } else {
+            const payload = normalizeNameDraft(nodeEditor.value.draft.name, "重分类");
+            if (nodeEditor.value.mode === "create") {
+                await createTransactionCategory({
+                    subject_id: nodeEditor.value.parentSubjectId,
+                    ...payload,
+                    sort_order: nextCategorySortOrder(
+                        subjectNodes.value.find(
+                            (item) => item.subject.id === nodeEditor.value.parentSubjectId,
+                        )!,
+                    ),
+                    status: 1,
+                });
+                ElMessage.success("重分类已新增");
+            } else {
+                await updateTransactionCategory(nodeEditor.value.categoryId, payload);
+                ElMessage.success("重分类已更新");
+            }
+        }
+    } catch (error) {
+        if (error instanceof Error && error.message.endsWith("_required")) {
+            return;
+        }
+        throw error;
+    }
+
+    nodeEditor.value = null;
+    await loadData({ keepExpansion: true });
+}
+
+async function saveEditingRow() {
+    if (!editingState.value) return;
+    try {
+        const payload = normalizeRuleDraft(editingState.value.draft);
+        if (editingState.value.mode === "create") {
+            await createTransactionRule(payload);
+            ElMessage.success("规则已新增");
+        } else {
+            await updateTransactionRule(editingState.value.ruleId, payload);
+            ElMessage.success("规则已更新");
+        }
+    } catch (error) {
+        if (error instanceof Error && error.message.endsWith("_required")) {
+            return;
+        }
+        throw error;
+    }
+
+    editingState.value = null;
+    await loadData({ keepExpansion: true });
+}
+
+function normalizeNameDraft(nameValue: string, label: string) {
+    const name = String(nameValue || "").trim();
+    if (!name) {
+        ElMessage.warning(`请输入${label}名称`);
+        throw new Error("name_required");
+    }
+    return { name };
+}
+
+function normalizeRuleDraft(draft: RuleDraft) {
+    const transactionDirection = String(draft.transaction_direction || "").trim();
+    const matchType = draft.match_type;
+    const remarkPattern = String(draft.remark_pattern || "").trim();
+    if (!transactionDirection) {
+        ElMessage.warning("请选择方向");
+        throw new Error("direction_required");
+    }
+    if (matchType !== "none" && !remarkPattern) {
+        ElMessage.warning("请输入备注条件");
+        throw new Error("remark_required");
+    }
+    return {
+        subject_id: draft.subject_id,
+        category_id: draft.category_id,
+        platform_code: draft.platform_code,
+        transaction_direction: transactionDirection,
+        transaction_scene: normalizeNullableText(draft.transaction_scene),
+        match_type: matchType,
+        remark_pattern: remarkPattern,
+        result_direction: draft.result_direction,
+        priority: Number(draft.priority ?? 100),
+        status: Number(draft.status ?? 1),
+        remark_field: draft.remark_field || "备注",
+        direction_field: draft.direction_field || "动账方向",
+        amount_field: draft.amount_field || "动账金额",
+        remark_exclude_pattern: draft.remark_exclude_pattern || "",
+    };
+}
+
+function normalizeNullableText(value: string | null | undefined) {
+    const text = String(value || "").trim();
+    return text || null;
+}
+
+async function removeSubject(subject: SubjectNode) {
+    await ElMessageBox.confirm(
+        `确认删除科目“${subject.subject.name}”吗？`,
+        "删除确认",
+        {
+            type: "warning",
+            confirmButtonText: "删除",
+            cancelButtonText: "取消",
+        },
+    );
+    await deleteTransactionSubject(subject.subject.id);
+    ElMessage.success("科目已删除");
+    await loadData({ keepExpansion: true });
+}
+
+async function removeCategory(category: CategoryNode) {
+    await ElMessageBox.confirm(
+        `确认删除重分类“${category.category.name}”吗？`,
+        "删除确认",
+        {
+            type: "warning",
+            confirmButtonText: "删除",
+            cancelButtonText: "取消",
+        },
+    );
+    await deleteTransactionCategory(category.category.id);
+    ElMessage.success("重分类已删除");
+    await loadData({ keepExpansion: true });
+}
+
+async function removeRule(rule: TransactionRule) {
+    await ElMessageBox.confirm(`确认删除规则 #${rule.id} 吗？`, "删除确认", {
+        type: "warning",
+        confirmButtonText: "删除",
+        cancelButtonText: "取消",
+    });
+    await deleteTransactionRule(rule.id);
+    ElMessage.success("规则已删除");
+    await loadData({ keepExpansion: true });
+}
+
+async function loadPlatformOptions() {
+    try {
+        const items = await getPlatformList();
+        platforms.value = items.length ? items : getFallbackPlatforms();
+    } catch {
+        platforms.value = getFallbackPlatforms();
+    }
+}
+
+async function loadData(options: { keepExpansion?: boolean } = {}) {
     loading.value = true;
     try {
-        const [subjectItems, categoryItems, ruleItems, platformItems] = await Promise.all([
+        await loadPlatformOptions();
+        const [subjectItems, categoryItems, ruleItems] = await Promise.all([
             listTransactionSubjects(),
             listTransactionCategories(),
             listTransactionRules(),
-            fetchPlatformOptions(),
         ]);
         subjects.value = subjectItems;
         categories.value = categoryItems;
         rules.value = ruleItems;
-        platforms.value = platformItems;
-        expandedGroupKeys.value = Array.from(
-            new Set(ruleItems.map((rule) => makeGroupKey(rule.subject_id, rule.platform_code || null))),
-        );
+        if (!expansionInitialized.value || !options.keepExpansion) {
+            resetExpansionState();
+            expansionInitialized.value = true;
+        } else {
+            syncExpansionState();
+        }
     } finally {
         loading.value = false;
     }
 }
 
-async function fetchPlatformOptions() {
-    try {
-        const res = await getPlatformList();
-        return res.length ? res : getFallbackPlatforms();
-    } catch {
-        return getFallbackPlatforms();
-    }
+function resetExpansionState() {
+    expandedSubjectKeys.value = subjectNodes.value.map((item) => item.key);
 }
 
-function openGroupDetail(group: RuleGroup) {
-    drawerMode.value = "detail";
-    selectedGroupKey.value = group.key;
-    drawerSearchText.value = "";
-    drawerVisible.value = true;
-    nextTick(() => ensureActiveCategory());
-}
-
-function openGroupDetailByCategory(group: RuleGroup, categoryId: number) {
-    drawerMode.value = "detail";
-    selectedGroupKey.value = group.key;
-    drawerSearchText.value = "";
-    activeCategoryId.value = categoryId;
-    drawerVisible.value = true;
-    nextTick(() => ensureActiveCategory(categoryId));
-}
-
-function openGroupEditor(group: RuleGroup, preferredCategoryId?: number) {
-    drawerMode.value = "edit";
-    selectedGroupKey.value = group.key;
-    drawerSearchText.value = "";
-    groupStatusValue.value = group.status === "disabled" ? 0 : 1;
-    keySeed.value = 1;
-    categoryForms.value = buildCategoryPanels(group, true);
-    activeCategoryId.value = preferredCategoryId ?? null;
-    drawerVisible.value = true;
-    nextTick(() => ensureActiveCategory(preferredCategoryId));
-}
-
-function ensureActiveCategory(preferredCategoryId?: number | null) {
-    const availableIds = visibleCategoryPanels.value.map((panel) => panel.categoryId);
-    if (
-        preferredCategoryId &&
-        availableIds.includes(preferredCategoryId)
-    ) {
-        activeCategoryId.value = preferredCategoryId;
-        return;
-    }
-    if (activeCategoryId.value && availableIds.includes(activeCategoryId.value)) {
-        return;
-    }
-    activeCategoryId.value = availableIds[0] ?? null;
-}
-
-function setActiveCategory(categoryId: number) {
-    activeCategoryId.value = categoryId;
-}
-
-function addRuleToActiveCategory() {
-    const categoryId = activeCategoryPanel.value?.categoryId;
-    if (!categoryId) return;
-    const panel = categoryForms.value.find((item) => item.categoryId === categoryId);
-    if (!panel) return;
-    panel.rules.push(createRuleItem(undefined, panel.templateRule));
-}
-
-function removeRule(categoryId: number, key: number) {
-    const panel = categoryForms.value.find((item) => item.categoryId === categoryId);
-    if (!panel) return;
-    const index = panel.rules.findIndex((item) => item.key === key);
-    if (index < 0) return;
-    const item = panel.rules[index];
-    if (item.ruleId) {
-        item.deleted = true;
-    } else {
-        panel.rules.splice(index, 1);
-    }
-}
-
-async function handleSubmitGroup() {
-    const group = selectedGroup.value;
-    if (!group) return;
-
-    const activeItems = categoryForms.value.flatMap((panel) => activeRules(panel));
-    if (!activeItems.length) {
-        ElMessage.warning("至少保留一个规则");
-        return;
-    }
-    const missingRemark = activeItems.some(
-        (item) => item.matchType !== "none" && !item.remarkPattern.trim(),
+function syncExpansionState() {
+    const subjectKeys = new Set(subjectNodes.value.map((item) => item.key));
+    expandedSubjectKeys.value = expandedSubjectKeys.value.filter((key) =>
+        subjectKeys.has(key),
     );
-    if (missingRemark) {
-        ElMessage.warning("请填写备注信息");
-        return;
+    if (!expandedSubjectKeys.value.length && subjectNodes.value.length) {
+        expandedSubjectKeys.value = subjectNodes.value.map((item) => item.key);
     }
-    const missingScene = activeItems.some(
-        (item) => item.transactionSceneMode === "specific" && !item.transactionSceneValue.trim(),
-    );
-    if (missingScene) {
-        ElMessage.warning("请填写动账场景");
-        return;
-    }
-    const missingHeader = activeItems.some((item) => !item.amountField.trim());
-    if (missingHeader) {
-        ElMessage.warning("请填写规则对应的表头");
-        return;
-    }
-
-    submitting.value = true;
-    try {
-        let nextPriority = Math.max(0, ...group.rules.map((rule) => rule.priority || 0)) + 10;
-        for (const panel of categoryForms.value) {
-            for (const item of panel.rules) {
-                const remarkPattern = item.remarkPattern.trim();
-                const remarkExcludePattern = item.remarkExcludePattern.trim();
-                const transactionScene = transactionSceneValueForPayload(item);
-                if (item.ruleId) {
-                    if (item.deleted) {
-                        await deleteTransactionRule(item.ruleId);
-                        continue;
-                    }
-
-                    const source = item.sourceRule || findRule(item.ruleId);
-                    if (!source) continue;
-                    const sourceScene = normalizeTransactionScene(source.transaction_scene);
-                    if (
-                        item.matchType !== source.match_type ||
-                        remarkPattern !== (source.remark_pattern || "") ||
-                        remarkExcludePattern !== (source.remark_exclude_pattern || "") ||
-                        item.transactionDirection !== source.transaction_direction ||
-                        transactionScene !== sourceScene ||
-                        item.amountField.trim() !== source.amount_field ||
-                        item.resultDirection !== source.result_direction ||
-                        source.category_id !== panel.categoryId ||
-                        source.status !== groupStatusValue.value
-                    ) {
-                        await updateTransactionRule(item.ruleId, {
-                            subject_id: group.subjectId,
-                            category_id: panel.categoryId,
-                            platform_code: group.platformCode,
-                            transaction_direction: item.transactionDirection,
-                            remark_field: source.remark_field || "备注",
-                            direction_field: source.direction_field || "动账方向",
-                            transaction_scene: transactionScene,
-                            match_type: item.matchType,
-                            remark_pattern: remarkPattern,
-                            remark_exclude_pattern: remarkExcludePattern,
-                            amount_field: item.amountField.trim(),
-                            result_direction: item.resultDirection,
-                            priority: source.priority,
-                            status: groupStatusValue.value,
-                        });
-                    }
-                    continue;
-                }
-
-                if (!remarkPattern && item.matchType !== "none") continue;
-                const template = item.sourceRule || panel.templateRule || group.rules[0];
-                await createTransactionRule({
-                    subject_id: group.subjectId,
-                    category_id: panel.categoryId,
-                    platform_code: group.platformCode,
-                    transaction_direction: item.transactionDirection,
-                    remark_field: template?.remark_field || "备注",
-                    direction_field: template?.direction_field || "动账方向",
-                    transaction_scene: transactionScene,
-                    match_type: item.matchType,
-                    remark_pattern: remarkPattern,
-                    remark_exclude_pattern: remarkExcludePattern,
-                    amount_field: item.amountField.trim(),
-                    result_direction: item.resultDirection,
-                    priority: nextPriority,
-                    status: groupStatusValue.value,
-                });
-                nextPriority += 10;
-            }
-        }
-
-        ElMessage.success("动账重分类已更新");
-        drawerVisible.value = false;
-        await loadData();
-    } finally {
-        submitting.value = false;
-    }
-}
-
-function buildCategoryPanels(group: RuleGroup, includeEmptyCategories: boolean): CategoryPanel[] {
-    const subjectCategories = categories.value
-        .filter((category) => category.subject_id === group.subjectId)
-        .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-    const rulesByCategory = new Map<number, TransactionRule[]>();
-    group.rules.forEach((rule) => {
-        const items = rulesByCategory.get(rule.category_id) || [];
-        items.push(rule);
-        rulesByCategory.set(rule.category_id, items);
-    });
-
-    return subjectCategories
-        .map((category) => {
-            const categoryRules = (rulesByCategory.get(category.id) || []).sort(
-                (a, b) => a.priority - b.priority || a.id - b.id,
-            );
-            return {
-                categoryId: category.id,
-                categoryName: category.name,
-                sortOrder: category.sort_order,
-                rules: categoryRules.map((rule) => createRuleItem(rule, rule)),
-                templateRule: categoryRules[0] || group.rules[0],
-            };
-        })
-        .filter((panel) => includeEmptyCategories || panel.rules.length);
-}
-
-function buildGroupCategorySummaries(subjectId: number, groupRules: TransactionRule[]) {
-    const rulesByCategory = new Map<number, TransactionRule[]>();
-    groupRules.forEach((rule) => {
-        const items = rulesByCategory.get(rule.category_id) || [];
-        items.push(rule);
-        rulesByCategory.set(rule.category_id, items);
-    });
-
-    return categories.value
-        .filter((category) => category.subject_id === subjectId)
-        .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
-        .map((category) => {
-            const categoryRules = (rulesByCategory.get(category.id) || []).sort(
-                (a, b) => a.priority - b.priority || a.id - b.id,
-            );
-            if (!categoryRules.length) return null;
-            const previewLines = categoryRules.slice(0, 3).map(buildRulePreviewLine);
-            return {
-                categoryId: category.id,
-                categoryName: category.name,
-                sortOrder: category.sort_order,
-                status: resolveGroupStatus(categoryRules),
-                ruleCount: categoryRules.length,
-                previewLines,
-                searchText: [
-                    category.name,
-                    groupRules.length ? ruleSubjectName(groupRules[0]) : "",
-                    previewLines.join(" "),
-                    ...categoryRules.map((rule) =>
-                        [
-                            rule.transaction_direction,
-                            formatSceneConditionFromRule(rule),
-                            formatRemarkCondition(
-                                rule.match_type,
-                                rule.remark_pattern || "",
-                                rule.remark_exclude_pattern || "",
-                            ),
-                            rule.amount_field,
-                            resultDirectionLabel(rule.result_direction),
-                        ].join(" "),
-                    ),
-                ]
-                    .join(" ")
-                    .toLowerCase(),
-            };
-        })
-        .filter((item): item is GroupCategorySummary => Boolean(item));
-}
-
-function createRuleItem(rule?: TransactionRule, templateRule?: TransactionRule): RuleItem {
-    const sceneValue = normalizeTransactionScene(rule?.transaction_scene ?? templateRule?.transaction_scene);
-    const sceneMode = transactionSceneModeFromValue(sceneValue);
-    return {
-        key: keySeed.value++,
-        ruleId: rule?.id,
-        matchType: rule?.match_type || templateRule?.match_type || "none",
-        remarkPattern: rule?.remark_pattern || "",
-        remarkExcludePattern: rule?.remark_exclude_pattern || "",
-        transactionDirection: rule?.transaction_direction || templateRule?.transaction_direction || "入账",
-        transactionSceneMode: sceneMode,
-        transactionSceneValue: sceneMode === "specific" ? sceneValue || "" : "",
-        amountField: rule?.amount_field || templateRule?.amount_field || "动账金额",
-        resultDirection: rule?.result_direction || templateRule?.result_direction || "original",
-        sourceRule: rule || templateRule,
-        deleted: false,
-    };
-}
-
-function activeRules(panel: CategoryPanel) {
-    return panel.rules.filter((item) => !item.deleted);
-}
-
-function transactionSceneModeFromValue(value?: string | null): RuleSceneMode {
-    if (value === null || value === undefined) return "any";
-    if (value === "") return "blank";
-    return "specific";
-}
-
-function normalizeTransactionScene(value?: string | null) {
-    if (value === null || value === undefined) return null;
-    return value;
-}
-
-function transactionSceneValueForPayload(item: RuleItem) {
-    if (item.transactionSceneMode === "any") return null;
-    if (item.transactionSceneMode === "blank") return "";
-    return item.transactionSceneValue.trim();
-}
-
-function formatRemarkCondition(
-    matchType: TransactionRule["match_type"],
-    remarkPattern: string,
-    remarkExcludePattern: string,
-) {
-    const excludeText = remarkExcludePattern.trim()
-        ? `额外不包含：${remarkExcludePattern.trim()}`
-        : "";
-    let baseText = "不限备注";
-    switch (matchType) {
-        case "exact":
-            baseText = `备注等于：${remarkPattern || "未填写"}`;
-            break;
-        case "contains":
-            baseText = `备注包含：${remarkPattern || "未填写"}`;
-            break;
-        case "not_contains":
-            baseText = `备注不包含：${remarkPattern || "未填写"}`;
-            break;
-        default:
-            baseText = "不限备注";
-    }
-    return excludeText ? `${baseText}；${excludeText}` : baseText;
-}
-
-function remarkConditionText(item: RuleItem) {
-    return formatRemarkCondition(item.matchType, item.remarkPattern, item.remarkExcludePattern);
-}
-
-function formatSceneCondition(mode: RuleSceneMode, value: string) {
-    if (mode === "any") return "不限场景";
-    if (mode === "blank") return "空白场景";
-    return value.trim() || "未填写场景";
-}
-
-function formatSceneConditionFromRule(rule: TransactionRule) {
-    const sceneValue = normalizeTransactionScene(rule.transaction_scene);
-    const mode = transactionSceneModeFromValue(sceneValue);
-    return formatSceneCondition(mode, mode === "specific" ? sceneValue || "" : "");
-}
-
-function sceneConditionText(item: RuleItem) {
-    return formatSceneCondition(item.transactionSceneMode, item.transactionSceneValue);
-}
-
-function ruleSequenceParts(
-    transactionDirection: string,
-    sceneText: string,
-    remarkText: string,
-) {
-    return [transactionDirection, sceneText, remarkText].filter((part) => part.trim());
-}
-
-function ruleSequenceText(item: RuleItem) {
-    return ruleSequenceParts(
-        item.transactionDirection,
-        sceneConditionText(item),
-        remarkConditionText(item),
-    ).join(" · ");
-}
-
-function handleMatchTypeChange(item: RuleItem) {
-    if (item.matchType !== "none" && !item.remarkPattern && item.sourceRule?.remark_pattern) {
-        item.remarkPattern = item.sourceRule.remark_pattern;
-    }
-}
-
-function remarkPatternPlaceholder(matchType: TransactionRule["match_type"]) {
-    if (matchType === "contains") return "输入必须包含的备注内容，多个用逗号分隔";
-    if (matchType === "not_contains") return "输入不能出现的备注内容，多个用逗号分隔";
-    return "输入完整备注信息";
-}
-
-function handleSceneModeChange(item: RuleItem) {
-    if (item.transactionSceneMode !== "specific") {
-        item.transactionSceneValue = "";
-        return;
-    }
-    if (!item.transactionSceneValue && item.sourceRule?.transaction_scene) {
-        item.transactionSceneValue = item.sourceRule.transaction_scene;
-    }
-}
-
-function buildRuleSearchText(item: RuleItem) {
-    return [
-        item.transactionDirection,
-        sceneConditionText(item),
-        remarkConditionText(item),
-        item.amountField,
-        resultDirectionLabel(item.resultDirection),
-        item.remarkPattern,
-        item.remarkExcludePattern,
-        item.transactionSceneValue,
-        item.matchType,
-    ]
-        .join(" ")
-        .toLowerCase();
-}
-
-function buildRulePreviewLine(rule: TransactionRule) {
-    return [
-        rule.transaction_direction,
-        formatSceneConditionFromRule(rule),
-        formatRemarkCondition(
-            rule.match_type,
-            rule.remark_pattern || "",
-            rule.remark_exclude_pattern || "",
-        ),
-        rule.amount_field,
-    ].join(" · ");
-}
-
-function toggleGroupExpanded(groupKey: string) {
-    if (expandedGroupKeys.value.includes(groupKey)) {
-        expandedGroupKeys.value = expandedGroupKeys.value.filter((key) => key !== groupKey);
-        return;
-    }
-    expandedGroupKeys.value = [...expandedGroupKeys.value, groupKey];
-}
-
-function isGroupExpanded(groupKey: string) {
-    return expandedGroupKeys.value.includes(groupKey);
-}
-
-function categoryPanelRuleCount(panel: CategoryPanel) {
-    return activeRules(panel).length;
-}
-
-function categoryPanelStatus(panel: CategoryPanel): RuleGroupStatus | "empty" {
-    const ruleCount = categoryPanelRuleCount(panel);
-    if (ruleCount === 0) return "empty";
-    if (drawerMode.value === "edit") {
-        return groupStatusValue.value === 1 ? "enabled" : "disabled";
-    }
-    const enabledCount = panel.rules.filter((item) => item.sourceRule?.status === 1).length;
-    if (enabledCount === 0) return "disabled";
-    if (enabledCount === ruleCount) return "enabled";
-    return "partial";
-}
-
-function categoryPanelStatusLabel(panel: CategoryPanel) {
-    const status = categoryPanelStatus(panel);
-    if (status === "empty") return "待补充";
-    return groupStatusLabel(status);
-}
-
-function categoryPanelStatusType(panel: CategoryPanel) {
-    const status = categoryPanelStatus(panel);
-    if (status === "empty") return "info";
-    return groupStatusType(status);
-}
-
-function groupCategoryStatusLabel(status: RuleGroupStatus) {
-    return groupStatusLabel(status);
-}
-
-function groupCategoryStatusType(status: RuleGroupStatus) {
-    return groupStatusType(status);
-}
-
-function makeGroupKey(subjectId: number, platformCode?: string | null) {
-    return `${subjectId}::${platformCode || "__all__"}`;
-}
-
-function resolveGroupStatus(groupRules: TransactionRule[]): RuleGroupStatus {
-    const enabledCount = groupRules.filter((rule) => rule.status === 1).length;
-    if (enabledCount === 0) return "disabled";
-    if (enabledCount === groupRules.length) return "enabled";
-    return "partial";
-}
-
-function groupStatusLabel(status: RuleGroupStatus) {
-    return status === "enabled" ? "启用" : status === "disabled" ? "停用" : "部分启用";
-}
-
-function groupStatusType(status: RuleGroupStatus) {
-    return status === "enabled" ? "success" : status === "disabled" ? "danger" : "warning";
-}
-
-function resultDirectionLabel(value: TransactionRule["result_direction"]) {
-    return resultDirectionSelectOptions.find((item) => item.value === value)?.label || value;
-}
-
-function laterDate(left: string, right: string) {
-    return new Date(right).getTime() > new Date(left).getTime() ? right : left;
-}
-
-function subjectSortOrder(subjectId: number) {
-    return subjects.value.find((item) => item.id === subjectId)?.sort_order ?? 9999;
-}
-
-function ruleSubjectName(rule: TransactionRule) {
-    return rule.subject_name || subjects.value.find((item) => item.id === rule.subject_id)?.name || "-";
-}
-
-function platformLabel(platformCode?: string | null) {
-    if (!platformCode) return "通用";
-    return platforms.value.find((platform) => platform.code === platformCode)?.name || platformCode;
-}
-
-function findRule(ruleId: number) {
-    return rules.value.find((rule) => rule.id === ruleId);
 }
 
 onMounted(loadData);
-usePageRefresh(loadData);
+
+usePageRefresh(() => loadData({ keepExpansion: true }));
 </script>
 
 <style scoped lang="scss">
 @use "./transaction.scss";
 
-.reclass-page {
+.split-rule-page {
     display: grid;
-    gap: 0;
+    gap: 16px;
 }
 
-.rule-table-card {
-    border: 1px solid var(--border-light);
+.rule-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
 
-    :deep(.el-card__header) {
-        padding: 16px 18px 18px;
-        border-bottom: 1px solid var(--border-light);
-        background: var(--bg-card);
-    }
+.rule-toolbar__actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.rule-search-input {
+    width: min(320px, 40vw);
+}
+
+.rule-summary {
+    margin-top: 12px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+.rule-workspace {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.33fr) minmax(0, 1fr);
+    gap: 16px;
+    min-width: 0;
+}
+
+.rule-tree-card,
+.rule-detail-card {
+    min-width: 0;
 
     :deep(.el-card__body) {
         padding: 0;
     }
 }
 
-.page-toolbar,
-.title-row,
-.toolbar-actions,
-.detail-badge-row,
-.detail-card-header,
-.keyword-workspace__head,
-.workbench-head,
-.group-tree-card__head,
-.group-tree-toggle,
-.group-tree-title-line,
-.group-tree-meta,
-.group-child-card__head,
-.group-child-card__stats,
-.group-child-card__footer,
-.rule-card__head,
-.rule-card__badges {
+.panel-header {
     display: flex;
-    align-items: center;
-}
-
-.page-toolbar {
+    align-items: baseline;
     justify-content: space-between;
-    gap: 18px;
-}
-
-.title-stack {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-}
-
-.page-kicker,
-.detail-kicker {
-    color: var(--primary);
-    font-family: "SF Mono", SFMono-Regular, Consolas, monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-}
-
-.title-row {
-    gap: 10px;
-    min-width: 0;
-
-    h2 {
-        margin: 0;
-        color: var(--text-primary);
-        font-size: 20px;
-        font-weight: 700;
-        line-height: 1.3;
-    }
-}
-
-.count-text {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.toolbar-actions,
-.detail-badge-row,
-.group-tree-actions,
-.workbench-head__tools,
-.group-list-parent__status,
-.group-list-parent__summary,
-.group-list-parent__actions,
-.group-list-child__status,
-.group-list-child__meta,
-.group-list-child__actions,
-.group-list-parent__title,
-.group-list-parent__meta {
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.group-search-input {
-    width: min(360px, 44vw);
-}
-
-.group-search-input :deep(.el-input__wrapper),
-.drawer-search-input :deep(.el-input__wrapper) {
-    background: var(--bg-elevated);
-}
-
-.overview-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
-    margin-top: 14px;
-}
-
-.overview-card {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 10px;
-    background: linear-gradient(180deg, var(--bg-elevated), var(--bg-card));
-
-    span {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        font-weight: 700;
-    }
-
-    strong {
-        color: var(--text-primary);
-        font-size: 22px;
-        font-weight: 800;
-        line-height: 1.15;
-    }
-
-    small {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        line-height: 1.45;
-    }
-}
-
-.group-tree-list {
-    display: grid;
-    gap: 14px;
-    padding: 16px 16px 18px;
-}
-
-.group-tree-card {
-    display: grid;
-    gap: 12px;
-    padding: 14px;
-    border: 1px solid var(--border-light);
-    border-radius: 14px;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
-        var(--bg-card);
-    box-shadow: var(--shadow-sm);
-    transition:
-        transform 0.18s ease,
-        border-color 0.18s ease,
-        box-shadow 0.18s ease;
-}
-
-.group-tree-card:hover {
-    transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--primary) 20%, var(--border-light));
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.group-tree-card__head {
-    justify-content: space-between;
-    gap: 14px;
-    min-width: 0;
-}
-
-.group-tree-toggle {
-    flex: 1 1 auto;
     gap: 12px;
     min-width: 0;
-    border: 0;
-    background: transparent;
-    cursor: pointer;
-    text-align: left;
 }
 
-.group-tree-toggle__icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    flex: 0 0 32px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 999px;
-    color: var(--primary);
-    background: var(--bg-elevated);
-}
-
-.group-tree-copy {
-    display: grid;
-    gap: 8px;
-    min-width: 0;
-}
-
-.group-tree-title-line {
-    gap: 10px;
-    min-width: 0;
-    flex-wrap: wrap;
-
-    h3 {
-        margin: 0;
-        color: var(--text-primary);
-        font-size: 16px;
-        font-weight: 800;
-        line-height: 1.35;
-    }
-}
-
-.group-tree-subject {
-    color: var(--text-tertiary);
-    font-size: 12px;
+.panel-header__title {
+    color: var(--text-primary);
+    font-size: 15px;
     font-weight: 700;
-    white-space: nowrap;
 }
 
-.group-tree-meta {
-    flex-wrap: wrap;
-    gap: 8px 10px;
+.panel-header__meta,
+.panel-header__count {
     color: var(--text-tertiary);
     font-size: 12px;
-    font-weight: 600;
 }
 
-.group-tree-actions {
-    flex: 0 0 auto;
-}
-
-.group-tree-children {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 12px;
-    padding-top: 2px;
-}
-
-.group-child-card {
-    display: grid;
-    gap: 10px;
+.rule-tree {
     min-width: 0;
-    padding: 12px 13px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 12px;
-    background: var(--bg-elevated);
-    text-align: left;
-    cursor: pointer;
-    transition:
-        transform 0.18s ease,
-        border-color 0.18s ease,
-        background-color 0.18s ease;
 }
 
-.group-child-card:hover {
-    transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--primary) 28%, var(--border-color-light));
-    background: color-mix(in srgb, var(--primary) 4%, var(--bg-elevated));
-}
-
-.group-child-card__head,
-.group-child-card__stats,
-.group-child-card__footer {
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.group-child-card__title {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-
-    strong {
-        color: var(--text-primary);
-        font-size: 14px;
-        line-height: 1.35;
-    }
-}
-
-.group-child-label {
-    color: var(--text-tertiary);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-}
-
-.group-child-card__stats,
-.group-child-card__footer {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.group-child-preview {
-    display: grid;
-    gap: 6px;
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.5;
-
-    span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-}
-
-.overview-strip {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    margin-top: 14px;
+.tree-group + .tree-group {
     border-top: 1px solid var(--border-light);
 }
 
-.overview-item {
+.tree-group__children {
+    padding: 0 12px 10px 12px;
+}
+
+.tree-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    background: var(--bg-card);
+}
+
+.tree-row--category {
+    margin-top: 6px;
+    padding: 0;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+}
+
+.tree-row--category.is-active {
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border-light));
+    background: color-mix(in srgb, var(--primary) 5%, var(--bg-card));
+}
+
+.tree-row__main {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    text-align: left;
+    background: transparent;
+    cursor: pointer;
+}
+
+.tree-row__main--category {
+    width: 100%;
+    padding: 10px 12px;
+}
+
+.tree-row__icon {
+    display: inline-flex;
+    width: 14px;
+    justify-content: center;
+    color: var(--text-tertiary);
+}
+
+.tree-row__copy {
     display: grid;
     gap: 4px;
     min-width: 0;
-    padding: 12px 14px 0;
-    border-left: 1px solid var(--border-color-light);
-
-    &:first-child {
-        border-left: 0;
-        padding-left: 0;
-    }
-
-    span {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        font-weight: 700;
-    }
-
-    strong {
-        color: var(--text-primary);
-        font-size: 22px;
-        font-weight: 800;
-        line-height: 1.15;
-    }
-
-    small {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        line-height: 1.45;
-    }
 }
 
-.group-list-table {
+.tree-row__copy strong {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tree-row__copy small {
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+.tree-row__more {
+    min-width: 30px;
+    padding: 0 6px;
+    color: var(--text-tertiary);
+    font-size: 16px;
+    cursor: pointer;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+}
+
+.tree-row__more:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.tree-row__more:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.tree-empty-row {
+    padding: 12px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+.detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
     min-width: 0;
 }
 
-.group-list-head,
-.group-list-parent,
-.group-list-child {
+.detail-header__copy {
     display: grid;
-    grid-template-columns: minmax(260px, 1.25fr) minmax(200px, 0.82fr) minmax(150px, 0.56fr) minmax(0, 1.45fr) 120px;
-    gap: 14px;
+    gap: 4px;
+    min-width: 0;
+}
+
+.detail-header__eyebrow {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.detail-header__copy strong {
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.detail-header__copy small {
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+.rule-list {
+    min-width: 0;
+}
+
+.rule-list__head,
+.rule-list__row {
+    display: grid;
+    grid-template-columns: 130px minmax(0, 1.9fr) 130px 140px;
+    gap: 12px;
     align-items: center;
 }
 
-.group-list-head {
+.rule-list__head {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-light);
     background: var(--table-header-bg);
@@ -1691,645 +1477,122 @@ usePageRefresh(loadData);
     font-weight: 700;
 }
 
-.group-list-group {
+.rule-list__row {
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border-light);
 }
 
-.group-list-parent {
-    min-width: 0;
-    padding: 14px 16px;
-    background: var(--bg-card);
+.rule-list__row--editing {
+    background: color-mix(in srgb, var(--primary) 3%, var(--bg-card));
 }
 
-.group-list-parent__main {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    min-width: 0;
-    width: 100%;
-    border: 0;
-    background: transparent;
-    text-align: left;
-    cursor: pointer;
-}
-
-.group-list-parent__icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    flex: 0 0 26px;
-    margin-top: 1px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 999px;
-    color: var(--primary);
-    background: var(--bg-elevated);
-}
-
-.group-list-parent__copy {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-}
-
-.group-list-parent__title {
-    align-items: baseline;
-    min-width: 0;
-
-    strong {
-        color: var(--text-primary);
-        font-size: 15px;
-        font-weight: 800;
-        line-height: 1.35;
-    }
-
-    span {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        font-weight: 700;
-    }
-}
-
-.group-list-parent__meta {
-    align-items: center;
-    min-width: 0;
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.group-list-parent__status,
-.group-list-parent__summary,
-.group-list-parent__actions,
-.group-list-child__status,
-.group-list-child__meta,
-.group-list-child__actions {
-    display: flex;
-    align-items: center;
-}
-
-.group-list-parent__status,
-.group-list-parent__summary {
+.rule-list__platform,
+.rule-list__result {
     color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.group-list-parent__preview {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    line-height: 1.55;
-}
-
-.group-list-parent__actions,
-.group-list-child__actions {
-    justify-content: flex-end;
-}
-
-.group-list-children {
-    display: grid;
-}
-
-.group-list-child {
-    min-width: 0;
-    padding: 12px 16px 12px 28px;
-    border-top: 1px dashed var(--border-color-light);
-    background: color-mix(in srgb, var(--bg-elevated) 88%, var(--bg-card));
-}
-
-.group-list-child__name {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    min-width: 0;
-    width: 100%;
-    border: 0;
-    background: transparent;
-    text-align: left;
-    cursor: pointer;
-}
-
-.group-list-child__branch {
-    position: relative;
-    width: 14px;
-    height: 14px;
-    flex: 0 0 14px;
-    margin-top: 2px;
-
-    &::before,
-    &::after {
-        content: "";
-        position: absolute;
-        background: color-mix(in srgb, var(--primary) 28%, var(--border-color-light));
-    }
-
-    &::before {
-        top: 0;
-        bottom: 6px;
-        left: 6px;
-        width: 1px;
-    }
-
-    &::after {
-        top: 6px;
-        left: 6px;
-        width: 8px;
-        height: 1px;
-    }
-}
-
-.group-list-child__copy {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-
-    strong {
-        color: var(--text-primary);
-        font-size: 14px;
-        font-weight: 700;
-        line-height: 1.35;
-    }
-
-    span {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        font-weight: 600;
-    }
-}
-
-.group-list-child__status,
-.group-list-child__meta {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.group-list-child__preview {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.55;
-
-    span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-}
-
-.group-drawer-panel {
-    display: grid;
-    gap: 14px;
-}
-
-.group-summary-card,
-.detail-card {
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-card);
-    background: var(--bg-card);
-}
-
-.group-summary-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(230px, 0.4fr);
-    gap: 14px;
-    padding: 14px;
-    border-radius: 14px;
-    background:
-        radial-gradient(circle at top right, color-mix(in srgb, var(--primary) 8%, transparent), transparent 40%),
-        var(--bg-card);
-}
-
-.group-summary-main {
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    min-width: 0;
-
-    h3 {
-        margin: 0;
-        color: var(--text-primary);
-        font-size: 20px;
-        font-weight: 800;
-        line-height: 1.4;
-    }
-}
-
-.group-summary-note {
-    color: var(--text-tertiary);
     font-size: 13px;
-    line-height: 1.6;
 }
 
-.group-summary-side {
-    display: grid;
-    gap: 8px;
-
-    > div {
-        display: grid;
-        gap: 6px;
-        min-width: 0;
-        padding: 10px 12px;
-        border: 1px solid var(--border-color-light);
-        border-radius: 6px;
-        background: var(--bg-elevated);
-    }
-
-    span {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        font-weight: 700;
-    }
-
-    strong {
-        color: var(--text-primary);
-        font-size: 13px;
-        line-height: 1.4;
-    }
-}
-
-.detail-card {
-    display: grid;
-    gap: 12px;
-    min-width: 0;
-    padding: 14px;
-    border-radius: 14px;
-}
-
-.detail-card-header {
-    justify-content: space-between;
-    gap: 10px;
-    color: var(--text-secondary);
-    font-size: 14px;
-    font-weight: 800;
-}
-
-.workbench-head {
-    justify-content: space-between;
-    gap: 14px;
-    align-items: flex-start;
-    flex-wrap: wrap;
-}
-
-.workbench-head__copy,
-.keyword-workspace__copy {
+.rule-summary-text {
     display: grid;
     gap: 4px;
     min-width: 0;
 }
 
-.workbench-head__tools {
-    align-items: flex-start;
-    justify-content: flex-end;
-    margin-left: auto;
-}
-
-.drawer-search-input {
-    width: min(360px, 44vw);
-}
-
-.category-editor-layout {
-    display: grid;
-    grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
-    gap: 16px;
-    min-width: 0;
-    min-height: 520px;
-}
-
-.category-sidebar {
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    max-height: 680px;
-    overflow: auto;
-    padding: 12px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 12px;
-    background: var(--bg-elevated);
-}
-
-.category-sidebar__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 0 2px 4px;
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.category-tab {
-    display: grid;
-    gap: 4px;
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    color: var(--text-secondary);
-    background: transparent;
-    text-align: left;
-    cursor: pointer;
-}
-
-.category-tab__copy {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-}
-
-.category-tab__title,
-.category-tab__meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-width: 0;
-}
-
-.category-tab__title span {
-    color: inherit;
+.rule-summary-text strong {
+    color: var(--text-primary);
     font-size: 13px;
-    font-weight: 800;
-    line-height: 1.35;
+    font-weight: 700;
+    line-height: 1.5;
 }
 
-.category-tab__meta small {
-    color: var(--text-tertiary);
+.rule-summary-text span {
+    color: var(--text-secondary);
     font-size: 12px;
+    line-height: 1.5;
 }
 
-.category-tab.is-active {
-    border-color: color-mix(in srgb, var(--primary) 32%, var(--border-color-light));
-    color: var(--primary);
-    background: color-mix(in srgb, var(--primary) 7%, var(--bg-card));
-}
-
-.keyword-workspace {
-    display: grid;
-    align-content: start;
-    gap: 14px;
-    min-width: 0;
-    overflow: auto;
-    padding: 16px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 12px;
-    background: var(--bg-card);
-}
-
-.keyword-workspace__head {
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-    overflow: hidden;
-    flex-wrap: wrap;
-    align-items: flex-end;
-
-    span {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        font-weight: 700;
-    }
-
-    strong {
-        color: var(--text-primary);
-        font-size: 16px;
-        font-weight: 800;
-        line-height: 1.35;
-    }
-
-    p {
-        color: var(--text-tertiary);
-        font-size: 12px;
-        line-height: 1.5;
-    }
-}
-
-.keyword-workspace__meta {
+.rule-list__actions {
     display: flex;
     align-items: center;
-    gap: 8px;
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 700;
+    justify-content: flex-end;
+    gap: 6px;
 }
 
-.add-keyword-btn {
-    flex: 0 0 auto;
+.rule-detail-empty {
+    padding: 32px 0;
+}
+
+.rule-editor {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    width: 100%;
+    font-size: 12px;
+}
+
+.rule-editor > span {
+    color: var(--text-tertiary);
     white-space: nowrap;
 }
 
-.rule-card-list {
-    display: grid;
-    gap: 12px;
-    min-width: 0;
+.rule-editor__field {
+    flex: 0 0 auto;
 }
 
-.rule-card {
-    display: grid;
-    gap: 12px;
-    min-width: 0;
-    padding: 14px;
-    border: 1px solid var(--border-color-light);
-    border-radius: 12px;
-    background: var(--bg-elevated);
+.rule-editor__field--xs {
+    width: 88px;
 }
 
-.rule-card__head {
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
+.rule-editor__field--sm {
+    width: 144px;
 }
 
-.rule-card__title {
+.node-dialog {
     display: grid;
-    gap: 4px;
-    min-width: 0;
+    gap: 10px;
+}
 
-    strong {
-        color: var(--text-primary);
-        font-size: 14px;
-        line-height: 1.45;
+.node-dialog__tip {
+    margin: 0;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+@media (max-width: 1180px) {
+    .rule-workspace {
+        grid-template-columns: 1fr;
     }
 }
 
-.rule-card__index {
-    color: var(--text-tertiary);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-}
-
-.rule-card__badges {
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: flex-end;
-}
-
-.rule-detail-grid,
-.rule-editor-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px 12px;
-    min-width: 0;
-}
-
-.rule-detail-block,
-.rule-editor-field {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-}
-
-.rule-detail-block span,
-.rule-editor-field span {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.rule-detail-block strong {
-    color: var(--text-primary);
-    font-size: 13px;
-    line-height: 1.5;
-    word-break: break-word;
-}
-
-.rule-editor-field--wide {
-    grid-column: span 2;
-}
-
-.rule-delete-btn {
-    align-self: end;
-    justify-self: end;
-}
-
-.remark-condition-stack {
-    display: grid;
-    gap: 8px;
-    min-width: 0;
-}
-
-.remark-condition-stack > :deep(.el-input) {
-    width: 100%;
-}
-
-.condition-stack {
-    display: grid;
-    grid-template-columns: minmax(120px, 168px) minmax(0, 1fr);
-    gap: 8px;
-    align-items: center;
-    min-width: 0;
-}
-
-.condition-stack--single {
-    grid-template-columns: minmax(120px, 200px);
-}
-
-.condition-stack > :deep(.el-input),
-.condition-stack > :deep(.el-select) {
-    min-width: 0;
-    width: 100%;
-}
-
-.drawer-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin: 20px -24px -20px;
-    padding: 14px 24px;
-    background: var(--bg-elevated);
-    border-top: 1px solid var(--border-light);
-}
-
-@media (max-width: 1100px) {
-    .page-toolbar,
-    .workbench-head,
-    .keyword-workspace__head,
-    .group-tree-card__head {
-        align-items: flex-start;
+@media (max-width: 900px) {
+    .rule-toolbar {
         flex-direction: column;
     }
 
-    .overview-grid,
-    .overview-strip {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .rule-toolbar__actions,
+    .rule-search-input {
+        width: 100%;
     }
 
-    .overview-item {
-        padding-left: 0;
-        border-left: 0;
+    .detail-header,
+    .panel-header {
+        flex-direction: column;
+        align-items: flex-start;
     }
 
-    .group-summary-card,
-    .category-editor-layout {
-        grid-template-columns: 1fr;
-    }
-
-    .rule-detail-grid,
-    .rule-editor-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .rule-editor-field--wide {
-        grid-column: auto;
-    }
-
-    .group-tree-children {
-        grid-template-columns: 1fr;
-    }
-
-    .group-list-head {
+    .rule-list__head {
         display: none;
     }
 
-    .group-list-parent,
-    .group-list-child {
+    .rule-list__row {
         grid-template-columns: 1fr;
         gap: 10px;
     }
 
-    .group-list-child {
-        padding-left: 16px;
-    }
-
-    .group-list-parent__actions,
-    .group-list-child__actions {
+    .rule-list__actions {
         justify-content: flex-start;
-    }
-
-    .group-search-input,
-    .drawer-search-input {
-        width: 100%;
-    }
-
-    .condition-stack,
-    .condition-stack--single {
-        grid-template-columns: 1fr;
-    }
-
-    .toolbar-actions,
-    .workbench-head__tools,
-    .toolbar-actions :deep(.el-button),
-    .workbench-head__tools :deep(.el-button) {
-        width: 100%;
-        max-width: none;
-    }
-}
-</style>
-
-<style lang="scss">
-.reclass-drawer {
-    .el-drawer__body {
-        display: flex;
-        flex-direction: column;
-        overflow: auto;
     }
 }
 </style>

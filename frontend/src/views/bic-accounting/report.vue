@@ -18,6 +18,11 @@
                         </el-option>
                     </el-select>
                 </el-form-item>
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+                    <el-select v-model="searchForm.orgIds" placeholder="全部组织" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 190px" @change="handleOrgChange">
+                        <el-option v-for="org in orgOptions" :key="org.id" :label="org.name" :value="org.id" />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="店铺">
                     <el-select v-model="searchForm.shopNames" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="全部店铺" :loading="shopLoading" style="width: 210px">
                         <el-option v-for="shop in filteredShopOptions" :key="`${shop.platform_name}-${shop.shop_name}`" :label="shop.shop_name" :value="shop.shop_name">
@@ -60,6 +65,11 @@
                 <el-table-column prop="platform_code" label="平台" width="110">
                     <template #default="{ row }"><PlatformBadge :platform="row.platform_code" /></template>
                 </el-table-column>
+                <el-table-column v-if="userStore.isSuperAdmin" label="组织" width="170" show-overflow-tooltip>
+                    <template #default="{ row }">
+                        {{ row.org_name || `组织#${row.org_id}` }}
+                    </template>
+                </el-table-column>
                 <el-table-column prop="service_provider" label="服务商" min-width="150" show-overflow-tooltip>
                     <template #default="{ row }">{{ row.service_provider || "-" }}</template>
                 </el-table-column>
@@ -97,6 +107,8 @@
 defineOptions({ name: "BicReport" });
 
 import type { TableInstance } from "element-plus";
+import { useUserStore } from "@/stores/user";
+import { getAllOrganizations, type Organization } from "@/api/organization";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
@@ -120,6 +132,8 @@ const tableRef = ref<TableInstance>();
 const tableData = ref<BicReport[]>([]);
 const selectedRows = ref<BicReport[]>([]);
 const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
+const userStore = useUserStore();
+const orgOptions = ref<Organization[]>([]);
 const shopOptions = ref<Shop[]>([]);
 const platforms = ref<Platform[]>(getFallbackPlatforms());
 const platformOptions = ref<PlatformOption[]>(toSourcePlatformOptions(platforms.value));
@@ -129,6 +143,7 @@ const exportCurrentPageLoading = ref(false);
 const exportSelectedLoading = ref(false);
 const searchForm = reactive({
     monthRange: [] as string[],
+    orgIds: [] as number[],
     platforms: [] as string[],
     shopNames: [] as string[],
     serviceProvider: "",
@@ -138,6 +153,7 @@ const selectedReportPlatformsParam = computed(() => {
     const values = new Set(searchForm.platforms.map((platform) => getReportPlatformCode(platform, platforms.value)).filter(Boolean));
     return Array.from(values).join(",") || undefined;
 });
+const selectedOrgIdsParam = computed(() => searchForm.orgIds.join(",") || undefined);
 
 const filteredShopOptions = computed(() => {
     if (!searchForm.platforms.length) return shopOptions.value;
@@ -154,12 +170,16 @@ const shopColorByName = computed(() => {
 });
 
 interface ReportFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "platforms" | "shopNames" | "serviceProvider";
+    key: "monthRange" | "orgIds" | "platforms" | "shopNames" | "serviceProvider";
 }
 
 const activeFilterTags = computed<ReportFilterTag[]>(() => {
     const tags: ReportFilterTag[] = [];
     if (searchForm.monthRange.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    searchForm.orgIds.forEach((value) => {
+        const org = orgOptions.value.find((item) => item.id === value);
+        tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
+    });
     searchForm.platforms.forEach((value) => tags.push({ key: "platforms", label: "平台", value: getPlatformLabel(value) }));
     searchForm.shopNames.forEach((value) => tags.push({ key: "shopNames", label: "店铺", value }));
     if (searchForm.serviceProvider) tags.push({ key: "serviceProvider", label: "服务商", value: searchForm.serviceProvider });
@@ -170,6 +190,7 @@ function queryParams() {
     return {
         page: pagination.page,
         page_size: pagination.pageSize,
+        org_id: selectedOrgIdsParam.value,
         platform_code: selectedReportPlatformsParam.value,
         shop_name: searchForm.shopNames.join(",") || undefined,
         service_provider: searchForm.serviceProvider || undefined,
@@ -191,10 +212,19 @@ async function fetchData() {
 async function fetchShopOptions() {
     shopLoading.value = true;
     try {
-        const res = await getShopList({ page: 1, page_size: 100, platform_name: selectedReportPlatformsParam.value });
+        const res = await getShopList({ page: 1, page_size: 100, org_id: selectedOrgIdsParam.value, platform_name: selectedReportPlatformsParam.value });
         shopOptions.value = res.items || [];
     } finally {
         shopLoading.value = false;
+    }
+}
+
+async function fetchOrgOptions() {
+    if (!userStore.isSuperAdmin) return;
+    try {
+        orgOptions.value = await getAllOrganizations();
+    } catch {
+        // Ignore
     }
 }
 
@@ -214,6 +244,12 @@ async function handlePlatformChange() {
     searchForm.shopNames = searchForm.shopNames.filter((shopName) => availableShopNames.has(shopName));
 }
 
+async function handleOrgChange() {
+    await fetchShopOptions();
+    const availableShopNames = new Set(filteredShopOptions.value.map((shop) => shop.shop_name));
+    searchForm.shopNames = searchForm.shopNames.filter((shopName) => availableShopNames.has(shopName));
+}
+
 function handleSearch() {
     pagination.page = 1;
     fetchData();
@@ -221,6 +257,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.monthRange = [];
+    searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopNames = [];
     searchForm.serviceProvider = "";
@@ -230,6 +267,13 @@ function handleReset() {
 
 async function removeFilterTag(tag: ReportFilterTag) {
     if (tag.key === "monthRange") searchForm.monthRange = [];
+    if (tag.key === "orgIds") {
+        searchForm.orgIds = searchForm.orgIds.filter((item) => {
+            const org = orgOptions.value.find((orgItem) => orgItem.id === item);
+            return (org?.name || `组织#${item}`) !== tag.value;
+        });
+        await handleOrgChange();
+    }
     if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter((item) => getPlatformLabel(item) !== tag.value);
         await handlePlatformChange();
@@ -290,6 +334,7 @@ function summaryMethod({ columns, data }: { columns: any[]; data: BicReport[] })
 }
 
 onMounted(async () => {
+    await fetchOrgOptions();
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();

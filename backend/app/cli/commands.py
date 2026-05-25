@@ -116,6 +116,12 @@ def seed_transaction_accounting_rules() -> None:
     asyncio.run(seed())
 
 
+def seed_transaction_major_subjects() -> None:
+    from scripts.seed_transaction_major_subjects import seed
+
+    asyncio.run(seed())
+
+
 async def _seed_all() -> None:
     from scripts.seed_category_dicts import seed as seed_categories
     from scripts.seed_file_specs import seed as seed_specs

@@ -66,13 +66,14 @@ class TransactionAccountingSeedService:
         result = await db.execute(
             select(TransactionSubject).where(
                 TransactionSubject.name == name,
+                TransactionSubject.account_type == "动账账户",
                 TransactionSubject.is_deleted.is_(False),
             )
         )
         subject = result.scalar_one_or_none()
         if subject is not None:
             return subject
-        subject = TransactionSubject(name=name, sort_order=sort_order, status=1)
+        subject = TransactionSubject(name=name, account_type="动账账户", sort_order=sort_order, status=1)
         db.add(subject)
         await db.flush()
         return subject

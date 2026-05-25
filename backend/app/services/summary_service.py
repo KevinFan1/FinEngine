@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
 from app.services.summary_adjustment_service import SummaryAdjustmentService
@@ -131,7 +132,7 @@ class SummaryService:
     async def list_summaries(
         db: AsyncSession,
         *,
-        org_id: int,
+        org_ids: list[int] | None,
         summary_year: int | None = None,
         summary_month: int | None = None,
         summary_start_year: int | None = None,
@@ -154,11 +155,19 @@ class SummaryService:
     ) -> tuple[list[dict], int]:
         """Query financial summaries with filters."""
         stmt = (
-            select(FinancialSummary, Shop.shop_color.label("shop_color"))
+            select(
+                FinancialSummary,
+                Shop.shop_color.label("shop_color"),
+                Organization.name.label("org_name"),
+            )
             .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
-            .where(FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False))
+            .outerjoin(Organization, FinancialSummary.org_id == Organization.id)
+            .where(FinancialSummary.is_deleted.is_(False))
         )
-        count_stmt = select(func.count()).select_from(FinancialSummary).where(FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False))
+        count_stmt = select(func.count()).select_from(FinancialSummary).where(FinancialSummary.is_deleted.is_(False))
+        if org_ids is not None:
+            stmt = stmt.where(FinancialSummary.org_id.in_(org_ids))
+            count_stmt = count_stmt.where(FinancialSummary.org_id.in_(org_ids))
 
         if summary_year is not None:
             stmt = stmt.where(FinancialSummary.summary_year == summary_year)
@@ -245,8 +254,9 @@ class SummaryService:
             {
                 "summary": summary,
                 "shop_color": shop_color,
+                "org_name": org_name,
             }
-            for summary, shop_color in result.all()
+            for summary, shop_color, org_name in result.all()
         ]
 
         return summaries, total
@@ -255,7 +265,7 @@ class SummaryService:
     async def export_summaries(
         db: AsyncSession,
         *,
-        org_id: int,
+        org_ids: list[int] | None,
         summary_year: int | None = None,
         summary_month: int | None = None,
         summary_start_year: int | None = None,
@@ -279,7 +289,9 @@ class SummaryService:
     ) -> io.BytesIO:
         """Export financial summaries to an Excel file (in-memory BytesIO)."""
         # Query all matching rows (no pagination)
-        stmt = select(FinancialSummary).where(FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False))
+        stmt = select(FinancialSummary).where(FinancialSummary.is_deleted.is_(False))
+        if org_ids is not None:
+            stmt = stmt.where(FinancialSummary.org_id.in_(org_ids))
 
         if ids is not None:
             if not ids:
@@ -355,7 +367,7 @@ class SummaryService:
     async def list_report_summaries(
         db: AsyncSession,
         *,
-        org_id: int,
+        org_ids: list[int] | None,
         source_year: int | None = None,
         source_month: int | None = None,
         source_start_year: int | None = None,
@@ -372,7 +384,7 @@ class SummaryService:
     ) -> tuple[list[dict], int]:
         """Aggregate financial summaries by accounting year/month."""
         filters = SummaryService._build_report_filters(
-            org_id=org_id,
+            org_ids=org_ids,
             source_year=source_year,
             source_month=source_month,
             source_start_year=source_start_year,
@@ -401,6 +413,7 @@ class SummaryService:
         stmt = (
             select(
                 FinancialSummary.org_id.label("org_id"),
+                func.max(Organization.name).label("org_name"),
                 FinancialSummary.source_year.label("source_year"),
                 FinancialSummary.source_month.label("source_month"),
                 FinancialSummary.report_platform_code.label("platform_name"),
@@ -412,6 +425,7 @@ class SummaryService:
                 *metric_cols,
             )
             .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
+            .outerjoin(Organization, FinancialSummary.org_id == Organization.id)
             .where(*filters)
             .group_by(*group_cols)
             .order_by(
@@ -427,7 +441,7 @@ class SummaryService:
         rows = [dict(row) for row in result.mappings().all()]
         rows = await SummaryService._apply_report_adjustments(
             db,
-            org_id=org_id,
+            org_ids=org_ids,
             rows=rows,
             source_year=source_year,
             source_month=source_month,
@@ -445,7 +459,7 @@ class SummaryService:
     async def export_report_summaries(
         db: AsyncSession,
         *,
-        org_id: int,
+        org_ids: list[int] | None,
         source_year: int | None = None,
         source_month: int | None = None,
         source_start_year: int | None = None,
@@ -463,7 +477,7 @@ class SummaryService:
     ) -> io.BytesIO:
         """Export accounting-month aggregated summaries to Excel."""
         filters = SummaryService._build_report_filters(
-            org_id=org_id,
+            org_ids=org_ids,
             source_year=source_year,
             source_month=source_month,
             source_start_year=source_start_year,
@@ -487,6 +501,7 @@ class SummaryService:
         stmt = (
             select(
                 FinancialSummary.org_id.label("org_id"),
+                func.max(Organization.name).label("org_name"),
                 FinancialSummary.source_year.label("source_year"),
                 FinancialSummary.source_month.label("source_month"),
                 FinancialSummary.report_platform_code.label("platform_name"),
@@ -498,6 +513,7 @@ class SummaryService:
                 *metric_cols,
             )
             .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
+            .outerjoin(Organization, FinancialSummary.org_id == Organization.id)
             .where(*filters)
             .group_by(*group_cols)
             .order_by(
@@ -515,7 +531,7 @@ class SummaryService:
         rows = [dict(row) for row in result.mappings().all()]
         rows = await SummaryService._apply_report_adjustments(
             db,
-            org_id=org_id,
+            org_ids=org_ids,
             rows=rows,
             source_year=source_year,
             source_month=source_month,
@@ -629,7 +645,7 @@ class SummaryService:
 
     @staticmethod
     def report_row_id(row: dict) -> str:
-        return f"{int(row.get('source_year') or 0)}-{int(row.get('source_month') or 0)}-{row.get('platform_name') or ''}-{int(row.get('shop_id') or 0)}"
+        return f"{int(row.get('org_id') or 0)}-{int(row.get('source_year') or 0)}-{int(row.get('source_month') or 0)}-{row.get('platform_name') or ''}-{int(row.get('shop_id') or 0)}"
 
     @staticmethod
     def _month_label(year: int | None, month: int | None) -> str:
@@ -641,7 +657,7 @@ class SummaryService:
     async def _apply_report_adjustments(
         db: AsyncSession,
         *,
-        org_id: int,
+        org_ids: list[int] | None,
         rows: list[dict],
         source_year: int | None,
         source_month: int | None,
@@ -658,7 +674,7 @@ class SummaryService:
 
         adjustment_sums = await SummaryAdjustmentService.list_adjustment_sums(
             db,
-            org_id=org_id,
+            org_ids=org_ids,
             source_year=source_year,
             source_month=source_month,
             source_start_year=source_start_year,
@@ -671,6 +687,7 @@ class SummaryService:
         )
         for row in rows:
             key = (
+                int(row.get("org_id") or 0),
                 int(row.get("source_year") or 0),
                 int(row.get("source_month") or 0),
                 str(row.get("platform_name") or ""),
@@ -694,7 +711,7 @@ class SummaryService:
     @staticmethod
     def _build_report_filters(
         *,
-        org_id: int,
+        org_ids: list[int] | None,
         source_year: int | None,
         source_month: int | None,
         source_start_year: int | None = None,
@@ -706,7 +723,9 @@ class SummaryService:
         shop_name: str | None,
         keyword: str | None = None,
     ):
-        filters = [FinancialSummary.org_id == org_id, FinancialSummary.is_deleted.is_(False)]
+        filters = [FinancialSummary.is_deleted.is_(False)]
+        if org_ids is not None:
+            filters.append(FinancialSummary.org_id.in_(org_ids))
         if source_year is not None:
             filters.append(FinancialSummary.source_year == source_year)
         if source_month is not None:

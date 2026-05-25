@@ -3,11 +3,12 @@ from io import BytesIO
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.models.organization import Organization
 from app.models.platform import Platform
 from app.models.shop import Shop
 from app.models.user import User
@@ -15,6 +16,7 @@ from app.schemas.shop import ShopCreate, ShopImportError, ShopImportResult, Shop
 from app.services.audit_service import AuditService
 from app.services.shop_color_service import assign_default_shop_color, normalize_shop_color
 from app.services.platform_profile_service import resolve_platform_profile
+from app.utils.query_filters import split_int_filter_values
 
 
 SHOP_DUPLICATE_MESSAGE = "该平台下已存在同名店铺，请勿重复创建"
@@ -117,17 +119,26 @@ class ShopService:
     async def list_shops(
         db: AsyncSession,
         *,
-        org_id: int | None = None,
+        org_id: str | int | None = None,
         keyword: str | None = None,
         platform_name: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[Shop], int]:
-        stmt = select(Shop).where(ShopService.active_filter()).order_by(Shop.id.desc())
+    ) -> tuple[list[tuple[Shop, str | None]], int]:
+        stmt = (
+            select(Shop, Organization.name.label("org_name"))
+            .outerjoin(
+                Organization,
+                and_(Organization.id == Shop.org_id, Organization.is_deleted.is_(False)),
+            )
+            .where(ShopService.active_filter())
+            .order_by(Shop.id.desc())
+        )
         count_stmt = select(func.count()).select_from(Shop).where(ShopService.active_filter())
-        if org_id:
-            stmt = stmt.where(Shop.org_id == org_id)
-            count_stmt = count_stmt.where(Shop.org_id == org_id)
+        org_ids = split_int_filter_values(org_id)
+        if org_ids:
+            stmt = stmt.where(Shop.org_id.in_(org_ids))
+            count_stmt = count_stmt.where(Shop.org_id.in_(org_ids))
         if platform_name:
             platform_values = [item.strip() for item in platform_name.split(",") if item.strip()]
             report_platform_codes = set()
@@ -157,7 +168,7 @@ class ShopService:
             stmt = stmt.where(cond)
             count_stmt = count_stmt.where(cond)
         total = (await db.execute(count_stmt)).scalar() or 0
-        items = list((await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).scalars().all())
+        items = list((await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).all())
         return items, total
 
     @staticmethod

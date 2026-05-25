@@ -16,6 +16,7 @@ class SummaryQuery(BaseModel):
 class SummaryOut(BaseModel):
     id: int
     org_id: int
+    org_name: str | None = None
     shop_id: int
     summary_year: int
     summary_month: int
@@ -78,6 +79,7 @@ class SummaryOut(BaseModel):
 class SummaryReportOut(BaseModel):
     id: str
     org_id: int
+    org_name: str | None = None
     shop_id: int
     source_year: int
     source_month: int

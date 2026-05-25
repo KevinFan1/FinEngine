@@ -19,13 +19,12 @@ class BicUploadFile(SoftDeleteMixin, Base):
             ),
         ),
         Index(
-            "uq_fin_bic_upload_business_key",
+            "idx_fin_bic_upload_business_key",
             "org_id",
             "platform_code",
             "shop_id",
             "accounting_year",
             "accounting_month",
-            unique=True,
             postgresql_where=text(
                 "is_deleted = false "
                 "AND platform_code IS NOT NULL "

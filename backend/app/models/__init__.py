@@ -14,6 +14,7 @@ from app.models.task import ProcessingTask
 from app.models.transaction_accounting import (
     TransactionCategory,
     TransactionDetail,
+    TransactionMajorCategory,
     TransactionRule,
     TransactionSubject,
     TransactionSummaryRow,
@@ -38,6 +39,7 @@ __all__ = [
     "UploadFile",
     "ProcessingTask",
     "TransactionSubject",
+    "TransactionMajorCategory",
     "TransactionCategory",
     "TransactionRule",
     "TransactionUploadFile",

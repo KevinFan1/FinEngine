@@ -36,6 +36,8 @@ class ShopUpdate(ShopInfoFields):
 
 class ShopOut(ShopInfoFields):
     id: int
+    org_id: int
+    org_name: str | None = None
     platform_name: str
     shop_name: str
     shop_color: str | None

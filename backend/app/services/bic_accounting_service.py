@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import register_after_commit
 from app.models.bic_accounting import BicDetail, BicReportRow, BicTask, BicUploadFile
+from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.upload import UploadFile
 from app.models.user import User
@@ -22,6 +23,7 @@ from app.services.shop_service import ShopService
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, safe_str
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
+from app.utils.query_filters import resolve_org_ids
 from app.utils.money import safe_decimal
 
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
@@ -89,26 +91,6 @@ class BicAccountingService:
             current_task = (await db.execute(task_stmt)).scalars().first()
             if current_task is not None:
                 return current_task
-
-        if shop_id is not None and upload_file.parsed_year is not None and upload_file.parsed_month is not None:
-            existing_business_file = await BicAccountingService._get_existing_business_upload_file(
-                db,
-                org_id=upload_file.org_id,
-                platform_code=source_platform,
-                shop_id=shop_id,
-                accounting_year=upload_file.parsed_year,
-                accounting_month=upload_file.parsed_month,
-            )
-            if existing_business_file is not None:
-                if shop_id is not None and existing_business_file.shop_id is None:
-                    existing_business_file.shop_id = shop_id
-                current_task = await BicAccountingService._get_latest_task_for_upload_file(
-                    db,
-                    file_id=existing_business_file.id,
-                )
-                if current_task is not None:
-                    return current_task
-                bic_upload_file = existing_business_file
 
         if bic_upload_file is None:
             bic_upload_file = BicUploadFile(
@@ -259,30 +241,6 @@ class BicAccountingService:
         return (await db.execute(stmt)).scalars().first()
 
     @staticmethod
-    async def _get_existing_business_upload_file(
-        db: AsyncSession,
-        *,
-        org_id: int,
-        platform_code: str,
-        shop_id: int,
-        accounting_year: int,
-        accounting_month: int,
-    ) -> BicUploadFile | None:
-        stmt = (
-            select(BicUploadFile)
-            .where(
-                BicUploadFile.org_id == org_id,
-                BicUploadFile.platform_code == platform_code,
-                BicUploadFile.shop_id == shop_id,
-                BicUploadFile.accounting_year == accounting_year,
-                BicUploadFile.accounting_month == accounting_month,
-                BicUploadFile.is_deleted.is_(False),
-            )
-            .order_by(BicUploadFile.id.desc())
-        )
-        return (await db.execute(stmt)).scalars().first()
-
-    @staticmethod
     def _latest_result_task_ids_select():
         return (
             select(func.max(BicTask.id).label("task_id"))
@@ -319,11 +277,11 @@ class BicAccountingService:
         keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[tuple[BicTask, BicUploadFile, str | None]], int]:
+    ) -> tuple[list[tuple[BicTask, BicUploadFile, str | None, str | None]], int]:
         filters = [BicTask.is_deleted.is_(False), BicUploadFile.is_deleted.is_(False)]
-        scoped_org_id = BicAccountingService.resolve_org_id(user=user, requested_org_id=org_id)
-        if scoped_org_id is not None:
-            filters.append(BicTask.org_id == scoped_org_id)
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        if org_ids is not None:
+            filters.append(BicTask.org_id.in_(org_ids))
         if status:
             filters.append(BicTask.status.in_(TransactionAccountingService._split_filter_values(status)))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
@@ -354,9 +312,10 @@ class BicAccountingService:
             )
 
         stmt = (
-            select(BicTask, BicUploadFile, Shop.shop_color)
+            select(BicTask, BicUploadFile, Shop.shop_color, Organization.name.label("org_name"))
             .join(BicUploadFile, BicUploadFile.id == BicTask.file_id)
             .outerjoin(Shop, Shop.id == BicUploadFile.shop_id)
+            .outerjoin(Organization, Organization.id == BicTask.org_id)
             .where(*filters)
             .order_by(BicTask.id.desc())
         )
@@ -388,9 +347,9 @@ class BicAccountingService:
         page_size: int | None = 50,
     ) -> tuple[list[dict[str, object]], int]:
         filters = [BicDetail.is_deleted.is_(False)]
-        scoped_org_id = BicAccountingService.resolve_org_id(user=user, requested_org_id=org_id)
-        if scoped_org_id is not None:
-            filters.append(BicDetail.org_id == scoped_org_id)
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        if org_ids is not None:
+            filters.append(BicDetail.org_id.in_(org_ids))
         if ids is not None:
             if not ids:
                 return [], 0
@@ -433,6 +392,7 @@ class BicAccountingService:
                 BicDetail.task_id.label("task_id"),
                 BicDetail.file_id.label("file_id"),
                 BicDetail.org_id.label("org_id"),
+                Organization.name.label("org_name"),
                 BicDetail.shop_id.label("shop_id"),
                 BicDetail.platform_code.label("platform_code"),
                 BicDetail.service_provider.label("service_provider"),
@@ -447,6 +407,7 @@ class BicAccountingService:
                 Shop.registered_address.label("registered_address"),
             )
             .outerjoin(Shop, Shop.id == BicDetail.shop_id)
+            .outerjoin(Organization, Organization.id == BicDetail.org_id)
             .where(*filters)
             .order_by(
                 BicDetail.accounting_year.desc(),
@@ -487,9 +448,9 @@ class BicAccountingService:
         page_size: int | None = 50,
     ) -> tuple[list[dict[str, object]], int]:
         filters = [BicReportRow.is_deleted.is_(False)]
-        scoped_org_id = BicAccountingService.resolve_org_id(user=user, requested_org_id=org_id)
-        if scoped_org_id is not None:
-            filters.append(BicReportRow.org_id == scoped_org_id)
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        if org_ids is not None:
+            filters.append(BicReportRow.org_id.in_(org_ids))
         if ids is not None:
             if not ids:
                 return [], 0
@@ -529,6 +490,7 @@ class BicAccountingService:
                 BicReportRow.task_id.label("task_id"),
                 BicReportRow.file_id.label("file_id"),
                 BicReportRow.org_id.label("org_id"),
+                Organization.name.label("org_name"),
                 BicReportRow.shop_id.label("shop_id"),
                 BicReportRow.platform_code.label("platform_code"),
                 BicReportRow.service_provider.label("service_provider"),
@@ -545,6 +507,7 @@ class BicAccountingService:
                 Shop.registered_address.label("registered_address"),
             )
             .outerjoin(Shop, Shop.id == BicReportRow.shop_id)
+            .outerjoin(Organization, Organization.id == BicReportRow.org_id)
             .where(*filters)
             .order_by(
                 BicReportRow.accounting_year.desc(),

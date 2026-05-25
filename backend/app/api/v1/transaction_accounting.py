@@ -14,10 +14,14 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.transaction_accounting import (
     TransactionAnnualSummaryOut,
+    TransactionCashFlowItemOut,
     TransactionCategoryCreate,
     TransactionCategoryOut,
     TransactionCategoryUpdate,
     TransactionDetailOut,
+    TransactionMajorCategoryCreate,
+    TransactionMajorCategoryOut,
+    TransactionMajorCategoryUpdate,
     TransactionRuleCreate,
     TransactionRuleOut,
     TransactionRuleUpdate,
@@ -62,9 +66,10 @@ def _client_info(request: Request) -> tuple[str | None, str | None]:
     return ip, ua
 
 
-def _task_out(task, upload_file) -> TransactionTaskOut:
+def _task_out(task, upload_file, org_name: str | None = None) -> TransactionTaskOut:
     item = TransactionTaskOut.model_validate(task)
     item.result_summary = _normalize_transaction_summary(item.result_summary)
+    item.org_name = org_name
     item.original_name = upload_file.original_name
     item.shop_id = upload_file.shop_id
     item.platform_code = upload_file.platform_code
@@ -141,6 +146,119 @@ def _rule_display_name(rule) -> str:
     if scene == "":
         scene = "空场景"
     return remark or scene or getattr(rule, "transaction_direction", "") or str(getattr(rule, "id", ""))
+
+
+@router.get("/major-categories", response_model=ApiResponse[list[TransactionMajorCategoryOut]])
+async def list_major_categories(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    items = await TransactionAccountingService.list_major_categories(db, user=current_user)
+    return ApiResponse(data=[TransactionMajorCategoryOut.model_validate(item) for item in items])
+
+
+@router.post("/major-categories", response_model=ApiResponse[TransactionMajorCategoryOut])
+async def create_major_category(
+    body: TransactionMajorCategoryCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    _superadmin: User = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    ip, ua = _client_info(request)
+    try:
+        item = await TransactionAccountingService.create_major_category(db, data=body, user=current_user)
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    await AuditService.log(
+        db,
+        user_id=current_user.id,
+        username=current_user.username,
+        display_name=current_user.display_name,
+        org_id=None,
+        module="transaction_accounting",
+        action="config_change",
+        description=f"新增资金大分类 [{item.name}]",
+        target_type="transaction_major_category",
+        target_id=item.id,
+        target_name=item.name,
+        ip=ip,
+        user_agent=ua,
+    )
+    return ApiResponse(data=TransactionMajorCategoryOut.model_validate(item))
+
+
+@router.put("/major-categories/{major_category_id}", response_model=ApiResponse[TransactionMajorCategoryOut])
+async def update_major_category(
+    major_category_id: int,
+    body: TransactionMajorCategoryUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    _superadmin: User = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    ip, ua = _client_info(request)
+    try:
+        item = await TransactionAccountingService.update_major_category(
+            db,
+            major_category_id=major_category_id,
+            data=body,
+            user=current_user,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    if item is None:
+        return ApiResponse(code=404, message="大分类不存在")
+    await AuditService.log(
+        db,
+        user_id=current_user.id,
+        username=current_user.username,
+        display_name=current_user.display_name,
+        org_id=None,
+        module="transaction_accounting",
+        action="config_change",
+        description=f"修改资金大分类 [{item.name}]",
+        target_type="transaction_major_category",
+        target_id=item.id,
+        target_name=item.name,
+        ip=ip,
+        user_agent=ua,
+    )
+    return ApiResponse(data=TransactionMajorCategoryOut.model_validate(item))
+
+
+@router.delete("/major-categories/{major_category_id}", response_model=ApiResponse[None])
+async def delete_major_category(
+    major_category_id: int,
+    current_user: User = Depends(get_current_user),
+    _superadmin: User = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        ok = await TransactionAccountingService.delete_major_category(
+            db,
+            major_category_id=major_category_id,
+            user=current_user,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=403, message=str(exc))
+    if not ok:
+        return ApiResponse(code=404, message="大分类不存在")
+    return ApiResponse(message="已删除")
+
+
+@router.get("/cash-flow-items", response_model=ApiResponse[list[TransactionCashFlowItemOut]])
+async def list_cash_flow_items(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    items = await TransactionAccountingService.list_cash_flow_items(db, user=current_user)
+    data = []
+    for item in items:
+        payload = TransactionCashFlowItemOut.model_validate(item)
+        payload.parent_name = getattr(item, "parent_name", None)
+        data.append(payload)
+    return ApiResponse(data=data)
 
 
 @router.get("/subjects", response_model=ApiResponse[list[TransactionSubjectOut]])
@@ -450,7 +568,7 @@ async def upload_callback(
 async def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     status: str | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
@@ -483,7 +601,7 @@ async def list_tasks(
         page=page,
         page_size=page_size,
     )
-    items = [_task_out(task, upload_file) for task, upload_file in rows]
+    items = [_task_out(task, upload_file, org_name) for task, upload_file, org_name in rows]
     return ApiResponse(data=PageResponse(items=items, total=total, page=page, page_size=page_size))
 
 
@@ -560,12 +678,13 @@ async def batch_recalculate_tasks(
 async def list_details(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     status: str | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    major_category_id: str | None = Query(None),
     subject_id: str | None = Query(None),
     category_id: str | None = Query(None),
     transaction_direction: str | None = Query(None),
@@ -594,6 +713,7 @@ async def list_details(
         platform_code=platform_code,
         shop_name=shop_name,
         shop_id=shop_id,
+        major_category_id=major_category_id,
         subject_id=subject_id,
         category_id=category_id,
         transaction_direction=transaction_direction,
@@ -624,12 +744,13 @@ async def list_details(
 @router.get("/details/export")
 async def export_details(
     request: Request,
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     status: str | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    major_category_id: str | None = Query(None),
     subject_id: str | None = Query(None),
     category_id: str | None = Query(None),
     transaction_direction: str | None = Query(None),
@@ -660,11 +781,12 @@ async def export_details(
             user=current_user,
             org_id=org_id,
             task_id=task_id,
-        status=status,
-        platform_code=platform_code,
-        shop_name=shop_name,
-        shop_id=shop_id,
-        subject_id=subject_id,
+            status=status,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            major_category_id=major_category_id,
+            subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
             accounting_year=accounting_year,
@@ -726,11 +848,12 @@ async def export_details(
 async def list_summaries(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    major_category_id: str | None = Query(None),
     subject_id: str | None = Query(None),
     category_id: str | None = Query(None),
     transaction_direction: str | None = Query(None),
@@ -758,6 +881,7 @@ async def list_summaries(
         platform_code=platform_code,
         shop_name=shop_name,
         shop_id=shop_id,
+        major_category_id=major_category_id,
         subject_id=subject_id,
         category_id=category_id,
         transaction_direction=transaction_direction,
@@ -788,11 +912,12 @@ async def list_summaries(
 @router.get("/summary/annual", response_model=ApiResponse[TransactionAnnualSummaryOut])
 async def get_annual_summary(
     year: int = Query(..., ge=2000, le=2100),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    major_category_id: str | None = Query(None),
     subject_id: str | None = Query(None),
     category_id: str | None = Query(None),
     transaction_direction: str | None = Query(None),
@@ -816,6 +941,7 @@ async def get_annual_summary(
             platform_code=platform_code,
             shop_name=shop_name,
             shop_id=shop_id,
+            major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
@@ -836,11 +962,12 @@ async def get_annual_summary(
 async def export_annual_summary(
     request: Request,
     year: int = Query(..., ge=2000, le=2100),
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
     shop_id: int | None = Query(None),
+    major_category_id: str | None = Query(None),
     subject_id: str | None = Query(None),
     category_id: str | None = Query(None),
     transaction_direction: str | None = Query(None),
@@ -860,11 +987,12 @@ async def export_annual_summary(
             user=current_user,
             year=year,
             org_id=org_id,
-        task_id=task_id,
-        platform_code=platform_code,
-        shop_name=shop_name,
-        shop_id=shop_id,
-        subject_id=subject_id,
+            task_id=task_id,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_id=shop_id,
+            major_category_id=major_category_id,
+            subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,
             upload_accounting_year=upload_accounting_year,
@@ -902,10 +1030,12 @@ async def export_annual_summary(
 @router.get("/summary/export")
 async def export_summaries(
     request: Request,
-    org_id: int | None = Query(None),
+    org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
+    shop_id: int | None = Query(None),
+    major_category_id: str | None = Query(None),
     subject_id: str | None = Query(None),
     category_id: str | None = Query(None),
     transaction_direction: str | None = Query(None),
@@ -938,6 +1068,8 @@ async def export_summaries(
             task_id=task_id,
             platform_code=platform_code,
             shop_name=shop_name,
+            shop_id=shop_id,
+            major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
             transaction_direction=transaction_direction,

@@ -2,6 +2,8 @@ import { del, downloadBlob, get, post, put, uploadForm } from './index'
 
 export interface Shop {
   id: number
+  org_id: number
+  org_name?: string | null
   platform_name: string
   shop_name: string
   shop_color?: string
@@ -49,6 +51,7 @@ export interface ShopListParams {
   page_size?: number
   keyword?: string
   platform_name?: string
+  org_id?: number | string
 }
 
 export interface ShopImportError {

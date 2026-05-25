@@ -104,6 +104,17 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "资金任务", icon: "List" },
             },
             {
+                path: "transaction-major-categories",
+                name: "TransactionMajorCategories",
+                component: () =>
+                    import("@/views/transaction-accounting/major-categories.vue"),
+                meta: {
+                    title: "资金大分类",
+                    icon: "CollectionTag",
+                    roles: ["superadmin"],
+                },
+            },
+            {
                 path: "transaction-rules",
                 name: "TransactionRules",
                 component: () =>

@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.database import run_after_commit_callbacks
+from app.models.bic_accounting import BicUploadFile
 from app.models.task import ProcessingTask
+from app.models.transaction_accounting import TransactionTask, TransactionUploadFile
 from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
 from app.services import upload_service as upload_service_module
@@ -55,6 +57,83 @@ class _CreateOnlySession:
                 return _Scalars()
 
         return _Result()
+
+    async def flush(self) -> None:
+        for instance in self.added:
+            if getattr(instance, "id", None) is None:
+                instance.id = self._next_id
+                self._next_id += 1
+
+    async def refresh(self, _instance) -> None:
+        return None
+
+
+class _ScalarResult:
+    def __init__(self, value=None) -> None:
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+    def scalars(self):
+        value = self.value
+
+        class _Scalars:
+            @staticmethod
+            def first():
+                return value
+
+        return _Scalars()
+
+
+class _ExistingBusinessSession(_CreateOnlySession):
+    def __init__(self, *, existing_upload: TransactionUploadFile) -> None:
+        super().__init__()
+        self.existing_upload = existing_upload
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        statement = str(stmt)
+        if "WHERE fin_transaction_upload_files.org_id" in statement:
+            return _ScalarResult(self.existing_upload)
+        return _ScalarResult(None)
+
+
+class _ExistingBicBusinessSession(_CreateOnlySession):
+    def __init__(self, *, existing_upload: BicUploadFile) -> None:
+        super().__init__()
+        self.existing_upload = existing_upload
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        statement = str(stmt)
+        if "WHERE fin_bic_upload_files.org_id" in statement:
+            return _ScalarResult(self.existing_upload)
+        return _ScalarResult(None)
+
+
+class _RerunSession:
+    def __init__(self, *, task: TransactionTask, upload_file: TransactionUploadFile) -> None:
+        self.task = task
+        self.upload_file = upload_file
+        self.added = []
+        self.executed = []
+        self._next_id = 700
+        self.info = {}
+
+    def add(self, instance) -> None:
+        self.added.append(instance)
+
+    async def get(self, model, item_id):
+        if model is TransactionTask and item_id == self.task.id:
+            return self.task
+        if model is TransactionUploadFile and item_id == self.upload_file.id:
+            return self.upload_file
+        return None
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        return _ScalarResult(None)
 
     async def flush(self) -> None:
         for instance in self.added:
@@ -146,6 +225,137 @@ async def test_transaction_accounting_creates_independent_records_from_shared_up
 
 
 @pytest.mark.asyncio
+async def test_transaction_accounting_reupload_creates_new_records_for_same_business_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing_upload = TransactionUploadFile(
+        id=77,
+        org_id=9,
+        user_id=7,
+        shop_id=12,
+        source_upload_file_id=21,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="old-key.xlsx",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="processed",
+    )
+    session = _ExistingBusinessSession(existing_upload=existing_upload)
+    user = make_user(user_id=7, org_id=9)
+    shared_upload = make_shared_upload(upload_id=22, parsed_type="动账")
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+
+    task = await TransactionAccountingService.create_from_shared_upload(
+        session,  # type: ignore[arg-type]
+        upload_file=shared_upload,
+        user=user,
+    )
+
+    derived_upload = next(
+        item
+        for item in session.added
+        if item.__class__.__name__ == "TransactionUploadFile"
+    )
+    assert derived_upload.id != existing_upload.id
+    assert derived_upload.source_upload_file_id == shared_upload.id
+    assert derived_upload.oss_key == shared_upload.oss_key
+    assert task.file_id == derived_upload.id
+    assert all(
+        "WHERE fin_transaction_upload_files.org_id" not in str(stmt)
+        for stmt in session.executed
+    )
+
+
+@pytest.mark.asyncio
+async def test_transaction_accounting_rerun_reuses_task_and_clears_result_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_task = TransactionTask(
+        id=7,
+        file_id=77,
+        org_id=9,
+        user_id=7,
+        status="success",
+        progress=100,
+        total_rows=10,
+        matched_rows=10,
+        unmatched_rows=0,
+        failed_rows=0,
+        result_summary={"ok": True},
+    )
+    upload_file = TransactionUploadFile(
+        id=77,
+        org_id=9,
+        user_id=7,
+        shop_id=12,
+        source_upload_file_id=21,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key.xlsx",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="processed",
+        error_message="old error",
+    )
+    session = _RerunSession(task=old_task, upload_file=upload_file)
+    user = make_user(user_id=7, org_id=9)
+    delay_calls: list[int] = []
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+    monkeypatch.setattr(
+        "app.tasks.transaction_accounting.run_transaction_accounting_task",
+        SimpleNamespace(
+            delay=lambda task_id: delay_calls.append(task_id)
+            or SimpleNamespace(id=f"txn-{task_id}"),
+        ),
+    )
+
+    rerun_task = await TransactionAccountingService.rerun_task(
+        session,  # type: ignore[arg-type]
+        task_id=old_task.id,
+        user=user,
+    )
+
+    assert rerun_task is old_task
+    assert session.added == []
+    assert old_task.file_id == upload_file.id
+    assert old_task.status == "queued"
+    assert old_task.progress == 0
+    assert old_task.total_rows == 0
+    assert old_task.matched_rows == 0
+    assert old_task.unmatched_rows == 0
+    assert old_task.failed_rows == 0
+    assert old_task.error_message is None
+    assert old_task.result_summary is None
+    assert upload_file.status == "uploaded"
+    assert upload_file.error_message is None
+    executed_sql = "\n".join(str(stmt) for stmt in session.executed)
+    assert "DELETE FROM fin_transaction_details" in executed_sql
+    assert "DELETE FROM fin_transaction_summary_rows" in executed_sql
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
+    assert old_task.celery_task_id == f"txn-{old_task.id}"
+    assert delay_calls == [old_task.id]
+
+
+@pytest.mark.asyncio
 async def test_bic_accounting_creates_independent_records_from_shared_upload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,6 +401,55 @@ async def test_bic_accounting_creates_independent_records_from_shared_upload(
 
     assert task.celery_task_id == f"bic-{task.id}"
     assert delay_calls == [task.id]
+
+
+@pytest.mark.asyncio
+async def test_bic_accounting_reupload_creates_new_records_for_same_business_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing_upload = BicUploadFile(
+        id=88,
+        org_id=9,
+        user_id=7,
+        shop_id=12,
+        source_upload_file_id=31,
+        original_name="26年02月_bic_抖音旗舰店.xlsx",
+        oss_key="old-bic-key.xlsx",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="processed",
+    )
+    session = _ExistingBicBusinessSession(existing_upload=existing_upload)
+    user = make_user(user_id=7, org_id=9)
+    shared_upload = make_shared_upload(upload_id=33, parsed_type="bic")
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+
+    task = await BicAccountingService.create_from_shared_upload(
+        session,  # type: ignore[arg-type]
+        upload_file=shared_upload,
+        user=user,
+    )
+
+    derived_upload = next(
+        item for item in session.added if item.__class__.__name__ == "BicUploadFile"
+    )
+    assert derived_upload.id != existing_upload.id
+    assert derived_upload.source_upload_file_id == shared_upload.id
+    assert derived_upload.oss_key == shared_upload.oss_key
+    assert task.file_id == derived_upload.id
+    assert all(
+        "WHERE fin_bic_upload_files.org_id" not in str(stmt)
+        for stmt in session.executed
+    )
 
 
 @pytest.mark.asyncio

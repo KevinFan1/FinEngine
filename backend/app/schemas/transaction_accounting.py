@@ -7,14 +7,56 @@ from pydantic import BaseModel, Field, field_validator
 from app.schemas.upload import ALLOWED_EXTENSIONS
 
 
+class TransactionMajorCategoryCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    sort_order: int = Field(100, ge=0)
+    status: int = Field(1, ge=0, le=1)
+
+
+class TransactionMajorCategoryUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    sort_order: int | None = Field(None, ge=0)
+    status: int | None = Field(None, ge=0, le=1)
+
+
+class TransactionMajorCategoryOut(BaseModel):
+    id: int
+    name: str
+    sort_order: int
+    status: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TransactionCashFlowItemOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    parent_id: int | None = None
+    parent_name: str | None = None
+    sort_order: int
+
+    class Config:
+        from_attributes = True
+
+
 class TransactionSubjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+    account_type: str = Field("动账账户", min_length=1, max_length=20)
+    major_category_id: int | None = Field(None, ge=1)
+    cash_flow_item_id: int | None = Field(None, ge=1)
     sort_order: int = Field(100, ge=0)
     status: int = Field(1, ge=0, le=1)
 
 
 class TransactionSubjectUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
+    account_type: str | None = Field(None, max_length=20)
+    major_category_id: int | None = Field(None, ge=1)
+    cash_flow_item_id: int | None = Field(None, ge=1)
     sort_order: int | None = Field(None, ge=0)
     status: int | None = Field(None, ge=0, le=1)
 
@@ -22,6 +64,11 @@ class TransactionSubjectUpdate(BaseModel):
 class TransactionSubjectOut(BaseModel):
     id: int
     name: str
+    account_type: str
+    major_category_id: int | None = None
+    major_category_name: str | None = None
+    cash_flow_item_id: int | None = None
+    cash_flow_item_name: str | None = None
     sort_order: int
     status: int
     created_at: datetime
@@ -156,6 +203,7 @@ class TransactionUploadCallback(BaseModel):
 class TransactionUploadFileOut(BaseModel):
     id: int
     org_id: int
+    org_name: str | None = None
     user_id: int
     shop_id: int | None = None
     original_name: str
@@ -179,6 +227,7 @@ class TransactionTaskOut(BaseModel):
     id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     user_id: int
     shop_id: int | None = None
     celery_task_id: str | None
@@ -209,7 +258,10 @@ class TransactionDetailOut(BaseModel):
     task_id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     shop_id: int | None = None
+    major_category_id: int | None = None
+    major_category_name: str | None = None
     subject_id: int | None
     category_id: int | None
     rule_id: int | None
@@ -244,7 +296,10 @@ class TransactionSummaryOut(BaseModel):
     task_id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     shop_id: int | None = None
+    major_category_id: int | None = None
+    major_category_name: str | None = None
     subject_id: int
     category_id: int
     subject_name: str

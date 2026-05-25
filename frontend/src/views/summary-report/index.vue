@@ -20,6 +20,26 @@
                         style="width: 230px"
                     />
                 </el-form-item>
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+                    <el-select
+                        v-model="searchForm.orgIds"
+                        placeholder="全部组织"
+                        clearable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        filterable
+                        multiple
+                        style="width: 190px"
+                        @change="handleOrgChange"
+                    >
+                        <el-option
+                            v-for="org in orgOptions"
+                            :key="org.id"
+                            :label="org.name"
+                            :value="org.id"
+                        />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="归集平台">
                     <el-select
                         v-model="searchForm.platforms"
@@ -162,6 +182,17 @@
                             $index +
                             1
                         }}
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    v-if="userStore.isSuperAdmin"
+                    label="组织"
+                    width="170"
+                    fixed="left"
+                    show-overflow-tooltip
+                >
+                    <template #default="{ row }">
+                        {{ row.org_name || `组织#${row.org_id}` }}
                     </template>
                 </el-table-column>
                 <el-table-column
@@ -433,6 +464,7 @@
         <SummaryDetailDrawer
             v-model="detailDrawerVisible"
             :context="detailContext"
+            :selected-org-ids="searchForm.orgIds"
         />
     </div>
 </template>
@@ -443,6 +475,8 @@ defineOptions({ name: "SummaryReport" });
 import { ref, reactive, computed, onMounted, nextTick } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import type { TableColumnCtx } from "element-plus/es/components/table/index.mjs";
+import { useUserStore } from "@/stores/user";
+import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getSummaryReportList,
     exportSummaryReportExcel,
@@ -476,8 +510,11 @@ import SummaryDetailDrawer, {
     type SummaryDetailContext,
 } from "@/components/SummaryDetailDrawer.vue";
 
+const userStore = useUserStore();
+const orgOptions = ref<Organization[]>([]);
+
 interface FilterTag extends ActiveFilterTag {
-    key: "accountingMonthRange" | "platforms" | "shops" | "keyword";
+    key: "accountingMonthRange" | "orgIds" | "platforms" | "shops" | "keyword";
 }
 
 interface SummaryTableInstance {
@@ -488,6 +525,7 @@ interface SummaryTableInstance {
 
 const searchForm = reactive({
     accountingMonthRange: [] as string[],
+    orgIds: [] as number[],
     platforms: [] as string[],
     shops: [] as string[],
     keyword: "",
@@ -544,6 +582,10 @@ const selectedAccountingEndMonth = computed(() => {
     return Number(month) || undefined;
 });
 
+const selectedOrgIdsParam = computed(
+    () => searchForm.orgIds.join(",") || undefined,
+);
+
 const filteredShopOptions = computed(() => {
     if (!searchForm.platforms.length) return shopOptions.value;
     const selectedPlatforms = new Set(searchForm.platforms);
@@ -577,6 +619,14 @@ const activeFilterTags = computed<FilterTag[]>(() => {
             value: accountingMonthRangeLabel.value,
         });
     }
+    searchForm.orgIds.forEach((value) => {
+        const org = orgOptions.value.find((item) => item.id === value);
+        tags.push({
+            key: "orgIds",
+            label: "组织",
+            value: org?.name || `组织#${value}`,
+        });
+    });
     searchForm.platforms.forEach((value) => {
         tags.push({
             key: "platforms",
@@ -647,6 +697,8 @@ function openDetailDrawer(row: SummaryReportRecord) {
         sourceYear: row.source_year,
         sourceMonth: row.source_month,
         sourceDate: row.source_date,
+        orgId: row.org_id,
+        orgName: row.org_name,
         platform: row.source_platform_code || undefined,
         reportPlatform: row.report_platform || row.platform,
         shopName: row.shop_name,
@@ -662,6 +714,7 @@ async function fetchData() {
         const res = await getSummaryReportList({
             page: pagination.page,
             page_size: pagination.pageSize,
+            org_id: selectedOrgIdsParam.value,
             accounting_start_year: selectedAccountingStartYear.value,
             accounting_start_month: selectedAccountingStartMonth.value,
             accounting_end_year: selectedAccountingEndYear.value,
@@ -688,6 +741,7 @@ async function fetchShopOptions() {
         const res = await getShopList({
             page: 1,
             page_size: 100,
+            org_id: selectedOrgIdsParam.value,
             platform_name: selectedReportPlatformsParam.value,
         });
         shopOptions.value = res.items || [];
@@ -708,6 +762,16 @@ function handlePlatformChange() {
     fetchShopOptions();
 }
 
+function handleOrgChange() {
+    const availableShops = new Set(
+        filteredShopOptions.value.map((shop) => shop.shop_name),
+    );
+    searchForm.shops = searchForm.shops.filter((shopName) =>
+        availableShops.has(shopName),
+    );
+    fetchShopOptions();
+}
+
 function handleSearch() {
     pagination.page = 1;
     fetchData();
@@ -715,6 +779,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.accountingMonthRange = [];
+    searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shops = [];
     searchForm.keyword = "";
@@ -745,6 +810,11 @@ function handleSelectionChange(rows: SummaryReportRecord[]) {
 function removeFilterTag(tag: FilterTag) {
     if (tag.key === "accountingMonthRange") {
         searchForm.accountingMonthRange = [];
+    } else if (tag.key === "orgIds") {
+        searchForm.orgIds = searchForm.orgIds.filter((item) => {
+            const org = orgOptions.value.find((orgItem) => orgItem.id === item);
+            return (org?.name || `组织#${item}`) !== tag.value;
+        });
     } else if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter(
             (item) => getPlatformLabel(item) !== tag.value,
@@ -757,7 +827,7 @@ function removeFilterTag(tag: FilterTag) {
         searchForm.keyword = "";
     }
 
-    handlePlatformChange();
+    handleOrgChange();
     handleSearch();
 }
 
@@ -793,6 +863,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
     loadingRef.value = true;
     try {
         const blob = await exportSummaryReportExcel({
+            org_id: selectedOrgIdsParam.value,
             accounting_start_year: selectedAccountingStartYear.value,
             accounting_start_month: selectedAccountingStartMonth.value,
             accounting_end_year: selectedAccountingEndYear.value,
@@ -840,7 +911,17 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
     }
 }
 
+async function fetchOrgOptions() {
+    if (!userStore.isSuperAdmin) return;
+    try {
+        orgOptions.value = await getAllOrganizations();
+    } catch {
+        // Ignore
+    }
+}
+
 onMounted(async () => {
+    await fetchOrgOptions();
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();

@@ -3,6 +3,8 @@ import type { PaginatedData } from "./index";
 
 export interface Task {
     id: number;
+    org_id: number;
+    org_name?: string | null;
     batch_id: number;
     filename: string;
     platform: string;
@@ -43,6 +45,7 @@ export interface TaskProgress {
 export interface TaskListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     status?: string;
     platform?: string;
     shop_id?: number | string;

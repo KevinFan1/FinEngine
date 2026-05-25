@@ -20,7 +20,7 @@ async def list_shops(
     page_size: int = 20,
     keyword: str | None = None,
     platform_name: str | None = None,
-    org_id: int | None = None,
+    org_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -35,7 +35,10 @@ async def list_shops(
     )
     return ApiResponse(
         data=PageResponse(
-            items=[ShopOut.model_validate(i) for i in items],
+            items=[
+                ShopOut.model_validate(shop).model_copy(update={"org_name": org_name})
+                for shop, org_name in items
+            ],
             total=total,
             page=page,
             page_size=page_size,

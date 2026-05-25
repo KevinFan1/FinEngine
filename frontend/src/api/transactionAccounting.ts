@@ -1,9 +1,32 @@
 import { del, downloadBlob, get, post, put } from "./index";
 import type { PaginatedData } from "./index";
 
+export interface TransactionMajorCategory {
+    id: number;
+    name: string;
+    sort_order: number;
+    status: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface TransactionCashFlowItem {
+    id: number;
+    code: string;
+    name: string;
+    parent_id?: number | null;
+    parent_name?: string | null;
+    sort_order: number;
+}
+
 export interface TransactionSubject {
     id: number;
     name: string;
+    account_type: string;
+    major_category_id?: number | null;
+    major_category_name?: string | null;
+    cash_flow_item_id?: number | null;
+    cash_flow_item_name?: string | null;
     sort_order: number;
     status: number;
     created_at: string;
@@ -46,6 +69,7 @@ export interface TransactionRule {
 export interface TransactionUploadFile {
     id: number;
     org_id: number;
+    org_name?: string | null;
     user_id: number;
     original_name: string;
     oss_key: string;
@@ -82,6 +106,7 @@ export interface TransactionTask {
     id: number;
     file_id: number;
     org_id: number;
+    org_name?: string | null;
     user_id: number;
     celery_task_id?: string | null;
     status: string;
@@ -118,6 +143,10 @@ export interface TransactionDetail {
     id: number;
     task_id: number;
     file_id: number;
+    org_id: number;
+    org_name?: string | null;
+    major_category_id?: number | null;
+    major_category_name?: string | null;
     subject_id?: number | null;
     category_id?: number | null;
     rule_id?: number | null;
@@ -148,6 +177,10 @@ export interface TransactionSummary {
     id: number;
     task_id: number;
     file_id: number;
+    org_id: number;
+    org_name?: string | null;
+    major_category_id?: number | null;
+    major_category_name?: string | null;
     subject_id: number;
     category_id: number;
     subject_name: string;
@@ -188,6 +221,7 @@ export interface TransactionAnnualSummary {
 export interface TransactionTaskListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     status?: string;
     platform_code?: string;
     shop_name?: string;
@@ -203,10 +237,12 @@ export interface TransactionTaskListParams {
 export interface TransactionDetailListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     task_id?: number;
     status?: string;
     platform_code?: string;
     shop_name?: string;
+    major_category_id?: number | string;
     subject_id?: number | string;
     category_id?: number | string;
     transaction_direction?: string;
@@ -228,9 +264,11 @@ export interface TransactionDetailListParams {
 export interface TransactionSummaryListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    major_category_id?: number | string;
     subject_id?: number | string;
     category_id?: number | string;
     transaction_direction?: string;
@@ -251,9 +289,11 @@ export interface TransactionSummaryListParams {
 
 export interface TransactionAnnualSummaryParams {
     year: number;
+    org_id?: number | string;
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    major_category_id?: number | string;
     subject_id?: number | string;
     category_id?: number | string;
     transaction_direction?: string;
@@ -277,6 +317,26 @@ export interface TransactionExportParams {
 
 export function listTransactionSubjects() {
     return get<TransactionSubject[]>("/transaction-accounting/subjects");
+}
+
+export function listTransactionMajorCategories() {
+    return get<TransactionMajorCategory[]>("/transaction-accounting/major-categories");
+}
+
+export function createTransactionMajorCategory(data: Partial<TransactionMajorCategory>) {
+    return post<TransactionMajorCategory>("/transaction-accounting/major-categories", data);
+}
+
+export function updateTransactionMajorCategory(id: number, data: Partial<TransactionMajorCategory>) {
+    return put<TransactionMajorCategory>(`/transaction-accounting/major-categories/${id}`, data);
+}
+
+export function deleteTransactionMajorCategory(id: number) {
+    return del<null>(`/transaction-accounting/major-categories/${id}`);
+}
+
+export function listTransactionCashFlowItems() {
+    return get<TransactionCashFlowItem[]>("/transaction-accounting/cash-flow-items");
 }
 
 export function createTransactionSubject(data: Partial<TransactionSubject>) {

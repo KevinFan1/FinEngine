@@ -18,6 +18,26 @@
                         style="width: 150px"
                     />
                 </el-form-item>
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+                    <el-select
+                        v-model="searchForm.orgIds"
+                        placeholder="全部组织"
+                        multiple
+                        clearable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        filterable
+                        style="width: 190px"
+                        @change="handleOrgChange"
+                    >
+                        <el-option
+                            v-for="org in orgOptions"
+                            :key="org.id"
+                            :label="org.name"
+                            :value="org.id"
+                        />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="平台">
                     <el-select
                         v-model="searchForm.platforms"
@@ -192,6 +212,16 @@
                             $index +
                             1
                         }}
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    v-if="userStore.isSuperAdmin"
+                    label="组织"
+                    width="170"
+                    show-overflow-tooltip
+                >
+                    <template #default="{ row }">
+                        {{ row.org_name || `组织#${row.org_id}` }}
                     </template>
                 </el-table-column>
                 <el-table-column
@@ -579,6 +609,8 @@ import {
     onDeactivated,
 } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
+import { useUserStore } from "@/stores/user";
+import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getTaskList,
     retryTask,
@@ -611,9 +643,13 @@ import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 
+const userStore = useUserStore();
+const orgOptions = ref<Organization[]>([]);
+
 // Search
 const searchForm = reactive({
     sourceMonth: "",
+    orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
     parsedTypes: [] as string[],
@@ -696,6 +732,9 @@ const filteredShopOptions = computed(() => {
 const selectedPlatformsParam = computed(
     () => searchForm.platforms.join(",") || undefined,
 );
+const selectedOrgIdsParam = computed(
+    () => searchForm.orgIds.join(",") || undefined,
+);
 const selectedShopIdsParam = computed(
     () => searchForm.shopIds.join(",") || undefined,
 );
@@ -725,12 +764,16 @@ const selectedRecalculableRows = computed(() =>
 );
 
 interface TaskFilterTag extends ActiveFilterTag {
-    key: "sourceMonth" | "platforms" | "shopIds" | "parsedTypes" | "statuses" | "keyword";
+    key: "sourceMonth" | "orgIds" | "platforms" | "shopIds" | "parsedTypes" | "statuses" | "keyword";
 }
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
     if (searchForm.sourceMonth) tags.push({ key: "sourceMonth", label: "年月", value: searchForm.sourceMonth });
+    searchForm.orgIds.forEach((value) => {
+        const org = orgOptions.value.find((item) => item.id === value);
+        tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
+    });
     searchForm.platforms.forEach((value) => tags.push({ key: "platforms", label: "平台", value: getPlatformLabel(value) }));
     searchForm.shopIds.forEach((value) => {
         const shop = shopOptions.value.find((item) => item.id === value);
@@ -811,6 +854,7 @@ async function fetchData() {
         const res = await getTaskList({
             page: pagination.page,
             page_size: pagination.pageSize,
+            org_id: selectedOrgIdsParam.value,
             parsed_year: selectedYear.value,
             parsed_month: selectedMonth.value,
             platform: selectedPlatformsParam.value,
@@ -837,6 +881,7 @@ async function fetchShopOptions() {
         const res = await getShopList({
             page: 1,
             page_size: 100,
+            org_id: selectedOrgIdsParam.value,
             platform_name: selectedReportPlatformsParam.value,
         });
         shopOptions.value = res.items || [];
@@ -857,7 +902,26 @@ async function fetchPlatformOptions() {
     platformOptions.value = toSourcePlatformOptions(platforms.value);
 }
 
+async function fetchOrgOptions() {
+    if (!userStore.isSuperAdmin) return;
+    try {
+        orgOptions.value = await getAllOrganizations();
+    } catch {
+        // Ignore
+    }
+}
+
 async function handlePlatformChange() {
+    await fetchShopOptions();
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
+    );
+    searchForm.shopIds = searchForm.shopIds.filter((shopId) =>
+        availableShopIds.has(shopId),
+    );
+}
+
+async function handleOrgChange() {
     await fetchShopOptions();
     const availableShopIds = new Set(
         filteredShopOptions.value.map((shop) => shop.id),
@@ -874,6 +938,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.sourceMonth = "";
+    searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
     searchForm.parsedTypes = [];
@@ -887,6 +952,12 @@ function handleReset() {
 async function removeFilterTag(tag: TaskFilterTag) {
     if (tag.key === "sourceMonth") {
         searchForm.sourceMonth = "";
+    } else if (tag.key === "orgIds") {
+        searchForm.orgIds = searchForm.orgIds.filter((item) => {
+            const org = orgOptions.value.find((orgItem) => orgItem.id === item);
+            return (org?.name || `组织#${item}`) !== tag.value;
+        });
+        await handleOrgChange();
     } else if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter((item) => getPlatformLabel(item) !== tag.value);
         await fetchShopOptions();
@@ -1065,6 +1136,7 @@ function stopAutoRefresh() {
 }
 
 onMounted(async () => {
+    await fetchOrgOptions();
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();

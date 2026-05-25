@@ -98,9 +98,9 @@ def test_annual_report_uses_all_cash_rows_and_sums_parent_from_child_subjects() 
         ),
     ]
     amounts = [
-        AnnualSummaryAmount("收到其他与经营相关的收入", 1, Decimal("889500.88")),
-        AnnualSummaryAmount("收到其他与经营相关的收入", 2, Decimal("849530.54")),
-        AnnualSummaryAmount("支付抖音提现", 1, Decimal("40056360.62")),
+        AnnualSummaryAmount(3, 1, Decimal("889500.88")),
+        AnnualSummaryAmount(3, 2, Decimal("849530.54")),
+        AnnualSummaryAmount(5, 1, Decimal("40056360.62")),
     ]
 
     rows = TransactionAccountingService._build_annual_report_rows(
@@ -201,8 +201,8 @@ def test_annual_report_formula_net_rows_use_inflow_minus_outflow() -> None:
         ),
     ]
     amounts = [
-        AnnualSummaryAmount("收到抖音分账款", 1, Decimal("100.00")),
-        AnnualSummaryAmount("支付抖音提现", 1, Decimal("40.00")),
+        AnnualSummaryAmount(2, 1, Decimal("100.00")),
+        AnnualSummaryAmount(4, 1, Decimal("40.00")),
     ]
 
     rows = TransactionAccountingService._build_annual_report_rows(year=2026, cash_items=cash_items, amounts=amounts)
@@ -228,9 +228,20 @@ def test_annual_report_workbook_uses_month_columns_and_row_total() -> None:
                 flow_direction="inflow",
                 summary_method="sum_children",
                 sort_order=10,
+            ),
+            _cash_item(
+                item_id=2,
+                code="A1",
+                name="收到直播回款",
+                parent_id=1,
+                level=2,
+                item_type="detail",
+                flow_direction="inflow",
+                summary_method="manual",
+                sort_order=11,
             )
         ],
-        amounts=[AnnualSummaryAmount("经营性现金流入", 1, Decimal("12.30"))],
+        amounts=[AnnualSummaryAmount(2, 1, Decimal("12.30"))],
     )[0]
 
     workbook_buffer = TransactionAccountingService._build_annual_summary_workbook(year=2026, rows=[row])

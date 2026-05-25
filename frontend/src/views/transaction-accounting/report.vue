@@ -31,6 +31,26 @@
                         style="width: 230px"
                     />
                 </el-form-item>
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+                    <el-select
+                        v-model="searchForm.orgIds"
+                        clearable
+                        filterable
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="全部组织"
+                        style="width: 190px"
+                        @change="handleOrgChange"
+                    >
+                        <el-option
+                            v-for="org in orgOptions"
+                            :key="org.id"
+                            :label="org.name"
+                            :value="org.id"
+                        />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="平台">
                     <el-select
                         v-model="searchForm.platforms"
@@ -77,6 +97,25 @@
                                 size="compact"
                             />
                         </el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="大分类">
+                    <el-select
+                        v-model="searchForm.majorCategoryIds"
+                        clearable
+                        filterable
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="全部大分类"
+                        style="width: 220px"
+                    >
+                        <el-option
+                            v-for="item in majorCategories"
+                            :key="item.id"
+                            :label="item.name"
+                            :value="item.id"
+                        />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="科目">
@@ -251,6 +290,8 @@
 defineOptions({ name: "TransactionSummaryReport" });
 
 import { ElMessage } from "element-plus";
+import { useUserStore } from "@/stores/user";
+import { getAllOrganizations, type Organization } from "@/api/organization";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
@@ -260,10 +301,12 @@ import {
     exportTransactionAnnualSummaryExcel,
     getTransactionAnnualSummary,
     listTransactionCategories,
+    listTransactionMajorCategories,
     listTransactionSubjects,
     type TransactionAnnualSummaryParams,
     type TransactionAnnualSummaryRow,
     type TransactionCategory,
+    type TransactionMajorCategory,
     type TransactionSubject,
 } from "@/api/transactionAccounting";
 import {
@@ -291,9 +334,12 @@ const currentYear = new Date().getFullYear();
 const loading = ref(false);
 const tableData = ref<TransactionAnnualSummaryRow[]>([]);
 const reportMonths = ref<string[]>(buildYearMonths(currentYear));
+const majorCategories = ref<TransactionMajorCategory[]>([]);
 const subjects = ref<TransactionSubject[]>([]);
 const categories = ref<TransactionCategory[]>([]);
 const shopOptions = ref<Shop[]>([]);
+const userStore = useUserStore();
+const orgOptions = ref<Organization[]>([]);
 const platforms = ref<Platform[]>(getFallbackPlatforms());
 const platformOptions = ref<PlatformOption[]>(
     toSourcePlatformOptions(platforms.value),
@@ -303,8 +349,10 @@ const exportLoading = ref(false);
 const searchForm = reactive({
     year: currentYear,
     uploadMonthRange: [] as string[],
+    orgIds: [] as number[],
     platforms: [] as string[],
     shopNames: [] as string[],
+    majorCategoryIds: [] as number[],
     subjectIds: [] as number[],
     categoryIds: [] as number[],
 });
@@ -326,6 +374,7 @@ const selectedReportPlatformsParam = computed(() => {
     );
     return Array.from(values).join(",") || undefined;
 });
+const selectedOrgIdsParam = computed(() => searchForm.orgIds.join(",") || undefined);
 
 const filteredShopOptions = computed(() => {
     if (!searchForm.platforms.length) return shopOptions.value;
@@ -343,8 +392,10 @@ interface ReportFilterTag extends ActiveFilterTag {
     key:
         | "year"
         | "uploadMonthRange"
+        | "orgIds"
         | "platforms"
         | "shopNames"
+        | "majorCategoryIds"
         | "subjectIds"
         | "categoryIds";
 }
@@ -360,6 +411,14 @@ const activeFilterTags = computed<ReportFilterTag[]>(() => {
             value: monthRangeLabel(searchForm.uploadMonthRange),
         });
     }
+    searchForm.orgIds.forEach((value) => {
+        const org = orgOptions.value.find((item) => item.id === value);
+        tags.push({
+            key: "orgIds",
+            label: "组织",
+            value: org?.name || `组织#${value}`,
+        });
+    });
     searchForm.platforms.forEach((value) =>
         tags.push({
             key: "platforms",
@@ -370,6 +429,14 @@ const activeFilterTags = computed<ReportFilterTag[]>(() => {
     searchForm.shopNames.forEach((value) =>
         tags.push({ key: "shopNames", label: "店铺", value }),
     );
+    searchForm.majorCategoryIds.forEach((value) => {
+        const majorCategory = majorCategories.value.find((item) => item.id === value);
+        tags.push({
+            key: "majorCategoryIds",
+            label: "大分类",
+            value: majorCategory?.name || String(value),
+        });
+    });
     searchForm.subjectIds.forEach((value) => {
         const subject = subjects.value.find((item) => item.id === value);
         tags.push({
@@ -399,8 +466,10 @@ function buildYearMonths(year: number) {
 function queryParams(): TransactionAnnualSummaryParams {
     return {
         year: searchForm.year,
+        org_id: selectedOrgIdsParam.value,
         platform_code: selectedReportPlatformsParam.value,
         shop_name: searchForm.shopNames.join(",") || undefined,
+        major_category_id: searchForm.majorCategoryIds.join(",") || undefined,
         subject_id: searchForm.subjectIds.join(",") || undefined,
         category_id: searchForm.categoryIds.join(",") || undefined,
         ...splitUploadMonthRange(searchForm.uploadMonthRange),
@@ -421,15 +490,18 @@ async function fetchData() {
 }
 
 async function loadOptions() {
-    const [subjectItems, categoryItems, platformItems] = await Promise.all([
+    const [majorCategoryItems, subjectItems, categoryItems, platformItems] = await Promise.all([
+        listTransactionMajorCategories(),
         listTransactionSubjects(),
         listTransactionCategories(),
         fetchPlatformOptions(),
     ]);
+    majorCategories.value = majorCategoryItems;
     subjects.value = subjectItems;
     categories.value = categoryItems;
     platforms.value = platformItems;
     platformOptions.value = toSourcePlatformOptions(platforms.value);
+    await fetchOrgOptions();
     await fetchShopOptions();
 }
 
@@ -441,8 +513,10 @@ function handleReset() {
     searchForm.year = currentYear;
     yearPickerValue.value = String(currentYear);
     searchForm.uploadMonthRange = [];
+    searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopNames = [];
+    searchForm.majorCategoryIds = [];
     searchForm.subjectIds = [];
     searchForm.categoryIds = [];
     reportMonths.value = buildYearMonths(currentYear);
@@ -472,6 +546,7 @@ async function fetchShopOptions() {
         const res = await getShopList({
             page: 1,
             page_size: 100,
+            org_id: selectedOrgIdsParam.value,
             platform_name: selectedReportPlatformsParam.value,
         });
         shopOptions.value = res.items || [];
@@ -480,7 +555,26 @@ async function fetchShopOptions() {
     }
 }
 
+async function fetchOrgOptions() {
+    if (!userStore.isSuperAdmin) return;
+    try {
+        orgOptions.value = await getAllOrganizations();
+    } catch {
+        // Ignore
+    }
+}
+
 async function handlePlatformChange() {
+    await fetchShopOptions();
+    const availableShopNames = new Set(
+        filteredShopOptions.value.map((shop) => shop.shop_name),
+    );
+    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
+        availableShopNames.has(shopName),
+    );
+}
+
+async function handleOrgChange() {
     await fetchShopOptions();
     const availableShopNames = new Set(
         filteredShopOptions.value.map((shop) => shop.shop_name),
@@ -507,6 +601,12 @@ function categoryName(id: number) {
     return categories.value.find((category) => category.id === id)?.name || String(id);
 }
 
+function majorCategoryName(id: number) {
+    return (
+        majorCategories.value.find((item) => item.id === id)?.name || String(id)
+    );
+}
+
 async function removeFilterTag(tag: ReportFilterTag) {
     if (tag.key === "year") {
         searchForm.year = currentYear;
@@ -514,6 +614,12 @@ async function removeFilterTag(tag: ReportFilterTag) {
         reportMonths.value = buildYearMonths(currentYear);
     } else if (tag.key === "uploadMonthRange") {
         searchForm.uploadMonthRange = [];
+    } else if (tag.key === "orgIds") {
+        searchForm.orgIds = searchForm.orgIds.filter((item) => {
+            const org = orgOptions.value.find((orgItem) => orgItem.id === item);
+            return (org?.name || `组织#${item}`) !== tag.value;
+        });
+        await handleOrgChange();
     } else if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter(
             (item) => getPlatformLabel(item) !== tag.value,
@@ -522,6 +628,15 @@ async function removeFilterTag(tag: ReportFilterTag) {
     } else if (tag.key === "shopNames") {
         searchForm.shopNames = searchForm.shopNames.filter(
             (item) => item !== tag.value,
+        );
+    } else if (tag.key === "majorCategoryIds") {
+        searchForm.majorCategoryIds = searchForm.majorCategoryIds.filter(
+            (item) => {
+                const majorCategory = majorCategories.value.find(
+                    (majorCategoryItem) => majorCategoryItem.id === item,
+                );
+                return (majorCategory?.name || String(item)) !== tag.value;
+            },
         );
     } else if (tag.key === "subjectIds") {
         searchForm.subjectIds = searchForm.subjectIds.filter((item) => {
@@ -555,6 +670,7 @@ async function handleExport() {
             monthRangeLabel(searchForm.uploadMonthRange) || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopNames, "全部")}`,
+            `大分类${summarizeFilenameValues(searchForm.majorCategoryIds.map(majorCategoryName), "全部")}`,
             `科目${summarizeFilenameValues(searchForm.subjectIds.map(subjectName), "全部")}`,
             `重分类${summarizeFilenameValues(searchForm.categoryIds.map(categoryName), "全部")}`,
             "资金报表",

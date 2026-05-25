@@ -87,6 +87,17 @@
                     </template>
                 </el-table-column>
                 <el-table-column
+                    v-if="props.context?.orgId || (props.selectedOrgIds?.length || 0) > 0"
+                    prop="org_name"
+                    label="组织"
+                    width="170"
+                    show-overflow-tooltip
+                >
+                    <template #default="{ row }">
+                        {{ row.org_name || `组织#${row.org_id}` }}
+                    </template>
+                </el-table-column>
+                <el-table-column
                     prop="source_date"
                     label="核算年月"
                     width="108"
@@ -355,6 +366,8 @@ export interface SummaryDetailContext {
     sourceYear?: number;
     sourceMonth?: number;
     sourceDate?: string;
+    orgId?: number;
+    orgName?: string | null;
     platform?: string;
     reportPlatform?: string;
     shopName?: string;
@@ -365,6 +378,7 @@ export interface SummaryDetailContext {
 const props = defineProps<{
     modelValue: boolean;
     context: SummaryDetailContext | null;
+    selectedOrgIds?: number[];
 }>();
 
 const emit = defineEmits<{
@@ -454,6 +468,11 @@ async function fetchData() {
         const res = await getSummaryList({
             page: pagination.page,
             page_size: pagination.pageSize,
+            org_id:
+                props.context.orgId ||
+                (props.selectedOrgIds?.length
+                    ? props.selectedOrgIds.join(",")
+                    : undefined),
             source_year: props.context.sourceYear,
             source_month: props.context.sourceMonth,
             platform_name: props.context.platform || undefined,
@@ -483,6 +502,11 @@ async function handleExport(scope: "all" | "current_page") {
     loadingRef.value = true;
     try {
         const blob = await exportSummaryExcel({
+            org_id:
+                props.context.orgId ||
+                (props.selectedOrgIds?.length
+                    ? props.selectedOrgIds.join(",")
+                    : undefined),
             source_year: props.context.sourceYear,
             source_month: props.context.sourceMonth,
             platform_name: props.context.platform || undefined,

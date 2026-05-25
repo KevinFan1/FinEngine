@@ -4,6 +4,7 @@ export interface BicTask {
     id: number;
     file_id: number;
     org_id: number;
+    org_name?: string | null;
     user_id: number;
     source_upload_file_id?: number | null;
     original_name?: string | null;
@@ -46,6 +47,7 @@ export interface BicDetail {
     task_id: number;
     file_id: number;
     org_id: number;
+    org_name?: string | null;
     shop_id?: number | null;
     platform_code: string;
     store_short_id?: string | null;
@@ -65,6 +67,7 @@ export interface BicReport {
     task_id: number;
     file_id: number;
     org_id: number;
+    org_name?: string | null;
     shop_id?: number | null;
     platform_code: string;
     store_short_id?: string | null;
@@ -84,6 +87,7 @@ export interface BicReport {
 export interface BicTaskListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     status?: string;
     platform_code?: string;
     shop_name?: string;
@@ -97,6 +101,7 @@ export interface BicTaskListParams {
 export interface BicDetailListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
@@ -113,6 +118,7 @@ export interface BicDetailListParams {
 export interface BicReportListParams {
     page?: number;
     page_size?: number;
+    org_id?: number | string;
     task_id?: number;
     platform_code?: string;
     shop_name?: string;

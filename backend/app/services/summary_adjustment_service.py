@@ -184,7 +184,7 @@ class SummaryAdjustmentService:
     async def list_adjustment_sums(
         db: AsyncSession,
         *,
-        org_id: int,
+        org_ids: list[int] | None = None,
         source_year: int | None = None,
         source_month: int | None = None,
         source_start_year: int | None = None,
@@ -194,12 +194,13 @@ class SummaryAdjustmentService:
         platform_name: str | None = None,
         shop_id: int | None = None,
         shop_name: str | None = None,
-    ) -> dict[tuple[int, int, str, int, str], dict[str, Decimal]]:
+    ) -> dict[tuple[int, int, int, str, int, str], dict[str, Decimal]]:
         filters = [
-            SummaryAdjustment.org_id == org_id,
             SummaryAdjustment.is_deleted.is_(False),
             SummaryAdjustment.metric_key.in_(ADJUSTABLE_SUMMARY_METRICS),
         ]
+        if org_ids is not None:
+            filters.append(SummaryAdjustment.org_id.in_(org_ids))
         if source_year is not None:
             filters.append(SummaryAdjustment.source_year == source_year)
         if source_month is not None:
@@ -220,6 +221,7 @@ class SummaryAdjustmentService:
 
         stmt = (
             select(
+                SummaryAdjustment.org_id,
                 SummaryAdjustment.source_year,
                 SummaryAdjustment.source_month,
                 SummaryAdjustment.platform_name,
@@ -230,6 +232,7 @@ class SummaryAdjustmentService:
             )
             .where(*filters)
             .group_by(
+                SummaryAdjustment.org_id,
                 SummaryAdjustment.source_year,
                 SummaryAdjustment.source_month,
                 SummaryAdjustment.platform_name,
@@ -240,9 +243,10 @@ class SummaryAdjustmentService:
         )
 
         result = await db.execute(stmt)
-        sums: dict[tuple[int, int, str, int, str], dict[str, Decimal]] = {}
+        sums: dict[tuple[int, int, int, str, int, str], dict[str, Decimal]] = {}
         for row in result.mappings().all():
             key = (
+                int(row["org_id"] or 0),
                 int(row["source_year"] or 0),
                 int(row["source_month"] or 0),
                 str(row["platform_name"] or ""),

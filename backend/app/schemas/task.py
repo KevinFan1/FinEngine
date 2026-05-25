@@ -7,6 +7,7 @@ class TaskOut(BaseModel):
     id: int
     file_id: int
     org_id: int
+    org_name: str | None = None
     user_id: int
     batch_id: int | None = None
     filename: str | None = None
@@ -42,6 +43,8 @@ class TaskOut(BaseModel):
 class TaskListOut(BaseModel):
     id: int
     file_id: int
+    org_id: int
+    org_name: str | None = None
     batch_id: int | None = None
     filename: str | None = None
     platform: str | None = None

@@ -34,6 +34,25 @@
             </el-option>
           </el-select>
         </el-form-item>
+        <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+          <el-select
+            v-model="searchForm.orgIds"
+            placeholder="全部组织"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            style="width: 190px"
+          >
+            <el-option
+              v-for="org in orgOptions"
+              :key="org.id"
+              :label="org.name"
+              :value="org.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="fetchData">搜索</el-button>
           <el-button @click="handleReset">重置</el-button>
@@ -76,6 +95,11 @@
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="userStore.isSuperAdmin" label="组织" width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.org_name || `组织#${row.org_id}` }}
           </template>
         </el-table-column>
         <el-table-column prop="platform_name" label="平台" width="120">
@@ -290,6 +314,8 @@ defineOptions({ name: 'Shops' })
 
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadFile as ElementUploadFile } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import { getAllOrganizations, type Organization } from '@/api/organization'
 import {
   createShop,
   deleteShop,
@@ -312,8 +338,10 @@ import SearchCardIntro from '@/components/SearchCardIntro.vue'
 import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 
+const userStore = useUserStore()
 const platforms = ref<Platform[]>(getFallbackPlatforms())
 const platformOptions = ref<PlatformOption[]>(toReportPlatformOptions(platforms.value))
+const orgOptions = ref<Organization[]>([])
 
 const shopProfileFields = [
   { prop: 'tax_no', label: '税号', max: 100, width: 150 },
@@ -345,10 +373,11 @@ const tableProfileFields = shopProfileFields
 const searchForm = reactive({
   keyword: '',
   platformNames: [] as string[],
+  orgIds: [] as number[],
 })
 
 interface ShopFilterTag extends ActiveFilterTag {
-  key: 'keyword' | 'platformNames'
+  key: 'keyword' | 'platformNames' | 'orgIds'
 }
 
 const activeFilterTags = computed<ShopFilterTag[]>(() => {
@@ -357,6 +386,10 @@ const activeFilterTags = computed<ShopFilterTag[]>(() => {
   searchForm.platformNames.forEach((value) => {
     const option = platformOptions.value.find((item) => item.value === value)
     tags.push({ key: 'platformNames', label: '平台', value: option?.label || value })
+  })
+  searchForm.orgIds.forEach((value) => {
+    const org = orgOptions.value.find((item) => item.id === value)
+    tags.push({ key: 'orgIds', label: '组织', value: org?.name || `组织#${value}` })
   })
   return tags
 })
@@ -438,6 +471,7 @@ async function fetchData() {
       page_size: pagination.pageSize,
       keyword: searchForm.keyword || undefined,
       platform_name: searchForm.platformNames.join(',') || undefined,
+      org_id: searchForm.orgIds.join(',') || undefined,
     })
     tableData.value = res.items || []
     pagination.total = res.total || 0
@@ -458,9 +492,19 @@ async function fetchPlatformOptions() {
   platformOptions.value = toReportPlatformOptions(platforms.value)
 }
 
+async function fetchOrgOptions() {
+  if (!userStore.isSuperAdmin) return
+  try {
+    orgOptions.value = await getAllOrganizations()
+  } catch {
+    // Ignore
+  }
+}
+
 function handleReset() {
   searchForm.keyword = ''
   searchForm.platformNames = []
+  searchForm.orgIds = []
   pagination.page = 1
   fetchData()
 }
@@ -471,6 +515,12 @@ function removeFilterTag(tag: ShopFilterTag) {
     searchForm.platformNames = searchForm.platformNames.filter((item) => {
       const option = platformOptions.value.find((platform) => platform.value === item)
       return (option?.label || item) !== tag.value
+    })
+  }
+  if (tag.key === 'orgIds') {
+    searchForm.orgIds = searchForm.orgIds.filter((item) => {
+      const org = orgOptions.value.find((orgItem) => orgItem.id === item)
+      return (org?.name || `组织#${item}`) !== tag.value
     })
   }
   pagination.page = 1
@@ -643,6 +693,7 @@ async function handleDelete(row: Shop) {
 }
 
 onMounted(async () => {
+  await fetchOrgOptions()
   await fetchPlatformOptions()
   fetchData()
 })

@@ -36,6 +36,26 @@
                         style="width: 230px"
                     />
                 </el-form-item>
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+                    <el-select
+                        v-model="searchForm.orgIds"
+                        placeholder="全部组织"
+                        clearable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        filterable
+                        multiple
+                        style="width: 190px"
+                        @change="handleOrgChange"
+                    >
+                        <el-option
+                            v-for="org in orgOptions"
+                            :key="org.id"
+                            :label="org.name"
+                            :value="org.id"
+                        />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="来源平台">
                     <el-select
                         v-model="searchForm.platforms"
@@ -200,6 +220,17 @@
                             $index +
                             1
                         }}
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    v-if="userStore.isSuperAdmin"
+                    label="组织"
+                    width="170"
+                    fixed="left"
+                    show-overflow-tooltip
+                >
+                    <template #default="{ row }">
+                        {{ row.org_name || `组织#${row.org_id}` }}
                     </template>
                 </el-table-column>
                 <el-table-column
@@ -483,6 +514,8 @@ import { ref, reactive, computed, onMounted, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import type { TableColumnCtx } from "element-plus/es/components/table/index.mjs";
+import { useUserStore } from "@/stores/user";
+import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getSummaryList,
     exportSummaryExcel,
@@ -516,11 +549,14 @@ import { usePageRefresh } from "@/composables/pageRefresh";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 
 const route = useRoute();
+const userStore = useUserStore();
+const orgOptions = ref<Organization[]>([]);
 
 interface FilterTag extends ActiveFilterTag {
     key:
         | "summaryMonthRange"
         | "sourceMonthRange"
+        | "orgIds"
         | "platforms"
         | "reportPlatforms"
         | "shops"
@@ -537,6 +573,7 @@ interface SummaryTableInstance {
 const searchForm = reactive({
     summaryMonthRange: [] as string[],
     sourceMonthRange: [] as string[],
+    orgIds: [] as number[],
     platforms: [] as string[],
     reportPlatforms: [] as string[],
     shops: [] as string[],
@@ -611,6 +648,9 @@ const filteredShopOptions = computed(() => {
 const selectedSourcePlatformsParam = computed(
     () => searchForm.platforms.join(",") || undefined,
 );
+const selectedOrgIdsParam = computed(
+    () => searchForm.orgIds.join(",") || undefined,
+);
 const selectedReportPlatformsParam = computed(() => {
     const explicitReportPlatforms = searchForm.reportPlatforms.filter(Boolean);
     const derivedReportPlatforms = searchForm.platforms
@@ -650,6 +690,14 @@ const activeFilterTags = computed<FilterTag[]>(() => {
             value: formatMonthRangeLabel(searchForm.sourceMonthRange),
         });
     }
+    searchForm.orgIds.forEach((value) => {
+        const org = orgOptions.value.find((item) => item.id === value);
+        tags.push({
+            key: "orgIds",
+            label: "组织",
+            value: org?.name || `组织#${value}`,
+        });
+    });
     searchForm.platforms.forEach((value) => {
         tags.push({
             key: "platforms",
@@ -727,6 +775,7 @@ async function fetchData() {
         const res = await getSummaryList({
             page: pagination.page,
             page_size: pagination.pageSize,
+            org_id: selectedOrgIdsParam.value,
             summary_start_year: selectedSummaryStart.value.year,
             summary_start_month: selectedSummaryStart.value.month,
             summary_end_year: selectedSummaryEnd.value.year,
@@ -758,6 +807,7 @@ async function fetchShopOptions() {
         const res = await getShopList({
             page: 1,
             page_size: 100,
+            org_id: selectedOrgIdsParam.value,
             platform_name:
                 selectedReportPlatformsParam.value ||
                 selectedSourcePlatformsParam.value,
@@ -781,7 +831,26 @@ async function fetchPlatformOptions() {
     reportPlatformOptions.value = toReportPlatformOptions(platforms.value);
 }
 
+async function fetchOrgOptions() {
+    if (!userStore.isSuperAdmin) return;
+    try {
+        orgOptions.value = await getAllOrganizations();
+    } catch {
+        // Ignore
+    }
+}
+
 function handlePlatformChange() {
+    const availableShops = new Set(
+        filteredShopOptions.value.map((shop) => shop.shop_name),
+    );
+    searchForm.shops = searchForm.shops.filter((shopName) =>
+        availableShops.has(shopName),
+    );
+    fetchShopOptions();
+}
+
+function handleOrgChange() {
     const availableShops = new Set(
         filteredShopOptions.value.map((shop) => shop.shop_name),
     );
@@ -810,6 +879,7 @@ function handleSearch() {
 function handleReset() {
     searchForm.summaryMonthRange = [];
     searchForm.sourceMonthRange = [];
+    searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.reportPlatforms = [];
     searchForm.shops = [];
@@ -856,6 +926,11 @@ function removeFilterTag(tag: FilterTag) {
         searchForm.summaryMonthRange = [];
     } else if (tag.key === "sourceMonthRange") {
         searchForm.sourceMonthRange = [];
+    } else if (tag.key === "orgIds") {
+        searchForm.orgIds = searchForm.orgIds.filter((item) => {
+            const org = orgOptions.value.find((orgItem) => orgItem.id === item);
+            return (org?.name || `组织#${item}`) !== tag.value;
+        });
     } else if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter(
             (item) => getPlatformLabel(item) !== tag.value,
@@ -872,7 +947,7 @@ function removeFilterTag(tag: FilterTag) {
         searchForm.keyword = "";
     }
 
-    handleReportPlatformChange();
+    handleOrgChange();
     handleSearch();
 }
 
@@ -971,6 +1046,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
 
 onMounted(async () => {
     applyRouteQuery();
+    await fetchOrgOptions();
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();
@@ -994,12 +1070,19 @@ function splitQueryList(value: unknown): string[] {
         .filter(Boolean);
 }
 
+function splitQueryNumberList(value: unknown): number[] {
+    return splitQueryList(value)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item));
+}
+
 function applyRouteQuery() {
     const sourceMonth = queryString(route.query.sourceMonth);
     const summaryMonth = queryString(route.query.summaryMonth);
     if (sourceMonth) searchForm.sourceMonthRange = [sourceMonth, sourceMonth];
     if (summaryMonth)
         searchForm.summaryMonthRange = [summaryMonth, summaryMonth];
+    searchForm.orgIds = splitQueryNumberList(route.query.org_id);
     searchForm.platforms = splitQueryList(route.query.platforms);
     searchForm.reportPlatforms = splitQueryList(route.query.reportPlatforms);
     searchForm.shops = splitQueryList(route.query.shops);

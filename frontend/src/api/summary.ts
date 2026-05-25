@@ -27,6 +27,8 @@ export interface SummaryReportAdjustmentFields {
 
 export interface SummaryRecord extends SummaryMetricFields {
     id: number;
+    org_id: number;
+    org_name?: string | null;
     shop_id: number;
     year: number;
     month: number;
@@ -49,6 +51,8 @@ export interface SummaryRecord extends SummaryMetricFields {
 
 export interface SummaryReportRecord extends SummaryMetricFields, SummaryReportAdjustmentFields {
     id: string;
+    org_id: number;
+    org_name?: string | null;
     year: number;
     month: number;
     source_year: number;
@@ -56,6 +60,7 @@ export interface SummaryReportRecord extends SummaryMetricFields, SummaryReportA
     source_date: string;
     platform: string;
     platform_name: string;
+    source_platform_code?: string;
     report_platform_code: string;
     report_platform: string;
     shop_id: number;
@@ -89,7 +94,7 @@ export interface SummaryListParams {
     report_platform_name?: string;
     shop_name?: string;
     keyword?: string;
-    org_id?: number;
+    org_id?: number | string;
 }
 
 /**
@@ -126,6 +131,7 @@ export async function exportSummaryExcel(params: {
     report_platform_name?: string;
     shop_name?: string;
     keyword?: string;
+    org_id?: number | string;
     scope?: "all" | "current_page" | "selected";
     ids?: string;
     page?: number;
@@ -150,6 +156,7 @@ export async function exportSummaryReportExcel(params: {
     report_platform_name?: string;
     shop_name?: string;
     keyword?: string;
+    org_id?: number | string;
     scope?: "all" | "current_page" | "selected";
     ids?: string;
     page?: number;

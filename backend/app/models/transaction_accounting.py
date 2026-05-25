@@ -7,11 +7,33 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, SoftDeleteMixin
 
 
+class TransactionMajorCategory(SoftDeleteMixin, Base):
+    __tablename__ = "fin_transaction_major_categories"
+    __table_args__ = (
+        Index(
+            "uq_fin_transaction_major_category_name",
+            "name",
+            unique=True,
+            postgresql_where=text("is_deleted = false"),
+        ),
+        {"comment": "动账核算大分类表"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="大分类名称")
+    sort_order: Mapped[int] = mapped_column(Integer, default=100, comment="排序")
+    status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态：1=启用 0=停用")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
+
+
 class TransactionSubject(SoftDeleteMixin, Base):
     __tablename__ = "fin_transaction_subjects"
     __table_args__ = (
         Index(
-            "uq_fin_transaction_subject_name",
+            "uq_fin_transaction_subject_scope_name",
+            "major_category_id",
+            "account_type",
             "name",
             unique=True,
             postgresql_where=text("is_deleted = false"),
@@ -21,6 +43,19 @@ class TransactionSubject(SoftDeleteMixin, Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="科目名称")
+    account_type: Mapped[str] = mapped_column(String(20), nullable=False, default="动账账户", comment="账户类型：银行账户/动账账户")
+    major_category_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("fin_transaction_major_categories.id"),
+        nullable=True,
+        comment="大分类ID",
+    )
+    cash_flow_item_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("fin_cash_flow_items.id"),
+        nullable=True,
+        comment="现金流项目ID",
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=100, comment="排序")
     status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态：1=启用 0=停用")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
@@ -102,13 +137,12 @@ class TransactionUploadFile(SoftDeleteMixin, Base):
             ),
         ),
         Index(
-            "uq_fin_transaction_upload_business_key",
+            "idx_fin_transaction_upload_business_key",
             "org_id",
             "platform_code",
             "shop_id",
             "accounting_year",
             "accounting_month",
-            unique=True,
             postgresql_where=text(
                 "is_deleted = false "
                 "AND platform_code IS NOT NULL "
@@ -172,6 +206,7 @@ class TransactionDetail(SoftDeleteMixin, Base):
     __table_args__ = (
         Index("idx_fin_transaction_details_task_status", "task_id", "status"),
         Index("idx_fin_transaction_details_org_period", "org_id", "accounting_year", "accounting_month"),
+        Index("idx_fin_transaction_details_major_category", "major_category_id", "accounting_year", "accounting_month"),
         {"comment": "动账核算明细表"},
     )
 
@@ -180,6 +215,13 @@ class TransactionDetail(SoftDeleteMixin, Base):
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_upload_files.id"), nullable=False, comment="文件ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
+    major_category_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("fin_transaction_major_categories.id"),
+        nullable=True,
+        comment="大分类ID快照",
+    )
+    major_category_name: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="大分类名称快照")
     subject_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_transaction_subjects.id"), nullable=True, comment="科目ID")
     category_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_transaction_categories.id"), nullable=True, comment="分类ID")
     rule_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_transaction_rules.id"), nullable=True, comment="规则ID")
@@ -204,6 +246,8 @@ class TransactionSummaryRow(SoftDeleteMixin, Base):
     __table_args__ = (
         Index("idx_fin_transaction_summary_task", "task_id"),
         Index("idx_fin_transaction_summary_org_period", "org_id", "accounting_year", "accounting_month"),
+        Index("idx_fin_transaction_summary_major_category", "major_category_id", "accounting_year", "accounting_month"),
+        Index("idx_fin_transaction_summary_cash_flow_item", "cash_flow_item_id", "accounting_year", "accounting_month"),
         {"comment": "动账核算汇总结果表"},
     )
 
@@ -212,8 +256,21 @@ class TransactionSummaryRow(SoftDeleteMixin, Base):
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_upload_files.id"), nullable=False, comment="文件ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
+    major_category_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("fin_transaction_major_categories.id"),
+        nullable=True,
+        comment="大分类ID快照",
+    )
+    major_category_name: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="大分类名称快照")
     subject_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_subjects.id"), nullable=False, comment="科目ID")
     category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_transaction_categories.id"), nullable=False, comment="分类ID")
+    cash_flow_item_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("fin_cash_flow_items.id"),
+        nullable=True,
+        comment="现金流项目ID快照",
+    )
     subject_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="科目名称快照")
     category_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="分类名称快照")
     transaction_direction: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="动账方向")

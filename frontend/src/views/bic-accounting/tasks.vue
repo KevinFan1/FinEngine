@@ -41,6 +41,26 @@
                         </el-option>
                     </el-select>
                 </el-form-item>
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织">
+                    <el-select
+                        v-model="searchForm.orgIds"
+                        placeholder="全部组织"
+                        multiple
+                        clearable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        filterable
+                        style="width: 190px"
+                        @change="handleOrgChange"
+                    >
+                        <el-option
+                            v-for="org in orgOptions"
+                            :key="org.id"
+                            :label="org.name"
+                            :value="org.id"
+                        />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="状态">
                     <el-select
                         v-model="searchForm.statuses"
@@ -140,6 +160,11 @@
                 <el-table-column label="序号" width="70" align="center">
                     <template #default="{ $index }">
                         {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
+                    </template>
+                </el-table-column>
+                <el-table-column v-if="userStore.isSuperAdmin" label="组织" width="170" show-overflow-tooltip>
+                    <template #default="{ row }">
+                        {{ row.org_name || `组织#${row.org_id}` }}
                     </template>
                 </el-table-column>
                 <el-table-column prop="original_name" label="文件名" min-width="160" show-overflow-tooltip />
@@ -331,6 +356,8 @@
 defineOptions({ name: "BicTasks" });
 
 import { ElMessage } from "element-plus";
+import { useUserStore } from "@/stores/user";
+import { getAllOrganizations, type Organization } from "@/api/organization";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
@@ -367,6 +394,8 @@ import {
 const loading = ref(false);
 const tableData = ref<BicTask[]>([]);
 const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
+const userStore = useUserStore();
+const orgOptions = ref<Organization[]>([]);
 const rerunningTaskId = ref<number | null>(null);
 const batchRecalculating = ref(false);
 const selectedRows = ref<BicTask[]>([]);
@@ -374,6 +403,7 @@ const taskDetailDrawerVisible = ref(false);
 const taskDetail = ref<BicTask | null>(null);
 const searchForm = reactive({
     monthRange: [] as string[],
+    orgIds: [] as number[],
     platforms: [] as string[],
     statuses: [] as string[],
     shopNames: [] as string[],
@@ -394,6 +424,9 @@ const hasRunningTasks = computed(() => {
 
 const selectedPlatformsParam = computed(
     () => searchForm.platforms.join(",") || undefined,
+);
+const selectedOrgIdsParam = computed(
+    () => searchForm.orgIds.join(",") || undefined,
 );
 const selectedStatusesParam = computed(
     () => searchForm.statuses.join(",") || undefined,
@@ -438,12 +471,16 @@ const selectedRecalculableRows = computed(() =>
 );
 
 interface TaskFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "platforms" | "statuses" | "shopNames" | "keyword";
+    key: "monthRange" | "orgIds" | "platforms" | "statuses" | "shopNames" | "keyword";
 }
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
     if (searchForm.monthRange.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    searchForm.orgIds.forEach((value) => {
+        const org = orgOptions.value.find((item) => item.id === value);
+        tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
+    });
     searchForm.platforms.forEach((value) => tags.push({ key: "platforms", label: "平台", value: getPlatformLabel(value) }));
     searchForm.statuses.forEach((value) => tags.push({ key: "statuses", label: "状态", value: taskStatusLabel(value) }));
     searchForm.shopNames.forEach((value) => tags.push({ key: "shopNames", label: "店铺", value }));
@@ -485,6 +522,7 @@ function queryParams() {
     return {
         page: pagination.page,
         page_size: pagination.pageSize,
+        org_id: selectedOrgIdsParam.value,
         status: selectedStatusesParam.value,
         platform_code: selectedPlatformsParam.value,
         shop_name: selectedShopNamesParam.value,
@@ -512,6 +550,7 @@ async function fetchShopOptions() {
         const res = await getShopList({
             page: 1,
             page_size: 100,
+            org_id: selectedOrgIdsParam.value,
             platform_name: selectedReportPlatformsParam.value,
         });
         shopOptions.value = res.items || [];
@@ -532,7 +571,26 @@ async function fetchPlatformOptions() {
     platformOptions.value = toSourcePlatformOptions(platforms.value);
 }
 
+async function fetchOrgOptions() {
+    if (!userStore.isSuperAdmin) return;
+    try {
+        orgOptions.value = await getAllOrganizations();
+    } catch {
+        // Ignore
+    }
+}
+
 async function handlePlatformChange() {
+    await fetchShopOptions();
+    const availableShopNames = new Set(
+        filteredShopOptions.value.map((shop) => shop.shop_name),
+    );
+    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
+        availableShopNames.has(shopName),
+    );
+}
+
+async function handleOrgChange() {
     await fetchShopOptions();
     const availableShopNames = new Set(
         filteredShopOptions.value.map((shop) => shop.shop_name),
@@ -549,6 +607,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.monthRange = [];
+    searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.statuses = [];
     searchForm.shopNames = [];
@@ -559,6 +618,13 @@ function handleReset() {
 
 async function removeFilterTag(tag: TaskFilterTag) {
     if (tag.key === "monthRange") searchForm.monthRange = [];
+    if (tag.key === "orgIds") {
+        searchForm.orgIds = searchForm.orgIds.filter((item) => {
+            const org = orgOptions.value.find((orgItem) => orgItem.id === item);
+            return (org?.name || `组织#${item}`) !== tag.value;
+        });
+        await handleOrgChange();
+    }
     if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter((item) => getPlatformLabel(item) !== tag.value);
         await fetchShopOptions();
@@ -642,6 +708,7 @@ function stopAutoRefresh() {
 }
 
 onMounted(async () => {
+    await fetchOrgOptions();
     await fetchPlatformOptions();
     await fetchShopOptions();
     fetchData();

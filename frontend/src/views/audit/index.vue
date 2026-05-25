@@ -58,6 +58,25 @@
             </template>
           </el-input>
         </el-form-item>
+        <el-form-item v-if="isSuperAdmin" label="组织">
+          <el-select
+            v-model="searchForm.orgIds"
+            placeholder="全部组织"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            style="width: 190px"
+          >
+            <el-option
+              v-for="org in orgOptions"
+              :key="org.id"
+              :label="org.name"
+              :value="org.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="时间范围">
           <el-date-picker
             v-model="searchForm.dateRange"
@@ -222,6 +241,7 @@ import { getAuditLogList, type AuditLog } from '@/api/audit'
 import { formatDateTime } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import { useUserStore } from '@/stores/user'
+import { getAllOrganizations, type Organization } from '@/api/organization'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
 import SearchCardIntro from '@/components/SearchCardIntro.vue'
 import { usePageRefresh } from '@/composables/pageRefresh'
@@ -235,6 +255,7 @@ const searchForm = reactive({
   modules: [] as string[],
   actions: [] as string[],
   username: '',
+  orgIds: [] as number[],
   dateRange: null as [string, string] | null,
 })
 
@@ -248,6 +269,7 @@ const pagination = reactive({
   pageSize: DEFAULT_PAGE_SIZE,
   total: 0,
 })
+const orgOptions = ref<Organization[]>([])
 
 const moduleMap: Record<string, string> = {
   auth: '认证',
@@ -289,7 +311,7 @@ const moduleOptions = Object.entries(moduleMap).map(([value, label]) => ({ value
 const actionOptions = Object.entries(actionMap).map(([value, label]) => ({ value, label }))
 
 interface AuditFilterTag extends ActiveFilterTag {
-  key: 'modules' | 'actions' | 'username' | 'dateRange'
+  key: 'modules' | 'actions' | 'username' | 'orgIds' | 'dateRange'
 }
 
 const activeFilterTags = computed<AuditFilterTag[]>(() => {
@@ -303,6 +325,10 @@ const activeFilterTags = computed<AuditFilterTag[]>(() => {
   if (searchForm.username) {
     tags.push({ key: 'username', label: '操作人', value: searchForm.username })
   }
+  searchForm.orgIds.forEach((value) => {
+    const org = orgOptions.value.find((item) => item.id === value)
+    tags.push({ key: 'orgIds', label: '组织', value: org?.name || `组织#${value}` })
+  })
   if (searchForm.dateRange?.length === 2) {
     tags.push({ key: 'dateRange', label: '时间范围', value: `${searchForm.dateRange[0]} 至 ${searchForm.dateRange[1]}` })
   }
@@ -329,6 +355,7 @@ async function fetchData() {
     const params: Record<string, any> = {
       page: pagination.page,
       page_size: pagination.pageSize,
+      org_id: searchForm.orgIds.join(',') || undefined,
       module: searchForm.modules.join(',') || undefined,
       action: searchForm.actions.join(',') || undefined,
       username: searchForm.username || undefined,
@@ -356,6 +383,7 @@ function handleReset() {
   searchForm.modules = []
   searchForm.actions = []
   searchForm.username = ''
+  searchForm.orgIds = []
   searchForm.dateRange = null
   pagination.page = 1
   fetchData()
@@ -368,6 +396,11 @@ function removeFilterTag(tag: AuditFilterTag) {
     searchForm.actions = searchForm.actions.filter((action) => actionLabel(action) !== tag.value)
   } else if (tag.key === 'username') {
     searchForm.username = ''
+  } else if (tag.key === 'orgIds') {
+    searchForm.orgIds = searchForm.orgIds.filter((item) => {
+      const org = orgOptions.value.find((orgItem) => orgItem.id === item)
+      return (org?.name || `组织#${item}`) !== tag.value
+    })
   } else if (tag.key === 'dateRange') {
     searchForm.dateRange = null
   }
@@ -379,7 +412,17 @@ function openDetailDrawer(row: AuditLog) {
   detailDrawerVisible.value = true
 }
 
-onMounted(() => {
+async function fetchOrgOptions() {
+  if (!isSuperAdmin.value) return
+  try {
+    orgOptions.value = await getAllOrganizations()
+  } catch {
+    // Ignore
+  }
+}
+
+onMounted(async () => {
+  await fetchOrgOptions()
   fetchData()
 })
 

@@ -21,6 +21,7 @@ export const directionOptions = [
 ];
 
 export const matchTypeOptions = [
+    { label: "不限制", value: "none" },
     { label: "精准", value: "exact" },
     { label: "包含", value: "contains" },
     { label: "不包含", value: "not_contains" },
