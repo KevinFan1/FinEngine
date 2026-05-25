@@ -6,6 +6,7 @@ export const transactionStatusOptions = [
     { label: "成功", value: "success" },
     { label: "部分成功", value: "partial_success" },
     { label: "失败", value: "failed" },
+    { label: "已过期", value: "expired" },
 ];
 
 export const detailStatusOptions = [
@@ -39,7 +40,7 @@ export function taskStatusLabel(status: string) {
 }
 
 export function taskStatusType(status: string) {
-    return ({ success: "success", partial_success: "warning", failed: "danger", processing: "primary", queued: "info" } as Record<string, string>)[status] || "info";
+    return ({ success: "success", partial_success: "warning", failed: "danger", expired: "info", processing: "primary", queued: "info" } as Record<string, string>)[status] || "info";
 }
 
 export function detailStatusLabel(status: string) {

@@ -6,16 +6,17 @@ export interface User {
   username: string
   display_name: string
   phone: string
-  email: string
+  email: string | null
   role: string
   org_id: number | null
-  org_name?: string
-  status: string
+  org_name?: string | null
+  status: string | number
   last_login_at: string | null
   active_session_ip?: string | null
   active_session_user_agent?: string | null
   active_session_at?: string | null
   created_at: string
+  updated_at: string
 }
 
 export interface UserListParams {

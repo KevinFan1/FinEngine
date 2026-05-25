@@ -1,14 +1,44 @@
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.deps import get_current_user, require_org_admin_or_above
+from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.user import UserCreate, UserOut, UserResetPassword, UserUpdate
 from app.services.user_service import UserService
 
 router = APIRouter()
+
+
+def _user_out(user: User, org_name: str | None = None) -> UserOut:
+    return UserOut.model_validate(user).model_copy(update={"org_name": org_name})
+
+
+async def _load_org_name_map(db: AsyncSession, org_ids: set[int]) -> dict[int, str]:
+    if not org_ids:
+        return {}
+    result = await db.execute(
+        select(Organization.id, Organization.name).where(
+            Organization.id.in_(org_ids),
+            Organization.is_deleted.is_(False),
+        )
+    )
+    return {org_id: org_name for org_id, org_name in result.all()}
+
+
+async def _load_org_name(db: AsyncSession, org_id: int | None) -> str | None:
+    if org_id is None:
+        return None
+    result = await db.execute(
+        select(Organization.name).where(
+            Organization.id == org_id,
+            Organization.is_deleted.is_(False),
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 @router.get("", response_model=ApiResponse[PageResponse[UserOut]])
@@ -30,9 +60,13 @@ async def list_users(
         org_id=org_id,
         operator=current_user,
     )
+    org_name_map = await _load_org_name_map(
+        db,
+        {user.org_id for user in users if user.org_id is not None},
+    )
     return ApiResponse(
         data=PageResponse(
-            items=[UserOut.model_validate(u) for u in users],
+            items=[_user_out(user, org_name_map.get(user.org_id)) for user in users],
             total=total,
             page=page,
             page_size=page_size,
@@ -63,7 +97,7 @@ async def create_user(
     except ValueError as e:
         return ApiResponse(code=400, message=str(e))
 
-    return ApiResponse(data=UserOut.model_validate(user))
+    return ApiResponse(data=_user_out(user, await _load_org_name(db, user.org_id)))
 
 
 @router.get("/{user_id}", response_model=ApiResponse[UserOut])
@@ -80,7 +114,7 @@ async def get_user(
         return ApiResponse(code=404, message=str(e))
     if user is None:
         return ApiResponse(code=404, message="用户不存在")
-    return ApiResponse(data=UserOut.model_validate(user))
+    return ApiResponse(data=_user_out(user, await _load_org_name(db, user.org_id)))
 
 
 @router.put("/{user_id}", response_model=ApiResponse[UserOut])
@@ -110,7 +144,7 @@ async def update_user(
 
     if user is None:
         return ApiResponse(code=404, message="用户不存在")
-    return ApiResponse(data=UserOut.model_validate(user))
+    return ApiResponse(data=_user_out(user, await _load_org_name(db, user.org_id)))
 
 
 @router.put("/{user_id}/status", response_model=ApiResponse[UserOut])
@@ -139,7 +173,7 @@ async def update_user_status(
         return ApiResponse(code=400, message=str(e))
     if user is None:
         return ApiResponse(code=404, message="用户不存在")
-    return ApiResponse(data=UserOut.model_validate(user))
+    return ApiResponse(data=_user_out(user, await _load_org_name(db, user.org_id)))
 
 
 @router.post("/{user_id}/reset-password", response_model=ApiResponse)

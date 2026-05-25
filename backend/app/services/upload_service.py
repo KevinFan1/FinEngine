@@ -1,5 +1,7 @@
 """Upload service — batch management and uploaded-file callback."""
 
+import math
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,17 @@ from app.services.platform_profile_service import resolve_platform_profile
 from app.services.quota_service import QuotaService
 from app.services.shop_service import ShopService
 from app.services.transaction_accounting_service import TransactionAccountingService
+
+
+def _format_file_size(bytes_size: int) -> str:
+    if bytes_size <= 0:
+        return "0 B"
+
+    units = ("B", "KB", "MB", "GB", "TB")
+    index = min(int(math.log(bytes_size, 1024)), len(units) - 1)
+    value = bytes_size / (1024 ** index)
+    decimals = 0 if index == 0 else 2
+    return f"{value:.{decimals}f} {units[index]}"
 
 
 class UploadService:
@@ -171,7 +184,7 @@ class UploadService:
             org_id=batch.org_id,
             module="upload",
             action="upload_file",
-            description=f"用户 [{user.display_name}] 上传文件 [{data.original_name}]，大小 {round(data.file_size / 1024, 2)}MB",
+            description=f"用户 [{user.display_name}] 上传文件 [{data.original_name}]，大小 {_format_file_size(data.file_size)}",
             target_type="upload_file",
             target_id=upload_file.id,
             target_name=data.original_name,

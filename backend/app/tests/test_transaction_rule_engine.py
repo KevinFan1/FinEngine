@@ -12,6 +12,7 @@ from app.services.transaction_rule_engine import (
     TransactionRuleCandidate,
     evaluate_transaction_row,
 )
+from app.services.oss_service import OSSObjectUnavailableError, SOURCE_FILE_UNAVAILABLE_MESSAGE
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.config.transaction_accounting_rules import (
     TRANSACTION_ACCOUNTING_PENDING_RULES,
@@ -783,3 +784,57 @@ async def test_execute_task_rolls_back_before_persisting_failed_state_after_flus
     assert task.status == "failed"
     assert upload_file.status == "failed"
     assert "Object of type datetime is not JSON serializable" in (task.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_task_marks_source_file_expired_and_preserves_previous_result(monkeypatch) -> None:
+    task = TransactionTask(
+        id=10,
+        file_id=20,
+        org_id=1,
+        user_id=2,
+        status="success",
+        progress=100,
+        total_rows=9,
+        matched_rows=8,
+        unmatched_rows=1,
+        failed_rows=0,
+        result_summary={"old": True},
+    )
+    upload_file = TransactionUploadFile(
+        id=20,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="processed",
+    )
+    db = _TransactionAccountingSession(
+        task=task,
+        upload_file=upload_file,
+        subjects=[],
+        categories=[],
+    )
+
+    monkeypatch.setattr(
+        TransactionAccountingService,
+        "_load_douyin_dongzhang_rows_from_oss",
+        staticmethod(lambda _upload_file: (_ for _ in ()).throw(OSSObjectUnavailableError("missing"))),
+    )
+
+    result = await TransactionAccountingService.execute_task(db, task_id=10)  # type: ignore[arg-type]
+
+    assert db.rollback_count == 1
+    assert result.status == "expired"
+    assert task.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
+    assert task.total_rows == 9
+    assert task.matched_rows == 8
+    assert task.unmatched_rows == 1
+    assert task.failed_rows == 0
+    assert task.result_summary == {"old": True}
+    assert upload_file.status == "expired"
+    assert upload_file.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE

@@ -29,6 +29,7 @@ class UserResetPassword(BaseModel):
 class UserOut(BaseModel):
     id: int
     org_id: int | None
+    org_name: str | None = None
     username: str
     phone: str
     display_name: str

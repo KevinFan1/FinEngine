@@ -226,6 +226,7 @@
                     <div class="rule-list__head">
                         <span>平台</span>
                         <span>规则说明</span>
+                        <span>取值表头</span>
                         <span>结果</span>
                         <span>操作</span>
                     </div>
@@ -281,6 +282,14 @@
                                     placeholder="输入备注内容"
                                 />
                             </div>
+                        </div>
+                        <div class="rule-list__amount">
+                            <el-input
+                                v-model="editingDraft.amount_field"
+                                size="small"
+                                class="rule-editor__field rule-editor__field--md"
+                                placeholder="动账金额"
+                            />
                         </div>
                         <div class="rule-list__result">
                             <el-select
@@ -361,6 +370,14 @@
                                         />
                                     </div>
                                 </div>
+                                <div class="rule-list__amount">
+                                    <el-input
+                                        v-model="editingDraft.amount_field"
+                                        size="small"
+                                        class="rule-editor__field rule-editor__field--md"
+                                        placeholder="动账金额"
+                                    />
+                                </div>
                                 <div class="rule-list__result">
                                     <el-select
                                         v-model="editingDraft.result_direction"
@@ -392,6 +409,9 @@
                                         <strong>{{ ruleDirectionSentence(rule) }}</strong>
                                         <span>{{ ruleRemarkSentence(rule) }}</span>
                                     </div>
+                                </div>
+                                <div class="rule-list__amount">
+                                    {{ rule.amount_field || "动账金额" }}
                                 </div>
                                 <div class="rule-list__result">
                                     {{ resultDirectionText(rule.result_direction) }}
@@ -811,6 +831,7 @@ function filterCategoryNode(category: CategoryNode, keyword: string): CategoryNo
             rule.transaction_direction,
             rule.transaction_scene,
             rule.remark_pattern,
+            rule.amount_field,
             platformLabel(rule.platform_code),
             resultDirectionText(rule.result_direction),
         ),
@@ -1234,7 +1255,7 @@ async function loadData(options: { keepExpansion?: boolean } = {}) {
 }
 
 function resetExpansionState() {
-    expandedSubjectKeys.value = subjectNodes.value.map((item) => item.key);
+    expandedSubjectKeys.value = [];
 }
 
 function syncExpansionState() {
@@ -1242,9 +1263,6 @@ function syncExpansionState() {
     expandedSubjectKeys.value = expandedSubjectKeys.value.filter((key) =>
         subjectKeys.has(key),
     );
-    if (!expandedSubjectKeys.value.length && subjectNodes.value.length) {
-        expandedSubjectKeys.value = subjectNodes.value.map((item) => item.key);
-    }
 }
 
 onMounted(loadData);
@@ -1296,6 +1314,13 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 .rule-detail-card {
     min-width: 0;
 
+    :deep(.el-card__header) {
+        display: flex;
+        align-items: center;
+        min-height: 78px;
+        padding: 14px 16px;
+    }
+
     :deep(.el-card__body) {
         padding: 0;
     }
@@ -1330,7 +1355,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 .tree-group__children {
-    padding: 0 12px 10px 12px;
+    padding: 0 8px 8px 30px;
 }
 
 .tree-row {
@@ -1338,19 +1363,18 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
-    padding: 10px 12px;
+    padding: 8px 10px;
     background: var(--bg-card);
 }
 
 .tree-row--category {
-    margin-top: 6px;
+    margin-top: 2px;
     padding: 0;
-    border: 1px solid var(--border-light);
-    border-radius: 8px;
+    border: 0;
+    border-radius: 6px;
 }
 
 .tree-row--category.is-active {
-    border-color: color-mix(in srgb, var(--primary) 30%, var(--border-light));
     background: color-mix(in srgb, var(--primary) 5%, var(--bg-card));
 }
 
@@ -1369,7 +1393,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 
 .tree-row__main--category {
     width: 100%;
-    padding: 10px 12px;
+    padding: 8px 10px;
 }
 
 .tree-row__icon {
@@ -1388,7 +1412,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 .tree-row__copy strong {
     overflow: hidden;
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: 13px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1427,33 +1451,44 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 
 .detail-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
+    width: 100%;
     min-width: 0;
 }
 
 .detail-header__copy {
     display: grid;
+    flex: 1;
     gap: 4px;
     min-width: 0;
 }
 
 .detail-header__eyebrow {
+    overflow: hidden;
     color: var(--text-tertiary);
     font-size: 12px;
     font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .detail-header__copy strong {
+    overflow: hidden;
     color: var(--text-primary);
     font-size: 16px;
     font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .detail-header__copy small {
+    overflow: hidden;
     color: var(--text-tertiary);
     font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rule-list {
@@ -1463,7 +1498,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 .rule-list__head,
 .rule-list__row {
     display: grid;
-    grid-template-columns: 130px minmax(0, 1.9fr) 130px 140px;
+    grid-template-columns: 120px minmax(0, 1.8fr) 150px 120px 130px;
     gap: 12px;
     align-items: center;
 }
@@ -1487,6 +1522,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 .rule-list__platform,
+.rule-list__amount,
 .rule-list__result {
     color: var(--text-secondary);
     font-size: 13px;
@@ -1548,6 +1584,10 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     width: 144px;
 }
 
+.rule-editor__field--md {
+    width: 150px;
+}
+
 .node-dialog {
     display: grid;
     gap: 10px;
@@ -1567,6 +1607,13 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 @media (max-width: 900px) {
+    .rule-tree-card,
+    .rule-detail-card {
+        :deep(.el-card__header) {
+            min-height: auto;
+        }
+    }
+
     .rule-toolbar {
         flex-direction: column;
     }

@@ -120,6 +120,7 @@
                         <el-option label="运行中" value="running" />
                         <el-option label="成功" value="success" />
                         <el-option label="失败" value="failed" />
+                        <el-option label="已过期" value="expired" />
                         <el-option label="已取消" value="cancelled" />
                     </el-select>
                 </el-form-item>
@@ -791,6 +792,7 @@ function statusTagType(status: string): string {
         running: "warning",
         success: "success",
         failed: "danger",
+        expired: "info",
         cancelled: "info",
     };
     return map[status] || "info";
@@ -802,12 +804,14 @@ function statusLabel(status: string): string {
         running: "运行中",
         success: "成功",
         failed: "失败",
+        expired: "已过期",
         cancelled: "已取消",
     };
     return map[status] || status;
 }
 
 function isActionExpired(row: Task) {
+    if (row.status === "expired") return true;
     if (row.action_expired) return true;
     if (!row.created_at) return false;
     const createdAt = new Date(row.created_at).getTime();
@@ -816,7 +820,7 @@ function isActionExpired(row: Task) {
 }
 
 function canRecalculate(row: Task) {
-    return !["queued", "running"].includes(row.status) && !isActionExpired(row);
+    return !["queued", "running", "expired"].includes(row.status) && !isActionExpired(row);
 }
 
 function taskErrorReason(row: Task) {

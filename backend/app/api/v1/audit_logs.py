@@ -11,6 +11,7 @@ from app.models.operation_log import OperationLog
 from app.models.user import User
 from app.schemas.audit import AuditLogOut
 from app.schemas.common import ApiResponse, PageResponse
+from app.services.audit_service import AuditService
 from app.utils.query_filters import split_int_filter_values
 
 router = APIRouter()
@@ -95,7 +96,12 @@ async def list_audit_logs(
     return ApiResponse(
         data=PageResponse(
             items=[
-                AuditLogOut.model_validate(log).model_copy(update={"org_name": org_name})
+                AuditLogOut.model_validate(log).model_copy(
+                    update={
+                        "org_name": org_name,
+                        "description": AuditService.render_log_description(log),
+                    }
+                )
                 for log, org_name in rows
             ],
             total=total,

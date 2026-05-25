@@ -174,6 +174,11 @@ def make_shared_upload(
     )
 
 
+def test_upload_file_size_label_uses_real_binary_units() -> None:
+    assert upload_service_module._format_file_size(40 * 1024 * 1024) == "40.00 MB"
+    assert upload_service_module._format_file_size(4096) == "4.00 KB"
+
+
 @pytest.mark.asyncio
 async def test_transaction_accounting_creates_independent_records_from_shared_upload(
     monkeypatch: pytest.MonkeyPatch,
@@ -276,7 +281,7 @@ async def test_transaction_accounting_reupload_creates_new_records_for_same_busi
 
 
 @pytest.mark.asyncio
-async def test_transaction_accounting_rerun_reuses_task_and_clears_result_state(
+async def test_transaction_accounting_rerun_reuses_task_and_preserves_result_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     old_task = TransactionTask(
@@ -337,17 +342,17 @@ async def test_transaction_accounting_rerun_reuses_task_and_clears_result_state(
     assert old_task.file_id == upload_file.id
     assert old_task.status == "queued"
     assert old_task.progress == 0
-    assert old_task.total_rows == 0
-    assert old_task.matched_rows == 0
+    assert old_task.total_rows == 10
+    assert old_task.matched_rows == 10
     assert old_task.unmatched_rows == 0
     assert old_task.failed_rows == 0
     assert old_task.error_message is None
-    assert old_task.result_summary is None
+    assert old_task.result_summary == {"ok": True}
     assert upload_file.status == "uploaded"
     assert upload_file.error_message is None
     executed_sql = "\n".join(str(stmt) for stmt in session.executed)
-    assert "DELETE FROM fin_transaction_details" in executed_sql
-    assert "DELETE FROM fin_transaction_summary_rows" in executed_sql
+    assert "DELETE FROM fin_transaction_details" not in executed_sql
+    assert "DELETE FROM fin_transaction_summary_rows" not in executed_sql
 
     await run_after_commit_callbacks(session)  # type: ignore[arg-type]
 
@@ -526,6 +531,7 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
     batch = UploadBatch(id=1, org_id=9, user_id=7, file_count=1)
     transaction_calls: list[int] = []
     bic_calls: list[int] = []
+    audit_descriptions: list[str] = []
 
     async def fake_get_batch_for_user(*args, **kwargs):
         return batch
@@ -540,6 +546,7 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
         return SimpleNamespace(id=12)
 
     async def fake_log(*args, **kwargs):
+        audit_descriptions.append(kwargs["description"])
         return None
 
     async def fake_transaction_create(*args, **kwargs):
@@ -625,3 +632,4 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
     assert generic_task.file_id == upload_file.id
     assert transaction_calls == [upload_file.id] * expected_transaction_calls
     assert bic_calls == [upload_file.id] * expected_bic_calls
+    assert any("大小 4.00 KB" in description for description in audit_descriptions)

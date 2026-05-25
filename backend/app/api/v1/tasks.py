@@ -248,6 +248,8 @@ async def _validate_task_action(
     upload_file: UploadFile,
     action: str,
 ) -> str | None:
+    if task.status == "expired":
+        return "源文件已过期或不存在，不能重试，请重新上传文件"
     if is_task_expired(task):
         return _task_expired_message()
     if action == "retry" and task.status != "failed":
@@ -270,11 +272,7 @@ async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db:
     task.status = "queued"
     task.progress = 0
     task.celery_task_id = None
-    task.processed_rows = 0
-    task.success_rows = 0
-    task.failed_rows = 0
     task.error_message = None
-    task.result_summary = None
     task.started_at = None
     task.finished_at = None
     upload_file.status = "uploaded"

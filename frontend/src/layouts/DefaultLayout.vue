@@ -251,7 +251,7 @@
                     @click="refreshContextTab"
                 >
                     <el-icon><Refresh /></el-icon>
-                    刷新当前页
+                    刷新
                 </button>
                 <button
                     type="button"

@@ -62,7 +62,7 @@ TRANSACTION_ACCOUNTING_RULE_CONFIG: RuleConfig = {
                 "transaction_scene": "退款-订单退款触发-分账",
                 "match_type": "exact",
                 "remark_pattern": "极速退款分账",
-                "amount_field": "动账金额",
+                "amount_field": "订单实付应结",
                 "result_direction": "positive",
                 "source_rows": (6,),
             },

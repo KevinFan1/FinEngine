@@ -12,6 +12,7 @@ from celery import Celery
 from celery.signals import worker_process_shutdown
 
 from app.core.config import settings
+from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error
 from app.tasks.processors.base import normalize_positive_summary_fields, safe_str
 
 celery_app = Celery("finengine", broker=settings.CELERY_REDIS_URL, backend=settings.CELERY_REDIS_URL)
@@ -59,12 +60,36 @@ def _run_async_in_worker(coro):
     return loop.run_until_complete(coro)
 
 
-def _mark_task_failed(task, upload_file, error_message: str) -> None:
-    task.status = "failed"
+def _capture_processing_result_state(task, upload_file) -> dict[str, object]:
+    return {
+        "processed_rows": task.processed_rows,
+        "success_rows": task.success_rows,
+        "failed_rows": task.failed_rows,
+        "result_summary": task.result_summary,
+        "upload_row_count": getattr(upload_file, "row_count", None) if upload_file is not None else None,
+    }
+
+
+def _restore_processing_result_state(task, upload_file, state: dict[str, object] | None) -> None:
+    if not state:
+        return
+    task.processed_rows = int(state.get("processed_rows") or 0)
+    task.success_rows = int(state.get("success_rows") or 0)
+    task.failed_rows = int(state.get("failed_rows") or 0)
+    task.result_summary = state.get("result_summary")  # type: ignore[assignment]
+    if upload_file is not None:
+        upload_file.row_count = state.get("upload_row_count")  # type: ignore[assignment]
+
+
+def _mark_task_failed(task, upload_file, error: Exception | str, *, previous_state: dict[str, object] | None = None) -> None:
+    is_expired = is_oss_object_unavailable_error(error)
+    error_message = SOURCE_FILE_UNAVAILABLE_MESSAGE if is_expired else str(error)
+    _restore_processing_result_state(task, upload_file, previous_state)
+    task.status = "expired" if is_expired else "failed"
     task.error_message = error_message
     task.finished_at = datetime.now(timezone.utc)
     if upload_file:
-        upload_file.status = "failed"
+        upload_file.status = "expired" if is_expired else "failed"
         upload_file.error_message = error_message
 
 
@@ -422,7 +447,7 @@ async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id:
             UploadFile.parsed_month == order_file.parsed_month,
             UploadFile.is_deleted.is_(False),
             ProcessingTask.is_deleted.is_(False),
-            ProcessingTask.status.notin_(["queued", "running"]),
+            ProcessingTask.status.notin_(["queued", "running", "expired"]),
         ]
         if order_file.shop_id is not None:
             filters.append(UploadFile.shop_id == order_file.shop_id)
@@ -453,11 +478,7 @@ def _reset_task_for_requeue(task, upload_file) -> None:
     task.status = "queued"
     task.progress = 0
     task.celery_task_id = None
-    task.processed_rows = 0
-    task.success_rows = 0
-    task.failed_rows = 0
     task.error_message = None
-    task.result_summary = None
     task.started_at = None
     task.finished_at = None
     upload_file.status = "uploaded"
@@ -492,6 +513,7 @@ async def _process_file_platform_async(
         if not task:
             return
 
+        previous_result_state = _capture_processing_result_state(task, None)
         task.status = "running"
         task.celery_task_id = task_instance.request.id
         task.started_at = datetime.now(timezone.utc)
@@ -501,6 +523,7 @@ async def _process_file_platform_async(
         file_stmt = select(UploadFile).where(UploadFile.id == file_id, UploadFile.is_deleted.is_(False))
         file_result = await db.execute(file_stmt)
         upload_file = file_result.scalar_one_or_none()
+        previous_result_state["upload_row_count"] = getattr(upload_file, "row_count", None) if upload_file is not None else None
         if upload_file and upload_file.shop_id:
             shop_id = upload_file.shop_id
         file_type = _infer_file_type(upload_file)
@@ -1019,7 +1042,14 @@ async def _process_file_platform_async(
                     await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
 
         except Exception as e:
-            _mark_task_failed(task, upload_file, str(e))
+            await db.rollback()
+            task_result = await db.execute(select(ProcessingTask).where(ProcessingTask.id == task.id, ProcessingTask.is_deleted.is_(False)))
+            task = task_result.scalar_one_or_none()
+            upload_file = None
+            if task is not None:
+                file_result = await db.execute(select(UploadFile).where(UploadFile.id == file_id, UploadFile.is_deleted.is_(False)))
+                upload_file = file_result.scalar_one_or_none()
+                _mark_task_failed(task, upload_file, e, previous_state=previous_result_state)
             await db.commit()
             logger.exception("任务处理失败 file_id=%s oss_key=%s", file_id, oss_key)
             raise

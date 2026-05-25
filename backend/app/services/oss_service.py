@@ -13,6 +13,28 @@ import oss2
 
 from app.core.config import settings
 
+SOURCE_FILE_UNAVAILABLE_MESSAGE = "源文件已过期或不存在，无法重新处理，请重新上传文件"
+
+
+class OSSObjectUnavailableError(ValueError):
+    """Raised when an uploaded source object can no longer be downloaded."""
+
+
+def is_oss_object_unavailable_error(exc: object) -> bool:
+    if isinstance(exc, OSSObjectUnavailableError):
+        return True
+
+    status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+    if status == 404:
+        return True
+
+    code = str(getattr(exc, "code", "") or "")
+    if code in {"NoSuchKey", "NoSuchBucket", "NoSuchUpload"}:
+        return True
+
+    message = str(exc)
+    return any(marker in message for marker in ("NoSuchKey", "NoSuchBucket", "No such object", "Object not found"))
+
 
 class AliyunOSSService:
     """Stream files from Alibaba Cloud OSS."""
@@ -72,25 +94,35 @@ class AliyunOSSService:
         Raises:
             ValueError: If file size exceeds max_size
         """
-        result = self._bucket(internal=settings.INTERNAL_DOWNLOAD).get_object(oss_key)
+        try:
+            result = self._bucket(internal=settings.INTERNAL_DOWNLOAD).get_object(oss_key)
+        except Exception as exc:
+            if is_oss_object_unavailable_error(exc):
+                raise OSSObjectUnavailableError(SOURCE_FILE_UNAVAILABLE_MESSAGE) from exc
+            raise
 
-        # Check content length if available
-        content_length = result.content_length
-        if content_length and content_length > max_size:
-            raise ValueError(f"文件过大: {content_length} bytes (最大 {max_size} bytes)")
+        try:
+            # Check content length if available
+            content_length = result.content_length
+            if content_length and content_length > max_size:
+                raise ValueError(f"文件过大: {content_length} bytes (最大 {max_size} bytes)")
 
-        downloaded = 0
-        with Path(local_path).open("wb") as f:
-            while True:
-                chunk = result.read(chunk_size)
-                if not chunk:
-                    break
-                downloaded += len(chunk)
-                if downloaded > max_size:
-                    # Clean up partial file
-                    Path(local_path).unlink(missing_ok=True)
-                    raise ValueError(f"下载超过大小限制: {max_size} bytes")
-                f.write(chunk)
+            downloaded = 0
+            with Path(local_path).open("wb") as f:
+                while True:
+                    chunk = result.read(chunk_size)
+                    if not chunk:
+                        break
+                    downloaded += len(chunk)
+                    if downloaded > max_size:
+                        Path(local_path).unlink(missing_ok=True)
+                        raise ValueError(f"下载超过大小限制: {max_size} bytes")
+                    f.write(chunk)
+        except Exception as exc:
+            if is_oss_object_unavailable_error(exc):
+                Path(local_path).unlink(missing_ok=True)
+                raise OSSObjectUnavailableError(SOURCE_FILE_UNAVAILABLE_MESSAGE) from exc
+            raise
 
 
 # ── Alibaba Cloud OSS STS ────────────────────────────────────────────────────

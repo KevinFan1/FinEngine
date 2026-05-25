@@ -42,7 +42,7 @@ from app.schemas.transaction_accounting import (
     TransactionUploadInit,
 )
 from app.services.audit_service import AuditService
-from app.services.oss_service import oss_service
+from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
 from app.services.shop_service import ShopService
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
@@ -93,9 +93,27 @@ TRANSACTION_PLATFORM_LABELS = {
     "快手": "快手",
 }
 
-TRANSACTION_RESULT_TASK_STATUSES = ("success", "partial_success")
+TRANSACTION_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
 TRANSACTION_ERROR_SAMPLE_LIMIT = 20
 logger = logging.getLogger("finengine.transaction_accounting")
+
+
+def _capture_transaction_result_state(task: TransactionTask) -> dict[str, object]:
+    return {
+        "total_rows": task.total_rows,
+        "matched_rows": task.matched_rows,
+        "unmatched_rows": task.unmatched_rows,
+        "failed_rows": task.failed_rows,
+        "result_summary": task.result_summary,
+    }
+
+
+def _restore_transaction_result_state(task: TransactionTask, state: dict[str, object]) -> None:
+    task.total_rows = int(state.get("total_rows") or 0)
+    task.matched_rows = int(state.get("matched_rows") or 0)
+    task.unmatched_rows = int(state.get("unmatched_rows") or 0)
+    task.failed_rows = int(state.get("failed_rows") or 0)
+    task.result_summary = state.get("result_summary")  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
@@ -730,6 +748,8 @@ class TransactionAccountingService:
         if task is None or task.is_deleted:
             return None
         TransactionAccountingService.validate_org_scope(org_id=task.org_id, user=user)
+        if task.status == "expired":
+            raise ValueError("源文件已过期或不存在，不能重新统计，请重新上传文件")
         upload_file = await db.get(TransactionUploadFile, task.file_id)
         if upload_file is None or upload_file.is_deleted:
             raise ValueError("动账上传文件不存在")
@@ -737,18 +757,11 @@ class TransactionAccountingService:
         task.status = "queued"
         task.progress = 0
         task.celery_task_id = None
-        task.total_rows = 0
-        task.matched_rows = 0
-        task.unmatched_rows = 0
-        task.failed_rows = 0
         task.error_message = None
-        task.result_summary = None
         task.started_at = None
         task.finished_at = None
         upload_file.status = "uploaded"
         upload_file.error_message = None
-        await db.execute(delete(TransactionDetail).where(TransactionDetail.task_id == task.id))
-        await db.execute(delete(TransactionSummaryRow).where(TransactionSummaryRow.task_id == task.id))
 
         await AuditService.log(
             db,
@@ -1466,6 +1479,7 @@ class TransactionAccountingService:
         if upload_file is None or upload_file.is_deleted:
             raise ValueError("动账上传文件不存在")
 
+        previous_result_state = _capture_transaction_result_state(task)
         task.status = "processing"
         task.progress = 5
         task.started_at = datetime.now(timezone.utc)
@@ -1579,12 +1593,14 @@ class TransactionAccountingService:
             upload_file = await db.get(TransactionUploadFile, task.file_id)
             if upload_file is None or upload_file.is_deleted:
                 raise ValueError("动账上传文件不存在") from exc
-            task.status = "failed"
+            is_expired = is_oss_object_unavailable_error(exc)
+            _restore_transaction_result_state(task, previous_result_state)
+            task.status = "expired" if is_expired else "failed"
             task.progress = 100
-            task.error_message = str(exc)
+            task.error_message = SOURCE_FILE_UNAVAILABLE_MESSAGE if is_expired else str(exc)
             task.finished_at = datetime.now(timezone.utc)
-            upload_file.status = "failed"
-            upload_file.error_message = str(exc)
+            upload_file.status = "expired" if is_expired else "failed"
+            upload_file.error_message = task.error_message
         await db.flush()
         await db.refresh(task)
         return task

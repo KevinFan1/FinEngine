@@ -2,8 +2,10 @@ from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+import pytest
 
 from app.models.bic_accounting import BicTask, BicUploadFile
+from app.services.oss_service import OSSObjectUnavailableError, SOURCE_FILE_UNAVAILABLE_MESSAGE
 from app.services.bic_accounting_service import BicAccountingService
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
@@ -23,6 +25,29 @@ def _row(headers: list[str], **overrides: object) -> list[object]:
     values = {header: None for header in headers}
     values.update(overrides)
     return [values[header] for header in headers]
+
+
+class _BicExecuteSession:
+    def __init__(self, *, task: BicTask, upload_file: BicUploadFile) -> None:
+        self.task = task
+        self.upload_file = upload_file
+        self.rollback_count = 0
+
+    async def get(self, model: type, _item_id: int):
+        if model is BicTask:
+            return self.task
+        if model is BicUploadFile:
+            return self.upload_file
+        raise AssertionError(f"unexpected model: {model!r}")
+
+    async def flush(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+
+    async def refresh(self, _instance: object) -> None:
+        return None
 
 
 def test_bic_accounting_parse_file_keeps_only_quality_inspection_rows(tmp_path: Path) -> None:
@@ -46,6 +71,52 @@ def test_bic_accounting_parse_file_keeps_only_quality_inspection_rows(tmp_path: 
         ("服务商A", "华东仓", Decimal("12.30")),
         ("服务商B", "华南仓", Decimal("7.70")),
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_task_marks_source_file_expired_and_preserves_previous_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    task = BicTask(
+        id=1,
+        file_id=2,
+        org_id=3,
+        user_id=4,
+        status="success",
+        progress=100,
+        processed_rows=6,
+        success_rows=6,
+        failed_rows=0,
+        result_summary={"old": True},
+    )
+    upload_file = BicUploadFile(
+        id=2,
+        org_id=3,
+        user_id=4,
+        original_name="26年02月_bic_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="processed",
+    )
+    session = _BicExecuteSession(task=task, upload_file=upload_file)
+
+    monkeypatch.setattr(
+        "app.services.bic_accounting_service.oss_service.download_to_temp",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSSObjectUnavailableError("missing")),
+    )
+
+    result = await BicAccountingService.execute_task(session, task_id=1)  # type: ignore[arg-type]
+
+    assert session.rollback_count == 1
+    assert result.status == "expired"
+    assert task.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
+    assert task.processed_rows == 6
+    assert task.success_rows == 6
+    assert task.failed_rows == 0
+    assert task.result_summary == {"old": True}
+    assert upload_file.status == "expired"
+    assert upload_file.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
 
 
 def test_bic_detail_workbook_includes_shop_profile_fields() -> None:

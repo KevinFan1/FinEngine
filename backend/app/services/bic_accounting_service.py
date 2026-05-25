@@ -18,7 +18,7 @@ from app.models.shop import Shop
 from app.models.upload import UploadFile
 from app.models.user import User
 from app.services.audit_service import AuditService
-from app.services.oss_service import oss_service
+from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
 from app.services.shop_service import ShopService
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, safe_str
@@ -29,7 +29,23 @@ from app.utils.money import safe_decimal
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
 BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
 BIC_REPORT_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
-BIC_RESULT_TASK_STATUSES = ("success", "partial_success")
+BIC_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
+
+
+def _capture_bic_result_state(task: BicTask) -> dict[str, object]:
+    return {
+        "processed_rows": task.processed_rows,
+        "success_rows": task.success_rows,
+        "failed_rows": task.failed_rows,
+        "result_summary": task.result_summary,
+    }
+
+
+def _restore_bic_result_state(task: BicTask, state: dict[str, object]) -> None:
+    task.processed_rows = int(state.get("processed_rows") or 0)
+    task.success_rows = int(state.get("success_rows") or 0)
+    task.failed_rows = int(state.get("failed_rows") or 0)
+    task.result_summary = state.get("result_summary")  # type: ignore[assignment]
 
 
 class BicAccountingService:
@@ -164,19 +180,20 @@ class BicAccountingService:
         if task is None or task.is_deleted:
             return None
         BicAccountingService.validate_org_scope(org_id=task.org_id, user=user)
+        if task.status == "expired":
+            raise ValueError("源文件已过期或不存在，不能重新统计，请重新上传文件")
+        upload_file = await db.get(BicUploadFile, task.file_id)
+        if upload_file is None or upload_file.is_deleted:
+            raise ValueError("BIC上传文件不存在")
 
         task.status = "queued"
         task.progress = 0
-        task.processed_rows = 0
-        task.success_rows = 0
-        task.failed_rows = 0
+        task.celery_task_id = None
         task.error_message = None
-        task.result_summary = None
         task.started_at = None
         task.finished_at = None
-
-        await db.execute(delete(BicDetail).where(BicDetail.task_id == task.id))
-        await db.execute(delete(BicReportRow).where(BicReportRow.task_id == task.id))
+        upload_file.status = "uploaded"
+        upload_file.error_message = None
 
         await AuditService.log(
             db,
@@ -193,7 +210,6 @@ class BicAccountingService:
             user_agent=user_agent,
         )
 
-        upload_file = await db.get(BicUploadFile, task.file_id)
         BicAccountingService.dispatch_task_after_commit(
             db,
             task=task,
@@ -534,6 +550,7 @@ class BicAccountingService:
         if upload_file is None or upload_file.is_deleted:
             raise ValueError("BIC上传文件不存在")
 
+        previous_result_state = _capture_bic_result_state(task)
         task.status = "processing"
         task.progress = 5
         task.started_at = datetime.now(timezone.utc)
@@ -571,12 +588,14 @@ class BicAccountingService:
             upload_file = await db.get(BicUploadFile, task.file_id)
             if upload_file is None or upload_file.is_deleted:
                 raise ValueError("BIC上传文件不存在") from exc
-            task.status = "failed"
+            is_expired = is_oss_object_unavailable_error(exc)
+            _restore_bic_result_state(task, previous_result_state)
+            task.status = "expired" if is_expired else "failed"
             task.progress = 100
-            task.error_message = str(exc)
+            task.error_message = SOURCE_FILE_UNAVAILABLE_MESSAGE if is_expired else str(exc)
             task.finished_at = datetime.now(timezone.utc)
-            upload_file.status = "failed"
-            upload_file.error_message = str(exc)
+            upload_file.status = "expired" if is_expired else "failed"
+            upload_file.error_message = task.error_message
 
         await db.flush()
         await db.refresh(task)

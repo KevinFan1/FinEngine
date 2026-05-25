@@ -65,11 +65,12 @@
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
           </template>
         </el-table-column>
-        <el-table-column prop="display_name" label="姓名" min-width="170" show-overflow-tooltip />
+        <el-table-column prop="display_name" label="姓名" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="username" label="用户名" min-width="160" show-overflow-tooltip />
         <el-table-column prop="phone" label="手机号" min-width="180" />
-        <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="所属组织" min-width="220" show-overflow-tooltip>
+        <el-table-column prop="org_name" label="组织名称" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.org_name || '-' }}
+            {{ row.org_name || (row.org_id ? `组织#${row.org_id}` : '-') }}
           </template>
         </el-table-column>
         <el-table-column prop="role" label="角色" width="130" align="center">
@@ -164,9 +165,13 @@
               <span class="detail-label">邮箱</span>
               <strong>{{ selectedUser.email || '-' }}</strong>
             </div>
-            <div v-if="userStore.isSuperAdmin" class="detail-item detail-item--wide">
+            <div class="detail-item">
+              <span class="detail-label">用户名</span>
+              <strong>{{ selectedUser.username }}</strong>
+            </div>
+            <div class="detail-item detail-item--wide">
               <span class="detail-label">所属组织</span>
-              <strong>{{ selectedUser.org_name || '-' }}</strong>
+              <strong>{{ selectedUser.org_name || (selectedUser.org_id ? `组织#${selectedUser.org_id}` : '-') }}</strong>
             </div>
           </div>
         </section>

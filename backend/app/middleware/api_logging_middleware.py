@@ -49,6 +49,7 @@ class ApiLoggingMiddleware:
         response_headers: list[tuple[bytes, bytes]] = []
         response_body = bytearray()
         response_body_truncated = False
+        response_bytes = 0
 
         async def receive_wrapper() -> Message:
             nonlocal request_body_truncated
@@ -59,14 +60,15 @@ class ApiLoggingMiddleware:
             return message
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal response_body_truncated, response_headers, response_status
+            nonlocal response_body_truncated, response_bytes, response_headers, response_status
             if message["type"] == "http.response.start":
                 response_status = int(message["status"])
                 response_headers = list(message.get("headers") or [])
             elif message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                response_bytes += len(body)
                 response_content_type = _header_value(response_headers, b"content-type")
                 if _should_log_body(response_content_type):
-                    body = message.get("body", b"")
                     response_body_truncated = _append_limited(response_body, body, self.max_body_bytes) or response_body_truncated
             await send(message)
 
@@ -77,29 +79,39 @@ class ApiLoggingMiddleware:
             method = str(request_scope.get("method") or "-")
             path = str(request_scope.get("path") or "-")
             query = _query_string(request_scope)
+            http_version = _http_version(request_scope)
             client_ip = _client_ip(request_scope, request_headers)
+            user_agent = _header_value(request_headers, b"user-agent") or "-"
+            referer = _header_value(request_headers, b"referer") or "-"
             logger.bind(
                 event="api.exception",
                 request_id=request_id,
                 method=method,
                 path=path,
                 query=query,
+                http_version=http_version,
+                response_bytes=response_bytes,
                 duration_ms=round(duration_ms, 1),
                 client_ip=client_ip,
-                user_agent=_header_value(request_headers, b"user-agent") or "-",
+                referer=referer,
+                user_agent=user_agent,
                 request_content_type=request_content_type or "-",
+                response_content_type="-",
                 request_body=_format_body(bytes(request_body), request_content_type, request_body_truncated),
             ).exception(
                 _request_log_message(
-                    event="api.exception",
                     method=method,
                     path=path,
                     query=query,
+                    http_version=http_version,
                     http_status=500,
+                    response_bytes=response_bytes,
                     api_code="-",
                     api_message="unhandled exception",
                     duration_ms=duration_ms,
                     client_ip=client_ip,
+                    referer=referer,
+                    user_agent=user_agent,
                     request_id=request_id,
                 )
             )
@@ -112,19 +124,25 @@ class ApiLoggingMiddleware:
                 method = str(request_scope.get("method") or "-")
                 path = str(request_scope.get("path") or "-")
                 query = _query_string(request_scope)
+                http_version = _http_version(request_scope)
                 client_ip = _client_ip(request_scope, request_headers)
+                user_agent = _header_value(request_headers, b"user-agent") or "-"
+                referer = _header_value(request_headers, b"referer") or "-"
                 log = logger.bind(
                     event="api.request",
                     request_id=request_id,
                     method=method,
                     path=path,
                     query=query,
+                    http_version=http_version,
                     http_status=response_status,
+                    response_bytes=response_bytes,
                     api_code=api_code,
                     api_message=api_message,
                     duration_ms=round(duration_ms, 1),
                     client_ip=client_ip,
-                    user_agent=_header_value(request_headers, b"user-agent") or "-",
+                    referer=referer,
+                    user_agent=user_agent,
                     request_content_type=request_content_type or "-",
                     response_content_type=response_content_type or "-",
                     request_body=_format_body(bytes(request_body), request_content_type, request_body_truncated),
@@ -132,15 +150,18 @@ class ApiLoggingMiddleware:
                 log.log(
                     _request_log_level(response_status, api_code),
                     _request_log_message(
-                        event="api.request",
                         method=method,
                         path=path,
                         query=query,
+                        http_version=http_version,
                         http_status=response_status,
+                        response_bytes=response_bytes,
                         api_code=api_code,
                         api_message=api_message,
                         duration_ms=duration_ms,
                         client_ip=client_ip,
+                        referer=referer,
+                        user_agent=user_agent,
                         request_id=request_id,
                     ),
                 )
@@ -169,26 +190,47 @@ def _query_string(scope: Scope) -> str:
     return query.decode("latin-1") if query else "-"
 
 
+def _http_version(scope: Scope) -> str:
+    return str(scope.get("http_version") or "1.1")
+
+
 def _request_log_message(
     *,
-    event: str,
     method: str,
     path: str,
     query: str,
+    http_version: str,
     http_status: int,
+    response_bytes: int,
     api_code: str,
     api_message: str,
     duration_ms: float,
     client_ip: str,
+    referer: str,
+    user_agent: str,
     request_id: str,
 ) -> str:
-    target = f"{path}?{query}" if query and query != "-" else path
-    code_part = f" code={api_code}" if api_code and api_code != "-" else ""
-    message_part = f" message={api_message}" if api_message and api_message != "-" else ""
-    return (
-        f"{event} {method} {target} status={http_status}{code_part}{message_part} "
-        f"duration={duration_ms:.1f}ms client={client_ip} request_id={request_id}"
-    )
+    request_line = f"{method} {_request_target(path, query)} HTTP/{http_version}"
+    parts = [
+        f'{client_ip} - {_quote_log_value(request_line)} {http_status} {response_bytes} '
+        f'{_quote_log_value(referer)} {_quote_log_value(user_agent)}',
+        f"duration_ms={duration_ms:.1f}",
+        f"request_id={json.dumps(request_id, ensure_ascii=False)}",
+    ]
+    if api_code and api_code != "-":
+        parts.append(f"api_code={json.dumps(api_code, ensure_ascii=False)}")
+    if api_message and api_message != "-":
+        parts.append(f"api_message={json.dumps(api_message, ensure_ascii=False)}")
+    return " ".join(parts)
+
+
+def _request_target(path: str, query: str) -> str:
+    return f"{path}?{query}" if query and query != "-" else path
+
+
+def _quote_log_value(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def _request_log_level(http_status: int, api_code: str) -> str:

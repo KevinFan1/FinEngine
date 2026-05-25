@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from loguru import logger
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import DataError, IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
@@ -169,11 +170,25 @@ def _validation_message(exc: RequestValidationError) -> str:
     return f"{field}{reason}"
 
 
+def _user_facing_http_message(code: int, message: str) -> str:
+    if code == status.HTTP_429_TOO_MANY_REQUESTS:
+        return "操作太频繁了，请稍后再试"
+    return message
+
+
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+        code = status.HTTP_429_TOO_MANY_REQUESTS
+        message = _user_facing_http_message(code, _stringify_detail(getattr(exc, "detail", "")) or "请求过于频繁")
+        client_ip = request.client.host if request.client else "unknown"
+        logger.warning("api.rate_limit path={} code={} message={} client_ip={}", request.url.path, code, message, client_ip)
+        return api_json_response(code=code, message=message)
+
     @app.exception_handler(HTTPException)
     async def fastapi_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         code = int(exc.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR)
-        message = _stringify_detail(exc.detail) or "请求失败"
+        message = _user_facing_http_message(code, _stringify_detail(exc.detail) or "请求失败")
         if code >= 500:
             logger.error("api.http_exception path={} code={} message={}", request.url.path, code, message)
         return api_json_response(code=code, message=message)
@@ -181,7 +196,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = int(exc.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR)
-        message = _stringify_detail(exc.detail) or "请求失败"
+        message = _user_facing_http_message(code, _stringify_detail(exc.detail) or "请求失败")
         if code == status.HTTP_404_NOT_FOUND and message == "Not Found":
             message = "接口不存在"
         if code >= 500:

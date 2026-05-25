@@ -489,7 +489,7 @@ const activeFilterTags = computed<TaskFilterTag[]>(() => {
 });
 
 function hasTaskResult(row: TransactionTask) {
-    return ["success", "partial_success", "failed"].includes(row.status);
+    return ["success", "partial_success", "failed", "expired"].includes(row.status);
 }
 
 function taskSuccessCount(row: TransactionTask) {
@@ -501,7 +501,7 @@ function taskFailedCount(row: TransactionTask) {
 }
 
 function canRecalculate(row: TransactionTask) {
-    return !["queued", "processing"].includes(row.status);
+    return !["queued", "processing", "expired"].includes(row.status);
 }
 
 const resultSummaryLabels: Record<string, string> = {

@@ -78,7 +78,7 @@ service.interceptors.response.use(
 
         // Backend returns HTTP 200 for business errors and exposes the real state in code/message.
         if (res.code !== undefined && res.code !== 200) {
-            const message = authExpiredMessage(res.code, res.message || "请求失败");
+            const message = userFacingApiMessage(res.code, res.message || "请求失败");
 
             if (res.code === 401) {
                 forceLogout({ message });
@@ -102,7 +102,7 @@ service.interceptors.response.use(
             const status = error.response.status;
             const data = error.response.data;
 
-            const message = authExpiredMessage(status, data?.message || `请求失败 (${status})`);
+            const message = userFacingApiMessage(status, data?.message || `请求失败 (${status})`);
             markRequestErrorShown(error, message);
 
             if (status === 401 || data?.code === 401) {
@@ -129,9 +129,12 @@ function showRequestError(message: string, error: unknown) {
     markRequestErrorShown(error, message);
 }
 
-function authExpiredMessage(code: number, message: string) {
+function userFacingApiMessage(code: number, message: string) {
     if (code === 401 && message.includes("其他端登录")) {
         return "账号已在其他端登录，请重新登录";
+    }
+    if (code === 429) {
+        return "操作太频繁了，请稍后再试";
     }
     return message;
 }
@@ -241,7 +244,7 @@ export async function downloadBlob(
         const text = await blob.text();
         const parsed = JSON.parse(text) as ApiResponse;
         if (parsed.code !== 200) {
-            const message = parsed.message || "导出失败";
+            const message = userFacingApiMessage(parsed.code, parsed.message || "导出失败");
             ElMessage.error(message);
             throw new ApiBusinessError(message, parsed.code, parsed.data);
         }

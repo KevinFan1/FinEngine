@@ -9,6 +9,7 @@ from app.tasks.celery_app import (
     _infer_file_type,
 )
 from app.tasks import celery_app as celery_module
+from app.services.oss_service import OSSObjectUnavailableError, SOURCE_FILE_UNAVAILABLE_MESSAGE
 
 
 def test_infer_file_type_prefers_filename_over_stored_default() -> None:
@@ -198,6 +199,43 @@ def test_mark_task_failed_sets_task_and_upload_file_state() -> None:
     assert task.finished_at is not None
     assert upload_file.status == "failed"
     assert upload_file.error_message == "OSS文件不存在"
+
+
+def test_mark_task_failed_sets_expired_for_unavailable_source_file() -> None:
+    previous_state = {
+        "processed_rows": 8,
+        "success_rows": 7,
+        "failed_rows": 1,
+        "result_summary": {"old": True},
+        "upload_row_count": 8,
+    }
+    task = SimpleNamespace(
+        status="running",
+        processed_rows=2,
+        success_rows=2,
+        failed_rows=0,
+        result_summary=None,
+        error_message=None,
+        finished_at=None,
+    )
+    upload_file = SimpleNamespace(status="processing", error_message=None, row_count=2)
+
+    celery_module._mark_task_failed(
+        task,
+        upload_file,
+        OSSObjectUnavailableError("missing"),
+        previous_state=previous_state,
+    )
+
+    assert task.status == "expired"
+    assert task.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
+    assert task.processed_rows == 8
+    assert task.success_rows == 7
+    assert task.failed_rows == 1
+    assert task.result_summary == {"old": True}
+    assert upload_file.status == "expired"
+    assert upload_file.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
+    assert upload_file.row_count == 8
 
 
 def test_celery_imports_include_bic_task_module() -> None:
