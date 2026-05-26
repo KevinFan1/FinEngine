@@ -7,6 +7,8 @@ from app.tasks.celery_app import (
     _group_return_cost_by_order_created_time,
     _group_money_by_order_or_fallback_time,
     _infer_file_type,
+    _result_task_status_from_processor_result,
+    _result_task_status_from_summary,
 )
 from app.tasks import celery_app as celery_module
 from app.services.oss_service import OSSObjectUnavailableError, SOURCE_FILE_UNAVAILABLE_MESSAGE
@@ -186,6 +188,12 @@ def test_order_or_fallback_time_summary_reports_entry_time_compatibility() -> No
     assert summary["fallback_time_count"] == 1
     assert summary["fallback_time_samples"] == ["fallback-order"]
     assert summary["errors"] == ["订单索引未命中 1 条，已使用入账时间归属年月；订单号: fallback-order"]
+
+
+def test_result_task_status_uses_partial_success_when_failed_rows_exist() -> None:
+    assert _result_task_status_from_processor_result({"failed_rows": 0}) == "success"
+    assert _result_task_status_from_processor_result({"failed_rows": 2}) == "partial_success"
+    assert _result_task_status_from_summary({"failed_rows": 1, "success_rows": 3}) == "partial_success"
 
 
 def test_mark_task_failed_sets_task_and_upload_file_state() -> None:

@@ -1,5 +1,4 @@
 """Independent transaction-accounting API."""
-
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -38,6 +37,7 @@ from app.schemas.transaction_accounting import (
 from app.services.audit_service import AuditService
 from app.services.oss_service import assume_sts_role, oss_service
 from app.services.transaction_accounting_service import TransactionAccountingService
+from app.utils.query_filters import parse_query_datetime
 from app.models.transaction_accounting import TransactionTask, TransactionUploadFile
 
 router = APIRouter()
@@ -580,6 +580,8 @@ async def list_tasks(
     accounting_end_year: int | None = Query(None),
     accounting_end_month: int | None = Query(None),
     keyword: str | None = Query(None),
+    created_start_time: str | None = Query(None),
+    created_end_time: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -598,6 +600,8 @@ async def list_tasks(
         accounting_end_year=accounting_end_year,
         accounting_end_month=accounting_end_month,
         keyword=keyword,
+        created_start_time=parse_query_datetime(created_start_time),
+        created_end_time=parse_query_datetime(created_end_time),
         page=page,
         page_size=page_size,
     )

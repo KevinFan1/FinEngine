@@ -459,6 +459,22 @@ async def test_list_tasks_supports_multiple_status_filters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_tasks_supports_created_time_range_filters() -> None:
+    db = _ListDetailsSession()
+
+    await TransactionAccountingService.list_tasks(
+        db,  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),
+        created_start_time=datetime(2026, 5, 1, 8, 0, 0),
+        created_end_time=datetime(2026, 5, 2, 18, 30, 0),
+    )
+
+    statement_text = "\n".join(db.statements)
+    assert "fin_transaction_tasks.created_at >=" in statement_text
+    assert "fin_transaction_tasks.created_at <=" in statement_text
+
+
+@pytest.mark.asyncio
 async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_rows(monkeypatch, caplog) -> None:
     caplog.set_level(logging.INFO, logger="finengine.transaction_accounting")
     task = TransactionTask(id=10, file_id=20, org_id=1, user_id=2, status="queued", progress=0)

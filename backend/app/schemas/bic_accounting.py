@@ -70,6 +70,8 @@ class BicDetailOut(BaseModel):
     store_short_id: str | None = None
     service_provider: str
     shop_name: str
+    accounting_year: int
+    accounting_month: int
     qic_warehouse: str
     merchant: str | None = None
     tax_no: str | None = None

@@ -10,7 +10,7 @@
         <el-form-item label="搜索">
           <el-input
             v-model="searchForm.keyword"
-            placeholder="店铺名称/商户/税号/主播"
+            placeholder="搜店铺/商户/税号/主播"
             clearable
             style="width: 280px"
             @keyup.enter="fetchData"
@@ -21,7 +21,7 @@
         <el-form-item label="平台">
           <el-select
             v-model="searchForm.platformNames"
-            placeholder="全部平台"
+            placeholder="平台"
             multiple
             clearable
             collapse-tags
@@ -37,7 +37,7 @@
         <el-form-item v-if="userStore.isSuperAdmin" label="组织">
           <el-select
             v-model="searchForm.orgIds"
-            placeholder="全部组织"
+            placeholder="组织"
             multiple
             clearable
             collapse-tags

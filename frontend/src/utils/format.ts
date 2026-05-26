@@ -192,6 +192,7 @@ export const statusLabelMap: Record<string, { label: string; type: string }> = {
     queued: { label: "排队中", type: "info" },
     running: { label: "运行中", type: "warning" },
     success: { label: "成功", type: "success" },
+    partial_success: { label: "部分成功", type: "warning" },
     failed: { label: "失败", type: "danger" },
     expired: { label: "已过期", type: "info" },
     cancelled: { label: "已取消", type: "info" },

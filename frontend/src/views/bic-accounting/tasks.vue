@@ -11,18 +11,31 @@
                     <el-date-picker
                         v-model="searchForm.monthRange"
                         type="monthrange"
-                        start-placeholder="开始年月"
-                        end-placeholder="结束年月"
+                        start-placeholder="任务年月起"
+                        end-placeholder="任务年月止"
                         range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 230px"
+                        style="width: 260px"
+                    />
+                </el-form-item>
+                <el-form-item label="创建时间">
+                    <el-date-picker
+                        v-model="searchForm.createdTimeRange"
+                        type="datetimerange"
+                        range-separator="至"
+                        start-placeholder="创建时间起"
+                        end-placeholder="创建时间止"
+                        clearable
+                        value-format="YYYY-MM-DD HH:mm:ss"
+                        :shortcuts="taskCreatedTimeShortcuts"
+                        style="width: 420px"
                     />
                 </el-form-item>
                 <el-form-item label="平台">
                     <el-select
                         v-model="searchForm.platforms"
-                        placeholder="全部平台"
+                        placeholder="平台"
                         multiple
                         clearable
                         collapse-tags
@@ -44,7 +57,7 @@
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
                     <el-select
                         v-model="searchForm.orgIds"
-                        placeholder="全部组织"
+                        placeholder="组织"
                         multiple
                         clearable
                         collapse-tags
@@ -65,7 +78,7 @@
                     <el-select
                         v-model="searchForm.statuses"
                         clearable
-                        placeholder="全部状态"
+                        placeholder="状态"
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
@@ -78,7 +91,7 @@
                     <el-select
                         v-model="searchForm.shopNames"
                         clearable
-                        placeholder="全部店铺"
+                        placeholder="店铺"
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
@@ -101,7 +114,7 @@
                     </el-select>
                 </el-form-item>
                 <el-form-item label="搜索">
-                    <el-input v-model="searchForm.keyword" clearable placeholder="文件名 / 店铺 / 错误" style="width: 210px" @keyup.enter="handleSearch" />
+                    <el-input v-model="searchForm.keyword" clearable placeholder="搜文件/店铺/错误" style="width: 210px" @keyup.enter="handleSearch" />
                 </el-form-item>
                 <el-form-item>
                     <el-button type="primary" @click="handleSearch">搜索</el-button>
@@ -374,6 +387,7 @@ import {
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { formatDateTime, getPlatformLabel } from "@/utils/format";
+import { dateRangeLabel, taskCreatedTimeShortcuts } from "@/utils/dateRange";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import {
@@ -403,6 +417,7 @@ const taskDetailDrawerVisible = ref(false);
 const taskDetail = ref<BicTask | null>(null);
 const searchForm = reactive({
     monthRange: [] as string[],
+    createdTimeRange: [] as string[],
     orgIds: [] as number[],
     platforms: [] as string[],
     statuses: [] as string[],
@@ -471,12 +486,13 @@ const selectedRecalculableRows = computed(() =>
 );
 
 interface TaskFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "orgIds" | "platforms" | "statuses" | "shopNames" | "keyword";
+    key: "monthRange" | "createdTimeRange" | "orgIds" | "platforms" | "statuses" | "shopNames" | "keyword";
 }
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
     if (searchForm.monthRange.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    if (searchForm.createdTimeRange.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -527,6 +543,8 @@ function queryParams() {
         platform_code: selectedPlatformsParam.value,
         shop_name: selectedShopNamesParam.value,
         keyword: searchForm.keyword || undefined,
+        created_start_time: searchForm.createdTimeRange[0] || undefined,
+        created_end_time: searchForm.createdTimeRange[1] || undefined,
         ...splitMonthRange(searchForm.monthRange),
     };
 }
@@ -607,6 +625,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.monthRange = [];
+    searchForm.createdTimeRange = [];
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.statuses = [];
@@ -618,6 +637,7 @@ function handleReset() {
 
 async function removeFilterTag(tag: TaskFilterTag) {
     if (tag.key === "monthRange") searchForm.monthRange = [];
+    if (tag.key === "createdTimeRange") searchForm.createdTimeRange = [];
     if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

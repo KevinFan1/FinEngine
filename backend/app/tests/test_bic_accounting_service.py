@@ -4,9 +4,9 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 import pytest
 
-from app.models.bic_accounting import BicTask, BicUploadFile
+from app.models.bic_accounting import BicDetail, BicTask, BicUploadFile
 from app.services.oss_service import OSSObjectUnavailableError, SOURCE_FILE_UNAVAILABLE_MESSAGE
-from app.services.bic_accounting_service import BicAccountingService
+from app.services.bic_accounting_service import BicAccountingService, _service_provider_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
 
@@ -71,6 +71,17 @@ def test_bic_accounting_parse_file_keeps_only_quality_inspection_rows(tmp_path: 
         ("服务商A", "华东仓", Decimal("12.30")),
         ("服务商B", "华南仓", Decimal("7.70")),
     ]
+
+
+def test_service_provider_filter_uses_fuzzy_multi_value_matching() -> None:
+    expr = _service_provider_filter(BicDetail.service_provider, "服务商A，服务商B")
+
+    assert expr is not None
+    statement = str(expr.compile(compile_kwargs={"literal_binds": True}))
+    assert "LIKE" in statement
+    assert "%服务商A%" in statement
+    assert "%服务商B%" in statement
+    assert " OR " in statement
 
 
 @pytest.mark.asyncio

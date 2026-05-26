@@ -104,6 +104,21 @@ def _json_safe(value):
     return value
 
 
+def _result_task_status_from_failed_rows(failed_rows: object) -> str:
+    try:
+        return "partial_success" if int(failed_rows or 0) > 0 else "success"
+    except (TypeError, ValueError):
+        return "success"
+
+
+def _result_task_status_from_processor_result(proc_result: dict) -> str:
+    return _result_task_status_from_failed_rows(proc_result.get("failed_rows"))
+
+
+def _result_task_status_from_summary(summary: dict) -> str:
+    return _result_task_status_from_failed_rows(summary.get("failed_rows"))
+
+
 def _group_return_cost_by_order_created_time(
     return_cost_rows: list[dict],
     order_created_times: dict[str, datetime],
@@ -608,7 +623,7 @@ async def _process_file_platform_async(
                     if file_type == "gmv":
                         should_requeue_order_dependents = upserted_rows > 0
                     else:
-                        task.status = "success"
+                        task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.success_rows = proc_result["success_rows"]
                         task.failed_rows = proc_result["failed_rows"]
@@ -642,7 +657,7 @@ async def _process_file_platform_async(
 
                     return_cost_rows = proc_result.get("return_cost_rows", [])
                     if not return_cost_rows:
-                        task.status = "success"
+                        task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.success_rows = proc_result["success_rows"]
                         task.failed_rows = proc_result["failed_rows"]
@@ -698,7 +713,7 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = "success"
+                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_or_fallback_time_summary(
                         type_code="动账",
@@ -731,7 +746,7 @@ async def _process_file_platform_async(
 
                     contribution_rows = proc_result.get("return_cost_contribution_rows", [])
                     if not contribution_rows:
-                        task.status = "success"
+                        task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.success_rows = proc_result["success_rows"]
                         task.failed_rows = proc_result["failed_rows"]
@@ -784,7 +799,7 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = "success"
+                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_dependency_summary(
                         type_code=file_type,
@@ -811,7 +826,7 @@ async def _process_file_platform_async(
 
                     insurance_fee_rows = proc_result.get("insurance_fee_rows", [])
                     if not insurance_fee_rows:
-                        task.status = "success"
+                        task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.success_rows = proc_result["success_rows"]
                         task.failed_rows = proc_result["failed_rows"]
@@ -864,7 +879,7 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = "success"
+                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_or_fallback_time_summary(
                         type_code="运费险",
@@ -894,7 +909,7 @@ async def _process_file_platform_async(
                     order_summary_rows = proc_result.get("order_summary_rows", [])
                     summary_fields = tuple(proc_result.get("order_summary_fields") or [])
                     if not order_summary_rows:
-                        task.status = "success"
+                        task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.success_rows = proc_result["success_rows"]
                         task.failed_rows = proc_result["failed_rows"]
@@ -946,7 +961,7 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = "success"
+                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_dependency_summary(
                         type_code="动账",
@@ -968,7 +983,7 @@ async def _process_file_platform_async(
                     if proc_result.get("errors"):
                         raise ValueError(f"解析结果为空，错误: {proc_result['errors'][:3]}")
 
-                    task.status = "success"
+                    task.status = _result_task_status_from_processor_result(proc_result)
                     task.progress = 100
                     task.success_rows = proc_result["success_rows"]
                     task.failed_rows = proc_result["failed_rows"]
@@ -1019,7 +1034,7 @@ async def _process_file_platform_async(
                     summary_ids.append(summary.id)
 
                 # 8. Update final status
-                task.status = "success"
+                task.status = _result_task_status_from_processor_result(proc_result)
                 task.progress = 100
                 task.success_rows = proc_result["success_rows"]
                 task.failed_rows = proc_result["failed_rows"]

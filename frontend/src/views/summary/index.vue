@@ -16,30 +16,30 @@
                     <el-date-picker
                         v-model="searchForm.summaryMonthRange"
                         type="monthrange"
-                        start-placeholder="开始年月"
-                        end-placeholder="结束年月"
+                        start-placeholder="业务年月起"
+                        end-placeholder="业务年月止"
                         range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 230px"
+                        style="width: 260px"
                     />
                 </el-form-item>
                 <el-form-item label="核算年月">
                     <el-date-picker
                         v-model="searchForm.sourceMonthRange"
                         type="monthrange"
-                        start-placeholder="开始年月"
-                        end-placeholder="结束年月"
+                        start-placeholder="核算年月起"
+                        end-placeholder="核算年月止"
                         range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 230px"
+                        style="width: 260px"
                     />
                 </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
                     <el-select
                         v-model="searchForm.orgIds"
-                        placeholder="全部组织"
+                        placeholder="组织"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -59,7 +59,7 @@
                 <el-form-item label="来源平台">
                     <el-select
                         v-model="searchForm.platforms"
-                        placeholder="全部来源平台"
+                        placeholder="来源平台"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -81,7 +81,7 @@
                 <el-form-item label="归集平台">
                     <el-select
                         v-model="searchForm.reportPlatforms"
-                        placeholder="全部归集平台"
+                        placeholder="归集平台"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -103,7 +103,7 @@
                 <el-form-item label="店铺">
                     <el-select
                         v-model="searchForm.shops"
-                        placeholder="全部店铺"
+                        placeholder="店铺"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -126,15 +126,15 @@
                         </el-option>
                     </el-select>
                 </el-form-item>
-                <el-form-item label="搜索">
+                <!-- <el-form-item label="搜索">
                     <el-input
                         v-model="searchForm.keyword"
                         clearable
-                        placeholder="店铺 / 平台"
+                        placeholder="搜索店铺或平台"
                         style="width: 150px"
                         @keyup.enter="handleSearch"
                     />
-                </el-form-item>
+                </el-form-item> -->
                 <el-form-item>
                     <el-button type="primary" @click="handleSearch"
                         >搜索</el-button
@@ -143,7 +143,11 @@
                 </el-form-item>
             </el-form>
 
-            <ActiveFilterTags :tags="activeFilterTags" @remove="removeFilterTag" @clear="handleReset" />
+            <ActiveFilterTags
+                :tags="activeFilterTags"
+                @remove="removeFilterTag"
+                @clear="handleReset"
+            />
         </el-card>
 
         <el-card shadow="never" class="table-card summary-table-card">
@@ -243,11 +247,7 @@
                     label="业务年月"
                     width="108"
                 />
-                <el-table-column
-                    prop="platform"
-                    label="来源平台"
-                    width="112"
-                >
+                <el-table-column prop="platform" label="来源平台" width="112">
                     <template #default="{ row }">
                         <button
                             type="button"

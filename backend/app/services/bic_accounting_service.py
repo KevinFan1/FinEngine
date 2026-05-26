@@ -23,7 +23,7 @@ from app.services.shop_service import ShopService
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, safe_str
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
-from app.utils.query_filters import resolve_org_ids
+from app.utils.query_filters import datetime_range_filters, resolve_org_ids
 from app.utils.money import safe_decimal
 
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
@@ -46,6 +46,14 @@ def _restore_bic_result_state(task: BicTask, state: dict[str, object]) -> None:
     task.success_rows = int(state.get("success_rows") or 0)
     task.failed_rows = int(state.get("failed_rows") or 0)
     task.result_summary = state.get("result_summary")  # type: ignore[assignment]
+
+
+def _service_provider_filter(column, service_provider: str | None):
+    normalized = service_provider.replace("，", ",") if service_provider else service_provider
+    values = TransactionAccountingService._split_filter_values(normalized)
+    if not values:
+        return None
+    return or_(*(column.ilike(f"%{value}%") for value in values))
 
 
 class BicAccountingService:
@@ -291,6 +299,8 @@ class BicAccountingService:
         accounting_end_year: int | None = None,
         accounting_end_month: int | None = None,
         keyword: str | None = None,
+        created_start_time: datetime | None = None,
+        created_end_time: datetime | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[tuple[BicTask, BicUploadFile, str | None, str | None]], int]:
@@ -326,6 +336,13 @@ class BicAccountingService:
                     BicTask.error_message.ilike(like_pattern),
                 )
             )
+        filters.extend(
+            datetime_range_filters(
+                BicTask.created_at,
+                start_time=created_start_time,
+                end_time=created_end_time,
+            )
+        )
 
         stmt = (
             select(BicTask, BicUploadFile, Shop.shop_color, Organization.name.label("org_name"))
@@ -377,9 +394,9 @@ class BicAccountingService:
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicDetail.platform_code.in_(platform_codes))
-        service_provider_values = TransactionAccountingService._split_filter_values(service_provider)
-        if service_provider_values:
-            filters.append(BicDetail.service_provider.in_(service_provider_values))
+        service_provider_filter = _service_provider_filter(BicDetail.service_provider, service_provider)
+        if service_provider_filter is not None:
+            filters.append(service_provider_filter)
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicDetail.shop_name.in_(shop_names))
@@ -413,6 +430,8 @@ class BicAccountingService:
                 BicDetail.platform_code.label("platform_code"),
                 BicDetail.service_provider.label("service_provider"),
                 BicDetail.shop_name.label("shop_name"),
+                BicDetail.accounting_year.label("accounting_year"),
+                BicDetail.accounting_month.label("accounting_month"),
                 BicDetail.qic_warehouse.label("qic_warehouse"),
                 BicDetail.total_amount.label("total_amount"),
                 BicDetail.created_at.label("created_at"),
@@ -478,9 +497,9 @@ class BicAccountingService:
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicReportRow.platform_code.in_(platform_codes))
-        service_provider_values = TransactionAccountingService._split_filter_values(service_provider)
-        if service_provider_values:
-            filters.append(BicReportRow.service_provider.in_(service_provider_values))
+        service_provider_filter = _service_provider_filter(BicReportRow.service_provider, service_provider)
+        if service_provider_filter is not None:
+            filters.append(service_provider_filter)
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicReportRow.shop_name.in_(shop_names))

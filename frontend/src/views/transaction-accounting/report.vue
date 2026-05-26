@@ -12,7 +12,7 @@
                     <el-date-picker
                         v-model="yearPickerValue"
                         type="year"
-                        placeholder="选择年份"
+                        placeholder="业务年份"
                         clearable
                         value-format="YYYY"
                         style="width: 150px"
@@ -23,12 +23,12 @@
                     <el-date-picker
                         v-model="searchForm.uploadMonthRange"
                         type="monthrange"
-                        start-placeholder="开始年月"
-                        end-placeholder="结束年月"
+                        start-placeholder="核算年月起"
+                        end-placeholder="核算年月止"
                         range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 230px"
+                        style="width: 260px"
                     />
                 </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
@@ -39,7 +39,7 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        placeholder="全部组织"
+                        placeholder="组织"
                         style="width: 190px"
                         @change="handleOrgChange"
                     >
@@ -59,7 +59,7 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        placeholder="全部平台"
+                        placeholder="平台"
                         style="width: 190px"
                         @change="handlePlatformChange"
                     >
@@ -81,7 +81,7 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        placeholder="全部店铺"
+                        placeholder="店铺"
                         :loading="shopLoading"
                         style="width: 210px"
                     >
@@ -107,7 +107,7 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        placeholder="全部大分类"
+                        placeholder="大分类"
                         style="width: 220px"
                     >
                         <el-option
@@ -126,7 +126,7 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        placeholder="全部科目"
+                        placeholder="科目"
                         style="width: 220px"
                         @change="handleSubjectChange"
                     >
@@ -146,7 +146,7 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        placeholder="全部重分类"
+                        placeholder="重分类"
                         style="width: 200px"
                     >
                         <el-option

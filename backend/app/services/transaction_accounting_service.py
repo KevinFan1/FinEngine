@@ -47,7 +47,7 @@ from app.services.shop_service import ShopService
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
-from app.utils.query_filters import resolve_org_ids
+from app.utils.query_filters import datetime_range_filters, resolve_org_ids
 
 TRANSACTION_FILENAME_PATTERN = re.compile(
     r"^(?P<year>\d{2}|\d{4})年(?P<month>\d{1,2})月[ _](?P<type>动账)[ _](?P<shop>.+)\.(?:xlsx|xlsm|xls|csv)$",
@@ -805,6 +805,8 @@ class TransactionAccountingService:
         accounting_end_year: int | None = None,
         accounting_end_month: int | None = None,
         keyword: str | None = None,
+        created_start_time: datetime | None = None,
+        created_end_time: datetime | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[tuple[TransactionTask, TransactionUploadFile, str | None]], int]:
@@ -845,6 +847,13 @@ class TransactionAccountingService:
                     TransactionTask.error_message.ilike(like_pattern),
                 )
             )
+        filters.extend(
+            datetime_range_filters(
+                TransactionTask.created_at,
+                start_time=created_start_time,
+                end_time=created_end_time,
+            )
+        )
         stmt = (
             select(TransactionTask, TransactionUploadFile, Organization.name.label("org_name"))
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionTask.file_id)

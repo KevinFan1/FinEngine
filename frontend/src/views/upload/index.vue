@@ -251,6 +251,21 @@
                                         <el-icon><Delete /></el-icon> 清空
                                     </el-button>
                                     <el-button
+                                        size="small"
+                                        :disabled="
+                                            isUploading ||
+                                            !hasSelectedFiles
+                                        "
+                                        @click="clearSelectedFiles"
+                                    >
+                                        清空选中
+                                        {{
+                                            hasSelectedFiles
+                                                ? `(${selectedFileRows.length})`
+                                                : ""
+                                        }}
+                                    </el-button>
+                                    <el-button
                                         v-if="failedReadyItems.length > 0"
                                         :disabled="isUploading"
                                         @click="retryFailedFiles"
@@ -341,12 +356,19 @@
                         </div>
 
                         <el-table
+                            ref="uploadTableRef"
                             v-else
                             :data="fileItems"
                             stripe
                             style="width: 100%"
                             class="summary-table file-table"
+                            @selection-change="handleUploadSelectionChange"
                         >
+                            <el-table-column
+                                type="selection"
+                                width="48"
+                                align="center"
+                            />
                             <el-table-column
                                 type="index"
                                 label="#"
@@ -875,7 +897,7 @@
 <script setup lang="ts">
 defineOptions({ name: "UploadCenter" });
 
-import { ref, computed } from "vue";
+import { ref, computed, h, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import {
     CircleCheckFilled,
@@ -884,6 +906,7 @@ import {
     Shop,
 } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import type { TableInstance } from "element-plus";
 import { parseFileName, type ParsedFileName } from "@/utils/format";
 import { getFileSpecs, type FileSpec } from "@/api/file_spec";
 import {
@@ -972,6 +995,15 @@ interface HeaderRowCandidate {
     headers: string[];
     rowIndex: number;
 }
+
+interface RejectedFileInfo {
+    name: string;
+    message: string;
+}
+
+const FILENAME_PARSE_FAILED_MESSAGE =
+    "文件名解析失败，格式示例：2026年02月_BIC_店铺名.xls、26年02月_其他服务款_店铺名.csv";
+const MAX_REJECTED_FILES_IN_DIALOG = 10;
 
 const platformUploadRules = [
     {
@@ -1159,7 +1191,7 @@ async function copyGeneratedFileName() {
 
 function validationMessage(row: FileItem): string {
     if (!row.meta) {
-        return "文件名不符合规则：请使用 26年02月 或 2026年02月_性质_店铺名称";
+        return FILENAME_PARSE_FAILED_MESSAGE;
     }
     if (!row.meta.shop) {
         return "文件名缺少店铺名称";
@@ -1172,9 +1204,11 @@ function validationMessage(row: FileItem): string {
 
 // State
 const fileInputRef = ref<HTMLInputElement>();
+const uploadTableRef = ref<TableInstance>();
 const isDragging = ref(false);
 const isUploading = ref(false);
 const fileItems = ref<FileItem[]>([]);
+const selectedFileRows = ref<FileItem[]>([]);
 const fileSpecs = ref<FileSpec[]>([]);
 const skeletonRows = [1, 2, 3];
 const userStore = useUserStore();
@@ -1207,6 +1241,7 @@ const failedReadyItems = computed(() =>
 const queuePanelVisible = computed(
     () => fileItems.value.length > 0 || uploadDialogTotal.value > 0,
 );
+const hasSelectedFiles = computed(() => selectedFileRows.value.length > 0);
 
 const uploadOverallPercent = computed(() => {
     const total = uploadDialogTotal.value || readyUploadItems.value.length;
@@ -1395,6 +1430,78 @@ async function ensureFileSpecsLoaded() {
 
 usePageRefresh(refreshPage);
 
+async function showRejectedFilesDialog(rejectedFiles: RejectedFileInfo[]) {
+    const visibleFiles = rejectedFiles.slice(0, MAX_REJECTED_FILES_IN_DIALOG);
+    const hiddenCount = rejectedFiles.length - visibleFiles.length;
+    const children = [
+        h(
+            "p",
+            { class: "upload-validation-dialog__intro" },
+            `以下 ${rejectedFiles.length} 个文件未通过文件名或表头校验，已从上传列表中跳过。`,
+        ),
+        h(
+            "div",
+            { class: "upload-validation-dialog__list" },
+            visibleFiles.map((item, index) =>
+                h(
+                    "div",
+                    {
+                        class: "upload-validation-dialog__item",
+                        key: `${item.name}-${index}`,
+                    },
+                    [
+                        h(
+                            "strong",
+                            {
+                                class: "upload-validation-dialog__name",
+                                title: item.name,
+                            },
+                            item.name,
+                        ),
+                        h(
+                            "span",
+                            { class: "upload-validation-dialog__message" },
+                            item.message,
+                        ),
+                    ],
+                ),
+            ),
+        ),
+    ];
+
+    if (hiddenCount > 0) {
+        children.push(
+            h(
+                "p",
+                { class: "upload-validation-dialog__more" },
+                `还有 ${hiddenCount} 个文件未展示，请修正后重新选择。`,
+            ),
+        );
+    }
+
+    try {
+        await ElMessageBox.alert(
+            h("div", { class: "upload-validation-dialog" }, children),
+            "文件预检未通过",
+            {
+                appendTo: "body",
+                confirmButtonText: "我知道了",
+                customClass: "upload-validation-message-box",
+                customStyle: {
+                    width: "min(1120px, calc(100vw - 96px))",
+                    maxWidth: "calc(100vw - 32px)",
+                },
+                closeOnClickModal: false,
+                closeOnPressEscape: false,
+                showClose: false,
+                type: "warning",
+            },
+        );
+    } catch {
+        // The dialog is confirmation-only; keep this guard for programmatic closes.
+    }
+}
+
 // File input trigger
 function triggerFileInput() {
     fileInputRef.value?.click();
@@ -1428,6 +1535,7 @@ async function processFiles(files: File[]) {
     uploadCompleteDialogVisible.value = false;
     await ensureFileSpecsLoaded();
     isReadingHeaders.value = true;
+    const rejectedFiles: RejectedFileInfo[] = [];
 
     try {
         for (const file of files) {
@@ -1448,23 +1556,24 @@ async function processFiles(files: File[]) {
             // Parse filename
             const meta = parseFileName(file.name);
             if (!meta) {
-                ElMessage.warning(
-                    `文件 ${file.name} 命名不符合规则：支持 26年/2026年，GMV/BIC 不区分大小写`,
-                );
+                rejectedFiles.push({
+                    name: file.name,
+                    message: FILENAME_PARSE_FAILED_MESSAGE,
+                });
+                continue;
             }
 
             let headers: string[] = [];
             let matchedRule: FileSpec | null = null;
             let headerMatch: HeaderMatchInfo = {
                 status: "filename_failed",
-                message:
-                    "文件名解析失败，格式示例：2026年02月_BIC_店铺名.xls、26年02月_其他服务款_店铺名.csv",
+                message: FILENAME_PARSE_FAILED_MESSAGE,
                 matchedCount: 0,
                 expectedCount: 0,
                 headerRowIndex: null,
             };
 
-            if (meta && fileSpecs.value.length > 0) {
+            if (fileSpecs.value.length > 0) {
                 try {
                     const headerRows = await readTabularHeaderRows(file);
                     const matchResult = matchPlatformByHeaderRows(
@@ -1483,7 +1592,7 @@ async function processFiles(files: File[]) {
                         headerRowIndex: null,
                     };
                 }
-            } else if (meta) {
+            } else {
                 headerMatch = {
                     status: "no_spec",
                     message: "未获取到接口表头规格，无法识别平台",
@@ -1491,6 +1600,14 @@ async function processFiles(files: File[]) {
                     expectedCount: 0,
                     headerRowIndex: null,
                 };
+            }
+
+            if (headerMatch.status !== "matched" || !matchedRule) {
+                rejectedFiles.push({
+                    name: file.name,
+                    message: headerMatch.message,
+                });
+                continue;
             }
 
             fileItems.value.push({
@@ -1507,6 +1624,10 @@ async function processFiles(files: File[]) {
         }
     } finally {
         isReadingHeaders.value = false;
+    }
+
+    if (rejectedFiles.length > 0) {
+        await showRejectedFilesDialog(rejectedFiles);
     }
 }
 
@@ -1964,13 +2085,46 @@ function loadOss() {
 // Remove a file from list
 function removeFile(index: number) {
     fileItems.value.splice(index, 1);
+    syncSelectedFileRows();
 }
 
 // Clear all files
 function clearAll() {
     fileItems.value = [];
+    selectedFileRows.value = [];
     uploadDialogTotal.value = 0;
     uploadDialogDone.value = 0;
+    void clearUploadSelection();
+}
+
+function handleUploadSelectionChange(rows: FileItem[]) {
+    selectedFileRows.value = rows;
+}
+
+async function clearUploadSelection() {
+    await nextTick();
+    uploadTableRef.value?.clearSelection();
+}
+
+function syncSelectedFileRows() {
+    selectedFileRows.value = selectedFileRows.value.filter((item) =>
+        fileItems.value.includes(item),
+    );
+    if (selectedFileRows.value.length === 0) {
+        void clearUploadSelection();
+    }
+}
+
+function clearSelectedFiles() {
+    if (selectedFileRows.value.length === 0) return;
+    const selectedSet = new Set(selectedFileRows.value);
+    fileItems.value = fileItems.value.filter((item) => !selectedSet.has(item));
+    selectedFileRows.value = [];
+    if (fileItems.value.length === 0) {
+        uploadDialogTotal.value = 0;
+        uploadDialogDone.value = 0;
+    }
+    void clearUploadSelection();
 }
 
 function showUploadCompleteDialog(successCount: number) {
@@ -2144,6 +2298,7 @@ function clearSuccessFiles() {
     fileItems.value = fileItems.value.filter(
         (item) => item.status !== "success",
     );
+    syncSelectedFileRows();
 }
 
 function exportFailedList() {
@@ -3236,6 +3391,68 @@ function exportFailedList() {
     }
 }
 
+:global(.el-message-box.upload-validation-message-box) {
+    width: min(1120px, calc(100vw - 96px));
+    width: min(1120px, calc(100vw - 96px)) !important;
+    max-width: calc(100vw - 32px);
+    max-width: calc(100vw - 32px) !important;
+
+    .el-message-box__status {
+        background: var(--warning-light);
+    }
+}
+
+:global(.upload-validation-dialog) {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
+:global(.upload-validation-dialog__intro),
+:global(.upload-validation-dialog__more) {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+:global(.upload-validation-dialog__list) {
+    display: grid;
+    gap: 8px;
+    max-height: 320px;
+    overflow: auto;
+}
+
+:global(.upload-validation-dialog__item) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 24px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+}
+
+:global(.upload-validation-dialog__name) {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:global(.upload-validation-dialog__message) {
+    color: var(--error);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: nowrap;
+}
+
 .upload-blocking-mask {
     position: fixed;
     inset: 0;
@@ -3351,6 +3568,18 @@ function exportFailedList() {
 }
 
 @media (max-width: 768px) {
+    :global(.upload-validation-dialog__item) {
+        grid-template-columns: 1fr;
+        align-items: start;
+        gap: 5px;
+    }
+
+    :global(.upload-validation-dialog__name),
+    :global(.upload-validation-dialog__message) {
+        overflow-wrap: anywhere;
+        white-space: normal;
+    }
+
     .operation-heading,
     .reference-heading,
     .file-list-card .card-header,

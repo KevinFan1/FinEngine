@@ -1,6 +1,9 @@
 <template>
-  <div v-if="tags.length" class="active-filters">
-    <span class="active-filters-label">当前筛选</span>
+  <div v-if="false && tags.length" class="active-filters">
+    <div class="active-filters-summary">
+      <span class="active-filters-label">当前筛选</span>
+      <span class="active-filters-count">{{ tags.length }} 项</span>
+    </div>
     <el-tag
       v-for="tag in tags"
       :key="tagKey(tag)"

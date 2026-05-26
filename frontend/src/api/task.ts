@@ -55,6 +55,8 @@ export interface TaskListParams {
     parsed_month?: number;
     keyword?: string;
     batch_id?: number;
+    created_start_time?: string;
+    created_end_time?: string;
 }
 
 export interface TaskBatchActionResult {

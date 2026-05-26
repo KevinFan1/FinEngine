@@ -9,29 +9,29 @@
 
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="核算年月">
-                    <el-date-picker v-model="searchForm.monthRange" type="monthrange" start-placeholder="开始年月" end-placeholder="结束年月" range-separator="至" clearable value-format="YYYY-MM" style="width: 230px" />
+                    <el-date-picker v-model="searchForm.monthRange" type="monthrange" start-placeholder="核算年月起" end-placeholder="核算年月止" range-separator="至" clearable value-format="YYYY-MM" style="width: 260px" />
                 </el-form-item>
                 <el-form-item label="平台">
-                    <el-select v-model="searchForm.platforms" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="全部平台" style="width: 190px" @change="handlePlatformChange">
+                    <el-select v-model="searchForm.platforms" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="平台" style="width: 190px" @change="handlePlatformChange">
                         <el-option v-for="item in platformOptions" :key="item.value" :label="item.label" :value="item.value">
                             <PlatformBadge :platform="item.value" />
                         </el-option>
                     </el-select>
                 </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
-                    <el-select v-model="searchForm.orgIds" placeholder="全部组织" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 190px" @change="handleOrgChange">
+                    <el-select v-model="searchForm.orgIds" placeholder="组织" multiple clearable collapse-tags collapse-tags-tooltip filterable style="width: 190px" @change="handleOrgChange">
                         <el-option v-for="org in orgOptions" :key="org.id" :label="org.name" :value="org.id" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="店铺">
-                    <el-select v-model="searchForm.shopNames" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="全部店铺" :loading="shopLoading" style="width: 210px">
+                    <el-select v-model="searchForm.shopNames" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="店铺" :loading="shopLoading" style="width: 210px">
                         <el-option v-for="shop in filteredShopOptions" :key="`${shop.platform_name}-${shop.shop_name}`" :label="shop.shop_name" :value="shop.shop_name">
                             <ShopBadge :label="shop.shop_name" :color="shop.shop_color" size="compact" />
                         </el-option>
                     </el-select>
                 </el-form-item>
                 <el-form-item label="服务商">
-                    <el-input v-model="searchForm.serviceProvider" clearable placeholder="输入服务商" style="width: 180px" @keyup.enter="handleSearch" />
+                    <el-input v-model="searchForm.serviceProvider" clearable placeholder="服务商，逗号分隔" style="width: 240px" @keyup.enter="handleSearch" />
                 </el-form-item>
                 <el-form-item>
                     <el-button type="primary" @click="handleSearch">搜索</el-button>
@@ -61,6 +61,9 @@
                 <el-table-column type="selection" width="48" fixed="left" :reserve-selection="true" />
                 <el-table-column label="序号" width="78" fixed="left" align="center">
                     <template #default="{ $index }">{{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}</template>
+                </el-table-column>
+                <el-table-column prop="accounting_year" label="核算年月" width="112" align="center">
+                    <template #default="{ row }">{{ formatMonth(row.accounting_year, row.accounting_month) }}</template>
                 </el-table-column>
                 <el-table-column prop="platform_code" label="平台" width="110">
                     <template #default="{ row }"><PlatformBadge :platform="row.platform_code" /></template>
@@ -125,7 +128,7 @@ import {
     summarizeFilenameValues,
 } from "@/utils/format";
 import { getFallbackPlatforms, getReportPlatformCode, toSourcePlatformOptions, type PlatformOption } from "@/utils/platform";
-import { downloadBlob, formatAmount, monthRangeLabel, splitMonthRange } from "./common";
+import { downloadBlob, formatAmount, formatMonth, monthRangeLabel, splitMonthRange } from "./common";
 
 const loading = ref(false);
 const tableRef = ref<TableInstance>();

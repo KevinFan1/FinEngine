@@ -12,18 +12,18 @@
                     <el-date-picker
                         v-model="searchForm.accountingMonthRange"
                         type="monthrange"
-                        start-placeholder="开始年月"
-                        end-placeholder="结束年月"
+                        start-placeholder="核算年月起"
+                        end-placeholder="核算年月止"
                         range-separator="至"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 230px"
+                        style="width: 260px"
                     />
                 </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
                     <el-select
                         v-model="searchForm.orgIds"
-                        placeholder="全部组织"
+                        placeholder="组织"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -43,7 +43,7 @@
                 <el-form-item label="归集平台">
                     <el-select
                         v-model="searchForm.platforms"
-                        placeholder="全部归集平台"
+                        placeholder="归集平台"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -65,7 +65,7 @@
                 <el-form-item label="店铺">
                     <el-select
                         v-model="searchForm.shops"
-                        placeholder="全部店铺"
+                        placeholder="店铺"
                         clearable
                         collapse-tags
                         collapse-tags-tooltip
@@ -92,7 +92,7 @@
                     <el-input
                         v-model="searchForm.keyword"
                         clearable
-                        placeholder="店铺 / 平台"
+                        placeholder="搜店铺/平台"
                         style="width: 150px"
                         @keyup.enter="handleSearch"
                     />

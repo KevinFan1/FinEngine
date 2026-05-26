@@ -53,6 +53,8 @@ export interface BicDetail {
     store_short_id?: string | null;
     service_provider: string;
     shop_name: string;
+    accounting_year: number;
+    accounting_month: number;
     qic_warehouse: string;
     merchant?: string | null;
     tax_no?: string | null;
@@ -96,6 +98,8 @@ export interface BicTaskListParams {
     accounting_end_year?: number;
     accounting_end_month?: number;
     keyword?: string;
+    created_start_time?: string;
+    created_end_time?: string;
 }
 
 export interface BicDetailListParams {

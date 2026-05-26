@@ -232,6 +232,8 @@ export interface TransactionTaskListParams {
     accounting_end_year?: number;
     accounting_end_month?: number;
     keyword?: string;
+    created_start_time?: string;
+    created_end_time?: string;
 }
 
 export interface TransactionDetailListParams {

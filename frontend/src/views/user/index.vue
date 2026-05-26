@@ -11,7 +11,7 @@
         <el-form-item label="搜索">
           <el-input
             v-model="searchForm.keyword"
-            placeholder="姓名/手机号"
+            placeholder="搜姓名/手机号"
             clearable
             style="width: 200px"
             @keyup.enter="handleSearch"
@@ -24,7 +24,7 @@
         <el-form-item v-if="userStore.isSuperAdmin" label="组织">
           <el-select
             v-model="searchForm.orgIds"
-            placeholder="全部组织"
+            placeholder="组织"
             multiple
             clearable
             collapse-tags

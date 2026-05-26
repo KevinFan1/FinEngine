@@ -12,7 +12,7 @@
         <el-form-item label="模块">
           <el-select
             v-model="searchForm.modules"
-            placeholder="全部模块"
+            placeholder="模块"
             multiple
             clearable
             collapse-tags
@@ -30,7 +30,7 @@
         <el-form-item label="操作类型">
           <el-select
             v-model="searchForm.actions"
-            placeholder="全部类型"
+            placeholder="操作类型"
             multiple
             clearable
             collapse-tags
@@ -61,7 +61,7 @@
         <el-form-item v-if="isSuperAdmin" label="组织">
           <el-select
             v-model="searchForm.orgIds"
-            placeholder="全部组织"
+            placeholder="组织"
             multiple
             clearable
             collapse-tags
@@ -82,10 +82,10 @@
             v-model="searchForm.dateRange"
             type="daterange"
             range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
+            start-placeholder="操作日期起"
+            end-placeholder="操作日期止"
             value-format="YYYY-MM-DD"
-            style="width: 260px"
+            style="width: 320px"
           />
         </el-form-item>
         <el-form-item>

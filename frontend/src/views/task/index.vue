@@ -12,16 +12,28 @@
                     <el-date-picker
                         v-model="searchForm.sourceMonth"
                         type="month"
-                        placeholder="全部年月"
+                        placeholder="任务年月"
                         clearable
                         value-format="YYYY-MM"
                         style="width: 150px"
                     />
                 </el-form-item>
+                <el-form-item label="创建时间">
+                    <el-date-picker
+                        v-model="searchForm.createdTimeRange"
+                        type="datetimerange"
+                        range-separator="至"
+                        start-placeholder="创建时间起"
+                        end-placeholder="创建时间止"
+                        value-format="YYYY-MM-DD HH:mm:ss"
+                        :shortcuts="taskCreatedTimeShortcuts"
+                        style="width: 420px"
+                    />
+                </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
                     <el-select
                         v-model="searchForm.orgIds"
-                        placeholder="全部组织"
+                        placeholder="组织"
                         multiple
                         clearable
                         collapse-tags
@@ -41,7 +53,7 @@
                 <el-form-item label="平台">
                     <el-select
                         v-model="searchForm.platforms"
-                        placeholder="全部平台"
+                        placeholder="平台"
                         multiple
                         clearable
                         collapse-tags
@@ -63,7 +75,7 @@
                 <el-form-item label="店铺">
                     <el-select
                         v-model="searchForm.shopIds"
-                        placeholder="全部店铺"
+                        placeholder="店铺"
                         multiple
                         clearable
                         collapse-tags
@@ -89,7 +101,7 @@
                 <el-form-item label="性质">
                     <el-select
                         v-model="searchForm.parsedTypes"
-                        placeholder="全部性质"
+                        placeholder="任务性质"
                         multiple
                         clearable
                         collapse-tags
@@ -109,7 +121,7 @@
                 <el-form-item label="状态">
                     <el-select
                         v-model="searchForm.statuses"
-                        placeholder="全部状态"
+                        placeholder="状态"
                         multiple
                         clearable
                         collapse-tags
@@ -119,6 +131,7 @@
                         <el-option label="排队中" value="queued" />
                         <el-option label="运行中" value="running" />
                         <el-option label="成功" value="success" />
+                        <el-option label="部分成功" value="partial_success" />
                         <el-option label="失败" value="failed" />
                         <el-option label="已过期" value="expired" />
                         <el-option label="已取消" value="cancelled" />
@@ -127,7 +140,7 @@
                 <el-form-item label="搜索">
                     <el-input
                         v-model="searchForm.keyword"
-                        placeholder="文件名/店铺"
+                        placeholder="搜文件名/店铺"
                         clearable
                         style="width: 200px"
                         @keyup.enter="handleSearch"
@@ -296,6 +309,8 @@
                         <template
                             v-if="
                                 row.status === 'success' ||
+                                row.status === 'partial_success' ||
+                                row.status === 'expired' ||
                                 row.status === 'failed'
                             "
                         >
@@ -624,6 +639,7 @@ import {
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { formatDateTime, getPlatformLabel } from "@/utils/format";
+import { dateRangeLabel, taskCreatedTimeShortcuts } from "@/utils/dateRange";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import {
     getFallbackPlatforms,
@@ -650,6 +666,7 @@ const orgOptions = ref<Organization[]>([]);
 // Search
 const searchForm = reactive({
     sourceMonth: "",
+    createdTimeRange: [] as string[],
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -765,12 +782,13 @@ const selectedRecalculableRows = computed(() =>
 );
 
 interface TaskFilterTag extends ActiveFilterTag {
-    key: "sourceMonth" | "orgIds" | "platforms" | "shopIds" | "parsedTypes" | "statuses" | "keyword";
+    key: "sourceMonth" | "createdTimeRange" | "orgIds" | "platforms" | "shopIds" | "parsedTypes" | "statuses" | "keyword";
 }
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
     if (searchForm.sourceMonth) tags.push({ key: "sourceMonth", label: "年月", value: searchForm.sourceMonth });
+    if (searchForm.createdTimeRange.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -791,6 +809,7 @@ function statusTagType(status: string): string {
         queued: "info",
         running: "warning",
         success: "success",
+        partial_success: "warning",
         failed: "danger",
         expired: "info",
         cancelled: "info",
@@ -803,6 +822,7 @@ function statusLabel(status: string): string {
         queued: "排队中",
         running: "运行中",
         success: "成功",
+        partial_success: "部分成功",
         failed: "失败",
         expired: "已过期",
         cancelled: "已取消",
@@ -866,6 +886,8 @@ async function fetchData() {
             parsed_type: selectedParsedTypesParam.value,
             status: selectedStatusesParam.value,
             keyword: searchForm.keyword || undefined,
+            created_start_time: searchForm.createdTimeRange[0] || undefined,
+            created_end_time: searchForm.createdTimeRange[1] || undefined,
         });
         tableData.value = res.items || [];
         pagination.total = res.total || 0;
@@ -942,6 +964,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.sourceMonth = "";
+    searchForm.createdTimeRange = [];
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -956,6 +979,8 @@ function handleReset() {
 async function removeFilterTag(tag: TaskFilterTag) {
     if (tag.key === "sourceMonth") {
         searchForm.sourceMonth = "";
+    } else if (tag.key === "createdTimeRange") {
+        searchForm.createdTimeRange = [];
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

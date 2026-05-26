@@ -1,5 +1,4 @@
 """BIC accounting API."""
-
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -14,6 +13,7 @@ from app.models.user import User
 from app.schemas.bic_accounting import BicDetailOut, BicReportOut, BicTaskOut
 from app.schemas.common import ApiResponse, PageResponse
 from app.services.bic_accounting_service import BicAccountingService
+from app.utils.query_filters import parse_query_datetime
 
 router = APIRouter()
 
@@ -96,6 +96,8 @@ async def list_tasks(
     accounting_end_month: int | None = Query(None),
     keyword: str | None = Query(None),
     org_id: str | None = Query(None),
+    created_start_time: str | None = Query(None),
+    created_end_time: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -112,6 +114,8 @@ async def list_tasks(
         accounting_end_year=accounting_end_year,
         accounting_end_month=accounting_end_month,
         keyword=keyword,
+        created_start_time=parse_query_datetime(created_start_time),
+        created_end_time=parse_query_datetime(created_end_time),
         page=page,
         page_size=page_size,
     )

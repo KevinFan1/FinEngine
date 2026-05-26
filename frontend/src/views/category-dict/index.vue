@@ -99,7 +99,7 @@
                         v-model="searchForm.platformId"
                         clearable
                         filterable
-                        placeholder="全部平台"
+                        placeholder="平台"
                         style="width: 190px"
                     >
                         <el-option
@@ -119,7 +119,7 @@
                         filterable
                         allow-create
                         default-first-option
-                        placeholder="全部类型"
+                        placeholder="业务类型"
                         style="width: 170px"
                     >
                         <el-option

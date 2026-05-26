@@ -17,7 +17,7 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.task import TaskListOut, TaskOut
 from app.services.platform_profile_service import resolve_platform_profile
-from app.utils.query_filters import split_int_filter_values
+from app.utils.query_filters import datetime_range_filters, parse_query_datetime, split_int_filter_values
 
 router = APIRouter()
 TASK_ACTION_EXPIRE_DAYS = 30
@@ -71,6 +71,8 @@ async def list_tasks(
     keyword: str | None = Query(None),
     batch_id: int | None = Query(None),
     org_id: str | None = Query(None),
+    created_start_time: str | None = Query(None),
+    created_end_time: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -144,6 +146,15 @@ async def list_tasks(
     if batch_id is not None:
         stmt = stmt.where(UploadFile.batch_id == batch_id)
         count_stmt = count_stmt.where(UploadFile.batch_id == batch_id)
+
+    created_time_filters = datetime_range_filters(
+        ProcessingTask.created_at,
+        start_time=parse_query_datetime(created_start_time),
+        end_time=parse_query_datetime(created_end_time),
+    )
+    if created_time_filters:
+        stmt = stmt.where(*created_time_filters)
+        count_stmt = count_stmt.where(*created_time_filters)
 
     total_result = await db.execute(count_stmt)
     total = total_result.scalar() or 0

@@ -877,44 +877,72 @@ html.dark .el-tag.platform-tag--miniprogram {
 
     .search-card {
         --search-control-height: 36px;
-        --search-control-radius: 9px;
-        --search-control-bg: var(--bg-elevated);
+        --search-control-radius: 8px;
+        --search-control-bg: var(--bg-card);
         --search-control-border: var(--border-color);
 
-        margin-bottom: 14px;
+        margin-bottom: 16px;
+        border: 1px solid var(--border-color-light);
+        background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-elevated) 100%);
 
         .el-card__body {
-            padding: 14px 18px 4px;
+            padding: 16px 18px 14px;
         }
 
-        .el-form {
+        .el-form.el-form--inline {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 10px 12px;
+            align-items: center;
+        }
+
+        .el-form.el-form--inline .el-form-item {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            min-width: 0;
+            margin: 0;
+        }
+
+        .el-form.el-form--inline .el-form-item__label {
+            display: none;
+        }
+
+        .el-form.el-form--inline .el-form-item__content {
             display: flex;
             align-items: center;
-            flex-wrap: wrap;
-            column-gap: 8px;
-            row-gap: 10px;
+            width: 100%;
+            min-width: 0;
+            margin-left: 0 !important;
         }
 
-        .el-form-item {
-            align-items: center;
-            margin: 0 0 10px;
-        }
-
-        .el-form-item__label {
-            height: var(--search-control-height);
-            line-height: var(--search-control-height);
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 600;
-        }
-
-        .el-input,
-        .el-select,
-        .el-date-editor,
-        .el-button {
+        .el-form.el-form--inline .el-input,
+        .el-form.el-form--inline .el-select,
+        .el-form.el-form--inline .el-date-editor,
+        .el-form.el-form--inline .el-cascader {
             --el-component-size: var(--search-control-height);
+            width: 100% !important;
+            min-width: 0;
             height: var(--search-control-height);
             vertical-align: middle;
+        }
+
+        .el-form.el-form--inline .el-form-item:last-child {
+            min-width: max-content;
+        }
+
+        .el-form.el-form--inline .el-form-item:last-child .el-form-item__content {
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+        }
+
+        .el-form.el-form--inline .el-button {
+            --el-component-size: var(--search-control-height);
+            min-width: 72px;
+            height: var(--search-control-height);
+            border-radius: var(--search-control-radius);
+            font-weight: 600;
         }
 
         .el-input__wrapper,
@@ -922,9 +950,13 @@ html.dark .el-tag.platform-tag--miniprogram {
         .el-date-editor.el-input__wrapper,
         .el-date-editor.el-range-editor {
             min-height: var(--search-control-height);
+            padding-inline: 10px;
             border-radius: var(--search-control-radius) !important;
             background: var(--search-control-bg) !important;
             box-shadow: 0 0 0 1px var(--search-control-border) inset !important;
+            transition:
+                box-shadow 0.18s ease,
+                background-color 0.18s ease;
         }
 
         .el-input__wrapper:hover,
@@ -953,18 +985,14 @@ html.dark .el-tag.platform-tag--miniprogram {
         .el-range-separator {
             color: var(--text-tertiary);
         }
-
-        .el-button {
-            border-radius: var(--search-control-radius);
-            font-weight: 600;
-        }
     }
 
     .search-card-head {
         display: flex;
         justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 14px;
+        align-items: flex-start;
+        gap: 20px;
+        margin-bottom: 18px;
     }
 
     .search-card-kicker {
@@ -978,17 +1006,19 @@ html.dark .el-tag.platform-tag--miniprogram {
     .search-card-title {
         margin: 0;
         color: var(--text-primary);
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
-        line-height: 1.2;
+        line-height: 1.3;
     }
 
     .search-card-tip {
         display: flex;
         align-items: center;
-        color: var(--text-secondary);
+        max-width: 320px;
+        color: var(--text-tertiary);
         font-size: 12px;
         font-weight: 500;
+        line-height: 1.5;
     }
 
     .table-card,
@@ -1055,34 +1085,88 @@ html.dark .el-tag.platform-tag--miniprogram {
     }
 
     @media (max-width: 768px) {
+        .search-card {
+            .el-card__body {
+                padding: 14px;
+            }
+
+            .el-form.el-form--inline {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+        }
+
         .search-card-head {
             flex-direction: column;
+            gap: 10px;
+            margin-bottom: 14px;
         }
     }
 }
 
 .active-filters {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     flex-wrap: wrap;
+    gap: 10px 8px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color-light);
+}
+
+.active-filters-summary {
+    display: inline-flex;
+    align-items: center;
     gap: 8px;
-    margin-top: 8px;
-    padding-top: 12px;
-    border-top: 1px dashed var(--border-light);
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .active-filters-label {
-    color: var(--text-secondary);
+    color: inherit;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 700;
+}
+
+.active-filters-count {
+    color: var(--el-color-primary);
+    font-variant-numeric: tabular-nums;
 }
 
 .filter-tag {
     margin: 0;
+    max-width: min(100%, 280px);
+    border-radius: 999px !important;
+    color: var(--text-primary) !important;
+    background: var(--primary-light-9) !important;
+    border-color: var(--primary-light-7) !important;
+
+    .el-tag__content {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 }
 
 .clear-filters-btn {
     padding: 0;
+    margin-left: auto;
+    min-height: 30px;
+}
+
+@media (max-width: 768px) {
+    .active-filters {
+        gap: 8px;
+    }
+
+    .clear-filters-btn {
+        margin-left: 0;
+    }
 }
 
 .inline-filter-trigger,
