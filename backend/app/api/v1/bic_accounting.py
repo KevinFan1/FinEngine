@@ -54,13 +54,37 @@ def _task_out(task, upload_file, org_name: str | None = None) -> BicTaskOut:
         result_failed=task.failed_rows,
         error_message=task.error_message,
         error_reason=task.error_message,
-        result_summary=task.result_summary,
+        result_summary=_normalize_bic_summary(task.result_summary),
         started_at=task.started_at,
         finished_at=task.finished_at,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
     return item
+
+
+def _normalize_bic_summary(result_summary: dict | None) -> dict | None:
+    if not result_summary:
+        return result_summary
+    labels = {
+        "type": "文件类型",
+        "total_rows": "总行数",
+        "success_rows": "符合条件行数",
+        "failed_rows": "失败行数",
+        "groups": "明细分组数",
+        "report_groups": "报表分组数",
+        "errors": "错误明细",
+        "detail_ids": "明细记录ID列表",
+        "report_ids": "报表记录ID列表",
+        "report_id": "首个报表记录ID",
+    }
+    normalized: dict = {}
+    for key, value in result_summary.items():
+        label = labels.get(key, key)
+        if key == "type" and isinstance(value, str) and value.lower() == "bic":
+            value = "BIC"
+        normalized[label] = value
+    return normalized
 
 
 def _export_response(buffer, filename: str) -> StreamingResponse:

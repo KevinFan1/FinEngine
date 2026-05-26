@@ -342,11 +342,11 @@
                     </div>
                 </section>
 
-                <section v-if="taskDetail.error_message" class="detail-card detail-card--danger">
+                <section v-if="taskErrorReason(taskDetail)" class="detail-card detail-card--danger">
                     <div class="detail-card-header">
                         <span>错误原因</span>
                     </div>
-                    <p class="detail-error">{{ taskDetail.error_message }}</p>
+                    <p class="detail-error">{{ taskErrorReason(taskDetail) }}</p>
                 </section>
 
                 <section v-if="taskDetail.result_summary" class="detail-card">
@@ -354,7 +354,7 @@
                         <span>结果摘要</span>
                     </div>
                     <div class="detail-summary-list">
-                        <div v-for="item in taskSummaryItems(taskDetail.result_summary)" :key="item.label" class="detail-summary-item">
+                        <div v-for="item in taskSummaryItems(taskDetail.result_summary)" :key="item.key" class="detail-summary-item">
                             <span>{{ item.label }}</span>
                             <strong>{{ item.value }}</strong>
                         </div>
@@ -521,17 +521,69 @@ function canRecalculate(row: BicTask) {
 }
 
 const resultSummaryLabels: Record<string, string> = {
+    type: "文件类型",
     total_rows: "总行数",
-    success_rows: "成功行数",
+    success_rows: "符合条件行数",
     failed_rows: "失败行数",
-    groups: "汇总分组数",
+    groups: "明细分组数",
+    report_groups: "报表分组数",
+    errors: "错误明细",
+    detail_ids: "明细记录ID列表",
+    report_ids: "报表记录ID列表",
+    report_id: "首个报表记录ID",
 };
 
+const hiddenResultSummaryKeys = new Set([
+    "detail_ids",
+    "report_ids",
+    "report_id",
+    "明细记录ID",
+    "报表记录ID",
+    "明细记录ID列表",
+    "报表记录ID列表",
+    "首个报表记录ID",
+]);
+
+function hasChineseText(value: string) {
+    return /[\u4e00-\u9fff]/.test(value);
+}
+
+function summaryLabel(key: string) {
+    return resultSummaryLabels[key] || (hasChineseText(key) ? key : "");
+}
+
+function formatSummaryErrors(errors: unknown) {
+    if (!errors) return "";
+    if (Array.isArray(errors)) return errors.filter(Boolean).map(String).join("；");
+    if (typeof errors === "string") return errors;
+    return JSON.stringify(errors);
+}
+
+function taskErrorReason(row: BicTask) {
+    return (
+        row.error_reason ||
+        row.error_message ||
+        formatSummaryErrors(row.result_summary?.["错误明细"] || row.result_summary?.errors)
+    );
+}
+
+function formatSummaryValue(key: string, value: unknown) {
+    if (value == null || value === "") return "-";
+    if (key === "type" && String(value).toLowerCase() === "bic") return "BIC";
+    if (Array.isArray(value)) return value.filter((item) => item != null && item !== "").map(String).join("；") || "-";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+}
+
 function taskSummaryItems(value: Record<string, any>) {
-    return Object.entries(value).map(([key, itemValue]) => ({
-        label: resultSummaryLabels[key] || key,
-        value: itemValue ?? "-",
-    }));
+    return Object.entries(value)
+        .filter(([key]) => !hiddenResultSummaryKeys.has(key))
+        .map(([key, itemValue]) => ({
+            key,
+            label: summaryLabel(key),
+            value: formatSummaryValue(key, itemValue),
+        }))
+        .filter((item) => item.label);
 }
 
 function queryParams() {

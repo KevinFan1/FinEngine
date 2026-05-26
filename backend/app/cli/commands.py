@@ -126,7 +126,12 @@ async def _seed_all() -> None:
     from scripts.seed_category_dicts import seed as seed_categories
     from scripts.seed_file_specs import seed as seed_specs
     from scripts.seed_platforms import seed as seed_platform_data
-    from scripts.seed_transaction_accounting_defaults import seed as seed_transaction_accounting
+    from scripts.seed_transaction_accounting_defaults import (
+        seed as seed_transaction_accounting,
+    )
+    from scripts.seed_transaction_major_subjects import (
+        seed as seed_transaction_major_subjects,
+    )
     from scripts.seed_users import seed as seed_user_data
 
     await seed_platform_data()
@@ -134,6 +139,7 @@ async def _seed_all() -> None:
     await seed_specs()
     await seed_categories()
     await seed_transaction_accounting()
+    await seed_transaction_major_subjects()
     print("\n[OK] All seeds complete.")
 
 

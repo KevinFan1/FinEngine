@@ -50,6 +50,22 @@ class _BicExecuteSession:
         return None
 
 
+class _BicPersistSession:
+    def __init__(self) -> None:
+        self.added_rows: list[object] = []
+        self.execute_count = 0
+        self.flush_count = 0
+
+    async def execute(self, _statement: object) -> None:
+        self.execute_count += 1
+
+    def add_all(self, rows: list[object]) -> None:
+        self.added_rows.extend(rows)
+
+    async def flush(self) -> None:
+        self.flush_count += 1
+
+
 def test_bic_accounting_parse_file_keeps_only_quality_inspection_rows(tmp_path: Path) -> None:
     file_path = tmp_path / "douyin_bic_qic.xlsx"
     _write_workbook(
@@ -71,6 +87,83 @@ def test_bic_accounting_parse_file_keeps_only_quality_inspection_rows(tmp_path: 
         ("服务商A", "华东仓", Decimal("12.30")),
         ("服务商B", "华南仓", Decimal("7.70")),
     ]
+
+
+def test_bic_accounting_parse_file_marks_missing_header_as_file_error(tmp_path: Path) -> None:
+    file_path = tmp_path / "invalid_bic.xlsx"
+    _write_workbook(file_path, ["错误表头"], [["x"]])
+
+    result = BicAccountingService.parse_file(str(file_path))
+
+    assert result["total_rows"] == 0
+    assert result["success_rows"] == 0
+    assert result["failed_rows"] == 1
+    assert result["fatal_error"] is True
+    assert result["errors"][0].startswith("缺少BIC必要表头:")
+
+
+def test_bic_accounting_parse_file_explains_no_matching_rows(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_bic_no_qic.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_BIC_HEADERS,
+        [
+            _row(DOUYIN_BIC_HEADERS, 费用项="质检费(拒绝)", 服务商="服务商A", QIC仓="华东仓", 结算金额="99.00"),
+        ],
+    )
+
+    result = BicAccountingService.parse_file(str(file_path))
+
+    assert result["total_rows"] == 1
+    assert result["success_rows"] == 0
+    assert result["failed_rows"] == 0
+    assert result["warnings"] == ["未找到费用项为“质检费(通过)”的记录"]
+
+
+@pytest.mark.asyncio
+async def test_bic_accounting_result_summary_uses_chinese_keys(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_bic_qic.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_BIC_HEADERS,
+        [
+            _row(DOUYIN_BIC_HEADERS, 费用项="质检费(通过)", 服务商="服务商A", QIC仓="华东仓", 结算金额="12.30"),
+        ],
+    )
+    task = BicTask(id=1, file_id=2, org_id=3, user_id=4, status="processing", progress=5)
+    upload_file = BicUploadFile(
+        id=2,
+        org_id=3,
+        user_id=4,
+        shop_id=5,
+        original_name="26年02月_bic_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="uploaded",
+    )
+
+    summary = await BicAccountingService.persist_task_result(
+        _BicPersistSession(),  # type: ignore[arg-type]
+        task=task,
+        upload_file=upload_file,
+        file_path=str(file_path),
+        platform_code="douyin",
+        shop_id=5,
+        shop_name="抖音旗舰店",
+    )
+
+    assert summary == {
+        "文件类型": "BIC",
+        "总行数": 1,
+        "符合条件行数": 1,
+        "失败行数": 0,
+        "明细分组数": 1,
+        "报表分组数": 1,
+    }
+    assert not any(key in summary for key in ["total_rows", "success_rows", "failed_rows", "detail_ids"])
 
 
 def test_service_provider_filter_uses_fuzzy_multi_value_matching() -> None:

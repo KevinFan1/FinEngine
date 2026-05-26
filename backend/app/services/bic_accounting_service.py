@@ -30,6 +30,7 @@ BIC_TARGET_FEE_ITEM = "质检费(通过)"
 BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
 BIC_REPORT_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
 BIC_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
+BIC_ERROR_SAMPLE_LIMIT = 10
 
 
 def _capture_bic_result_state(task: BicTask) -> dict[str, object]:
@@ -591,14 +592,20 @@ class BicAccountingService:
                     shop_name=upload_file.shop_name or "",
                 )
 
-            task.processed_rows = int(summary.get("total_rows", 0))
-            task.success_rows = int(summary.get("success_rows", 0))
-            task.failed_rows = int(summary.get("failed_rows", 0))
+            task.processed_rows = int(summary.get("总行数", 0))
+            task.success_rows = int(summary.get("符合条件行数", 0))
+            task.failed_rows = int(summary.get("失败行数", 0))
             task.result_summary = summary
             task.progress = 100
-            task.status = "success" if task.failed_rows == 0 else "partial_success"
+            if summary.get("文件解析失败"):
+                task.status = "failed"
+            else:
+                task.status = "success" if task.failed_rows == 0 else "partial_success"
+            error_messages = summary.get("错误明细")
+            task.error_message = "\n".join(map(str, error_messages)) if isinstance(error_messages, list) and error_messages else None
             task.finished_at = datetime.now(timezone.utc)
-            upload_file.status = "processed"
+            upload_file.status = "failed" if task.status == "failed" else "processed"
+            upload_file.error_message = task.error_message
         except Exception as exc:
             await db.rollback()
             task = await db.get(BicTask, task_id)
@@ -651,39 +658,47 @@ class BicAccountingService:
         await db.execute(delete(BicReportRow).where(BicReportRow.task_id == task.id))
 
         parse_result = BicAccountingService.parse_file(file_path)
-        detail_rows = BicAccountingService._build_detail_rows(
-            task=task,
-            upload_file=upload_file,
-            rows=parse_result.get("bic_rows", []),
-            platform_code=platform_code,
-            shop_id=shop_id,
-            shop_name=shop_name,
-        )
-        db.add_all(detail_rows)
+        detail_rows: list[BicDetail] = []
+        report_rows: list[BicReportRow] = []
+        if not parse_result.get("fatal_error"):
+            detail_rows = BicAccountingService._build_detail_rows(
+                task=task,
+                upload_file=upload_file,
+                rows=parse_result.get("bic_rows", []),
+                platform_code=platform_code,
+                shop_id=shop_id,
+                shop_name=shop_name,
+            )
+            db.add_all(detail_rows)
 
-        report_rows = BicAccountingService._build_report_rows(
-            task=task,
-            upload_file=upload_file,
-            detail_rows=detail_rows,
-            platform_code=platform_code,
-            shop_id=shop_id,
-            shop_name=shop_name,
-        )
-        db.add_all(report_rows)
+            report_rows = BicAccountingService._build_report_rows(
+                task=task,
+                upload_file=upload_file,
+                detail_rows=detail_rows,
+                platform_code=platform_code,
+                shop_id=shop_id,
+                shop_name=shop_name,
+            )
+            db.add_all(report_rows)
         await db.flush()
 
-        return {
-            "type": "bic",
-            "total_rows": parse_result.get("total_rows", 0),
-            "success_rows": parse_result.get("success_rows", 0),
-            "failed_rows": parse_result.get("failed_rows", 0),
-            "groups": len(detail_rows),
-            "report_groups": len(report_rows),
-            "detail_ids": [row.id for row in detail_rows],
-            "report_ids": [row.id for row in report_rows],
-            "report_id": report_rows[0].id if report_rows else None,
-            "errors": parse_result.get("errors", [])[:10],
+        summary = {
+            "文件类型": "BIC",
+            "总行数": parse_result.get("total_rows", 0),
+            "符合条件行数": parse_result.get("success_rows", 0),
+            "失败行数": parse_result.get("failed_rows", 0),
+            "明细分组数": len(detail_rows),
+            "报表分组数": len(report_rows),
         }
+        errors = parse_result.get("errors", [])[:BIC_ERROR_SAMPLE_LIMIT]
+        if errors:
+            summary["错误明细"] = errors
+        if parse_result.get("fatal_error"):
+            summary["文件解析失败"] = "是"
+        warnings = parse_result.get("warnings", [])
+        if warnings:
+            summary["处理提示"] = warnings
+        return summary
 
     @staticmethod
     def parse_file(file_path: str) -> dict:
@@ -692,26 +707,32 @@ class BicAccountingService:
             "success_rows": 0,
             "failed_rows": 0,
             "errors": [],
+            "warnings": [],
+            "fatal_error": False,
             "bic_rows": [],
         }
+
+        def add_file_error(message: str) -> dict:
+            result["errors"].append(message)
+            result["failed_rows"] = max(int(result["failed_rows"]), 1)
+            result["fatal_error"] = True
+            return result
+
         required_headers = tuple(DOUYIN_BIC_HEADERS)
         with open_tabular_rows(file_path) as rows:
             if rows is None:
-                result["errors"].append("无法打开表格文件")
-                return result
+                return add_file_error("无法打开表格文件")
 
             row_iter = iter(rows)
             header_result = FinancialSummaryExcelProcessorMixin._find_header_row(row_iter, required_headers)
             if header_result is None:
-                result["errors"].append("无法读取BIC表头")
-                return result
+                return add_file_error("无法读取BIC表头")
 
             headers, header_row_number = header_result
             col_idx = FinancialSummaryExcelProcessorMixin._build_col_idx(headers, required_headers)
             missing = FinancialSummaryExcelProcessorMixin._missing_headers(col_idx, required_headers)
             if missing:
-                result["errors"].append(f"缺少BIC必要表头: {', '.join(missing)}")
-                return result
+                return add_file_error(f"缺少BIC必要表头: {', '.join(missing)}")
 
             for row in row_iter:
                 result["total_rows"] += 1
@@ -732,6 +753,8 @@ class BicAccountingService:
                 except Exception as exc:
                     result["failed_rows"] += 1
                     result["errors"].append(f"Row {result['total_rows'] + header_row_number}: {exc}")
+        if result["total_rows"] > 0 and result["success_rows"] == 0 and result["failed_rows"] == 0:
+            result["warnings"].append(f"未找到费用项为“{BIC_TARGET_FEE_ITEM}”的记录")
         return result
 
     @staticmethod

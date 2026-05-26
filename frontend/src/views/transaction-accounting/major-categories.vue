@@ -2,11 +2,13 @@
     <div class="page-container major-category-page">
         <el-card shadow="never" class="search-card">
             <div class="major-toolbar">
-                <SearchCardIntro
-                    kicker="MAJOR CATEGORY"
-                    title="资金大分类"
-                    tip="在这里维护大分类本身，并直接勾选科目归属"
-                />
+                <div class="major-toolbar__intro">
+                    <SearchCardIntro
+                        kicker="MAJOR CATEGORY"
+                        title="资金大分类"
+                        tip="在这里维护大分类本身，并直接勾选科目归属"
+                    />
+                </div>
                 <div class="major-toolbar__actions">
                     <el-input
                         v-model="searchText"
@@ -680,17 +682,41 @@ usePageRefresh(loadData);
 
 .major-toolbar {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
+}
+
+.major-toolbar__intro {
+    flex: 1;
+    min-width: 0;
+}
+
+.major-toolbar__intro :deep(.search-card-head) {
+    margin-bottom: 0;
+}
+
+.major-toolbar__intro :deep(.search-card-tip) {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+}
+
+.major-toolbar__intro :deep(.search-card-tip span) {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .major-toolbar__actions {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
     gap: 8px;
+    min-width: 0;
 }
 
 .major-search-input {
