@@ -16,6 +16,7 @@ from app.schemas.summary_adjustment import (
     signed_adjustment_amount,
 )
 from app.services.audit_service import AuditService
+from app.services.shop_visibility import active_shop_filter
 
 
 ADJUSTABLE_SUMMARY_METRICS = tuple(SUMMARY_ADJUSTMENT_METRIC_LABELS.keys())
@@ -48,6 +49,7 @@ class SummaryAdjustmentService:
                 SummaryAdjustment.platform_name == platform_name,
                 SummaryAdjustment.shop_id == shop_id,
                 SummaryAdjustment.is_deleted.is_(False),
+                active_shop_filter(SummaryAdjustment.shop_id),
             )
             .order_by(SummaryAdjustment.created_at.desc(), SummaryAdjustment.id.desc())
         )
@@ -176,6 +178,7 @@ class SummaryAdjustmentService:
                 SummaryAdjustment.id == adjustment_id,
                 SummaryAdjustment.org_id == org_id,
                 SummaryAdjustment.is_deleted.is_(False),
+                active_shop_filter(SummaryAdjustment.shop_id),
             )
         )
         return result.scalar_one_or_none()
@@ -198,6 +201,7 @@ class SummaryAdjustmentService:
         filters = [
             SummaryAdjustment.is_deleted.is_(False),
             SummaryAdjustment.metric_key.in_(ADJUSTABLE_SUMMARY_METRICS),
+            active_shop_filter(SummaryAdjustment.shop_id),
         ]
         if org_ids is not None:
             filters.append(SummaryAdjustment.org_id.in_(org_ids))

@@ -126,7 +126,7 @@ def detect_csv_encoding(file_path: str) -> str:
     """Detect common encodings used by Chinese marketplace CSV exports."""
     path = Path(file_path)
     with path.open("rb") as file:
-        sample = file.read(64 * 1024)
+        sample = file.read(63 * 1024)
 
     for encoding in CSV_ENCODINGS:
         try:

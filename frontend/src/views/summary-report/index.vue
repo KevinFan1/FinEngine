@@ -64,7 +64,7 @@
                 </el-form-item>
                 <el-form-item label="店铺">
                     <el-select
-                        v-model="searchForm.shops"
+                        v-model="searchForm.shopIds"
                         placeholder="店铺"
                         clearable
                         collapse-tags
@@ -78,7 +78,7 @@
                             v-for="shop in filteredShopOptions"
                             :key="shop.id"
                             :label="shop.shop_name"
-                            :value="shop.shop_name"
+                            :value="shop.id"
                         >
                             <ShopBadge
                                 :label="shop.shop_name"
@@ -160,7 +160,6 @@
                 :summary-method="getSummary"
                 :fit="true"
                 style="width: 100%"
-                height="calc(100vh - 278px)"
                 row-key="id"
                 @selection-change="handleSelectionChange"
             >
@@ -514,7 +513,7 @@ const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
 
 interface FilterTag extends ActiveFilterTag {
-    key: "accountingMonthRange" | "orgIds" | "platforms" | "shops" | "keyword";
+    key: "accountingMonthRange" | "orgIds" | "platforms" | "shopIds" | "keyword";
 }
 
 interface SummaryTableInstance {
@@ -527,7 +526,7 @@ const searchForm = reactive({
     accountingMonthRange: [] as string[],
     orgIds: [] as number[],
     platforms: [] as string[],
-    shops: [] as string[],
+    shopIds: [] as number[],
     keyword: "",
 });
 
@@ -597,8 +596,8 @@ const filteredShopOptions = computed(() => {
 const selectedReportPlatformsParam = computed(
     () => searchForm.platforms.join(",") || undefined,
 );
-const selectedShopsParam = computed(
-    () => searchForm.shops.join(",") || undefined,
+const selectedShopIdsParam = computed(
+    () => searchForm.shopIds.join(",") || undefined,
 );
 const keywordParam = computed(() => searchForm.keyword.trim() || undefined);
 const selectedCount = computed(() => selectedRows.value.length);
@@ -634,8 +633,9 @@ const activeFilterTags = computed<FilterTag[]>(() => {
             value: getPlatformLabel(value),
         });
     });
-    searchForm.shops.forEach((value) => {
-        tags.push({ key: "shops", label: "店铺", value });
+    searchForm.shopIds.forEach((id) => {
+        const shop = shopOptions.value.find((item) => item.id === id);
+        tags.push({ key: "shopIds", label: "店铺", value: shop?.shop_name || `店铺#${id}` });
     });
     if (searchForm.keyword.trim()) {
         tags.push({
@@ -720,7 +720,7 @@ async function fetchData() {
             accounting_end_year: selectedAccountingEndYear.value,
             accounting_end_month: selectedAccountingEndMonth.value,
             report_platform_name: selectedReportPlatformsParam.value,
-            shop_name: selectedShopsParam.value,
+            shop_ids: selectedShopIdsParam.value,
             keyword: keywordParam.value,
         });
         tableData.value = res.items || [];
@@ -753,21 +753,21 @@ async function fetchShopOptions() {
 }
 
 function handlePlatformChange() {
-    const availableShops = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shops = searchForm.shops.filter((shopName) =>
-        availableShops.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((id) =>
+        availableShopIds.has(id),
     );
     fetchShopOptions();
 }
 
 function handleOrgChange() {
-    const availableShops = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shops = searchForm.shops.filter((shopName) =>
-        availableShops.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((id) =>
+        availableShopIds.has(id),
     );
     fetchShopOptions();
 }
@@ -781,7 +781,7 @@ function handleReset() {
     searchForm.accountingMonthRange = [];
     searchForm.orgIds = [];
     searchForm.platforms = [];
-    searchForm.shops = [];
+    searchForm.shopIds = [];
     searchForm.keyword = "";
     pagination.page = 1;
     fetchShopOptions();
@@ -819,10 +819,11 @@ function removeFilterTag(tag: FilterTag) {
         searchForm.platforms = searchForm.platforms.filter(
             (item) => getPlatformLabel(item) !== tag.value,
         );
-    } else if (tag.key === "shops") {
-        searchForm.shops = searchForm.shops.filter(
-            (item) => item !== tag.value,
-        );
+    } else if (tag.key === "shopIds") {
+        searchForm.shopIds = searchForm.shopIds.filter((id) => {
+            const shop = shopOptions.value.find((item) => item.id === id);
+            return (shop?.shop_name || `店铺#${id}`) !== tag.value;
+        });
     } else if (tag.key === "keyword") {
         searchForm.keyword = "";
     }
@@ -837,7 +838,10 @@ function applyQuickFilter(type: "reportPlatform" | "shop", value: string) {
     if (type === "reportPlatform") {
         searchForm.platforms = [value];
     } else {
-        searchForm.shops = [value];
+        const shop = shopOptions.value.find((s) => s.shop_name === value);
+        if (shop) {
+            searchForm.shopIds = [shop.id];
+        }
     }
 
     handlePlatformChange();
@@ -869,7 +873,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             accounting_end_year: selectedAccountingEndYear.value,
             accounting_end_month: selectedAccountingEndMonth.value,
             report_platform_name: selectedReportPlatformsParam.value,
-            shop_name: selectedShopsParam.value,
+            shop_ids: selectedShopIdsParam.value,
             keyword: keywordParam.value,
             scope,
             ids:
@@ -892,7 +896,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
         link.download = buildExportFilename([
             accountingMonthRangeLabel.value || "全部核算年月",
             `归集平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
-            `店铺${summarizeFilenameValues(searchForm.shops, "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shopIds.map(id => shopOptions.value.find(s => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
             searchForm.keyword.trim()
                 ? `关键词${searchForm.keyword.trim()}`
                 : "关键词全部",

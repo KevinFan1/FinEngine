@@ -1,5 +1,5 @@
 from app.models.base import Base
-from app.models.bic_accounting import BicDetail, BicReportRow, BicTask, BicUploadFile
+from app.models.bic_accounting import BicDetail, BicSourceRow, BicTask, BicUploadFile
 from app.models.cash_flow import CashFlowItem
 from app.models.category_dict import CategoryDict
 from app.models.file_spec import FileSpec
@@ -27,7 +27,7 @@ from app.models.user import User
 __all__ = [
     "Base",
     "BicDetail",
-    "BicReportRow",
+    "BicSourceRow",
     "BicTask",
     "BicUploadFile",
     "CashFlowItem",

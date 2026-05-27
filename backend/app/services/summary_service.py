@@ -4,6 +4,8 @@ import io
 from decimal import Decimal
 
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
+from openpyxl.styles import Font
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +13,7 @@ from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
 from app.services.summary_adjustment_service import SummaryAdjustmentService
+from app.services.shop_visibility import active_shop_filter
 
 # Export header aligned with actual business Excel.
 EXPORT_HEADERS = [
@@ -75,8 +78,24 @@ def split_filter_values(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def split_int_filter_values(value: str | None) -> list[int]:
+    if not value:
+        return []
+    values: list[int] = []
+    for item in value.split(","):
+        item = item.strip()
+        if item:
+            values.append(int(item))
+    return values
+
+
 def single_filter_value(value: str | None) -> str | None:
     values = split_filter_values(value)
+    return values[0] if len(values) == 1 else None
+
+
+def single_int_filter_value(value: str | None) -> int | None:
+    values = split_int_filter_values(value)
     return values[0] if len(values) == 1 else None
 
 
@@ -126,6 +145,22 @@ PLATFORM_LABELS = {
     "小程序": "小程序",
 }
 
+EXCEL_EXPORT_ROW_LIMIT = 20000
+
+
+def _ensure_export_row_limit(label: str, row_count: int) -> None:
+    if row_count > EXCEL_EXPORT_ROW_LIMIT:
+        raise ValueError(f"{label}导出数据量 {row_count} 行，超过系统上限 {EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出")
+
+
+def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
+    cells: list[WriteOnlyCell] = []
+    for label in headers:
+        cell = WriteOnlyCell(sheet, value=label)
+        cell.font = Font(bold=True)
+        cells.append(cell)
+    return cells
+
 
 class SummaryService:
     @staticmethod
@@ -147,7 +182,7 @@ class SummaryService:
         source_end_month: int | None = None,
         platform_name: str | None = None,
         report_platform_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         shop_name: str | None = None,
         keyword: str | None = None,
         page: int = 1,
@@ -162,9 +197,19 @@ class SummaryService:
             )
             .outerjoin(Shop, FinancialSummary.shop_id == Shop.id)
             .outerjoin(Organization, FinancialSummary.org_id == Organization.id)
-            .where(FinancialSummary.is_deleted.is_(False))
+            .where(
+                FinancialSummary.is_deleted.is_(False),
+                active_shop_filter(FinancialSummary.shop_id),
+            )
         )
-        count_stmt = select(func.count()).select_from(FinancialSummary).where(FinancialSummary.is_deleted.is_(False))
+        count_stmt = (
+            select(func.count())
+            .select_from(FinancialSummary)
+            .where(
+                FinancialSummary.is_deleted.is_(False),
+                active_shop_filter(FinancialSummary.shop_id),
+            )
+        )
         if org_ids is not None:
             stmt = stmt.where(FinancialSummary.org_id.in_(org_ids))
             count_stmt = count_stmt.where(FinancialSummary.org_id.in_(org_ids))
@@ -217,9 +262,10 @@ class SummaryService:
             stmt = stmt.where(FinancialSummary.report_platform_code.in_(report_platform_names))
             count_stmt = count_stmt.where(FinancialSummary.report_platform_code.in_(report_platform_names))
 
-        if shop_id is not None:
-            stmt = stmt.where(FinancialSummary.shop_id == shop_id)
-            count_stmt = count_stmt.where(FinancialSummary.shop_id == shop_id)
+        shop_id_list = split_int_filter_values(shop_ids)
+        if shop_id_list:
+            stmt = stmt.where(FinancialSummary.shop_id.in_(shop_id_list))
+            count_stmt = count_stmt.where(FinancialSummary.shop_id.in_(shop_id_list))
 
         shop_names = split_filter_values(shop_name)
         if shop_names:
@@ -280,7 +326,7 @@ class SummaryService:
         source_end_month: int | None = None,
         platform_name: str | None = None,
         report_platform_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         shop_name: str | None = None,
         keyword: str | None = None,
         ids: list[int] | None = None,
@@ -289,7 +335,10 @@ class SummaryService:
     ) -> io.BytesIO:
         """Export financial summaries to an Excel file (in-memory BytesIO)."""
         # Query all matching rows (no pagination)
-        stmt = select(FinancialSummary).where(FinancialSummary.is_deleted.is_(False))
+        stmt = select(FinancialSummary).where(
+            FinancialSummary.is_deleted.is_(False),
+            active_shop_filter(FinancialSummary.shop_id),
+        )
         if org_ids is not None:
             stmt = stmt.where(FinancialSummary.org_id.in_(org_ids))
 
@@ -331,8 +380,9 @@ class SummaryService:
         report_platform_names = split_filter_values(report_platform_name)
         if report_platform_names:
             stmt = stmt.where(FinancialSummary.report_platform_code.in_(report_platform_names))
-        if shop_id is not None:
-            stmt = stmt.where(FinancialSummary.shop_id == shop_id)
+        shop_id_list = split_int_filter_values(shop_ids)
+        if shop_id_list:
+            stmt = stmt.where(FinancialSummary.shop_id.in_(shop_id_list))
         shop_names = split_filter_values(shop_name)
         if shop_names:
             stmt = stmt.where(FinancialSummary.shop_name.in_(shop_names))
@@ -357,6 +407,10 @@ class SummaryService:
 
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        else:
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            total = (await db.execute(count_stmt)).scalar() or 0
+            _ensure_export_row_limit("财务汇总", total)
 
         result = await db.execute(stmt)
         rows = list(result.scalars().all())
@@ -376,13 +430,14 @@ class SummaryService:
         source_end_month: int | None = None,
         platform_name: str | None = None,
         report_platform_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         shop_name: str | None = None,
         keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         """Aggregate financial summaries by accounting year/month."""
+        shop_id = single_int_filter_value(shop_ids)
         filters = SummaryService._build_report_filters(
             org_ids=org_ids,
             source_year=source_year,
@@ -392,7 +447,7 @@ class SummaryService:
             source_end_year=source_end_year,
             source_end_month=source_end_month,
             platform_name=report_platform_name or platform_name,
-            shop_id=shop_id,
+            shop_ids=shop_ids,
             shop_name=shop_name,
             keyword=keyword,
         )
@@ -468,7 +523,7 @@ class SummaryService:
         source_end_month: int | None = None,
         platform_name: str | None = None,
         report_platform_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         shop_name: str | None = None,
         keyword: str | None = None,
         ids: list[str] | None = None,
@@ -476,6 +531,7 @@ class SummaryService:
         page_size: int | None = None,
     ) -> io.BytesIO:
         """Export accounting-month aggregated summaries to Excel."""
+        shop_id = single_int_filter_value(shop_ids)
         filters = SummaryService._build_report_filters(
             org_ids=org_ids,
             source_year=source_year,
@@ -485,7 +541,7 @@ class SummaryService:
             source_end_year=source_end_year,
             source_end_month=source_end_month,
             platform_name=report_platform_name or platform_name,
-            shop_id=shop_id,
+            shop_ids=shop_ids,
             shop_name=shop_name,
             keyword=keyword,
         )
@@ -526,6 +582,11 @@ class SummaryService:
 
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        else:
+            grouped_subquery = stmt.subquery()
+            count_stmt = select(func.count()).select_from(grouped_subquery)
+            total = (await db.execute(count_stmt)).scalar() or 0
+            _ensure_export_row_limit("汇总报表", total)
 
         result = await db.execute(stmt)
         rows = [dict(row) for row in result.mappings().all()]
@@ -550,15 +611,9 @@ class SummaryService:
 
     @staticmethod
     def _build_summary_workbook(rows: list[FinancialSummary]) -> io.BytesIO:
-        # Build Excel workbook
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "财务汇总"
-
-        # Write header
-        ws.append(EXPORT_HEADERS)
-
-        # Write data rows
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet(title="财务汇总")
+        ws.append(_write_only_header_row(ws, EXPORT_HEADERS))
         for s in rows:
             ws.append(
                 [
@@ -581,17 +636,6 @@ class SummaryService:
                     float(s.bic or 0),
                 ]
             )
-
-        # Auto-width columns (approximate)
-        for col_idx, header in enumerate(EXPORT_HEADERS, 1):
-            max_len = len(header)
-            for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx, values_only=True):
-                val = row[0]
-                if val is not None:
-                    max_len = max(max_len, len(str(val)))
-            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 4, 30)
-
-        # Save to BytesIO
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
@@ -599,11 +643,9 @@ class SummaryService:
 
     @staticmethod
     def _build_report_workbook(rows: list[dict]) -> io.BytesIO:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "汇总报表"
-        ws.append(REPORT_EXPORT_HEADERS)
-
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet(title="汇总报表")
+        ws.append(_write_only_header_row(ws, REPORT_EXPORT_HEADERS))
         for row in rows:
             ws.append(
                 [
@@ -625,15 +667,6 @@ class SummaryService:
                     float(row.get("bic") or 0),
                 ]
             )
-
-        for col_idx, header in enumerate(REPORT_EXPORT_HEADERS, 1):
-            max_len = len(header)
-            for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx, values_only=True):
-                val = row[0]
-                if val is not None:
-                    max_len = max(max_len, len(str(val)))
-            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 4, 30)
-
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
@@ -719,11 +752,11 @@ class SummaryService:
         source_end_year: int | None = None,
         source_end_month: int | None = None,
         platform_name: str | None,
-        shop_id: int | None,
+        shop_ids: str | None,
         shop_name: str | None,
         keyword: str | None = None,
     ):
-        filters = [FinancialSummary.is_deleted.is_(False)]
+        filters = [FinancialSummary.is_deleted.is_(False), active_shop_filter(FinancialSummary.shop_id)]
         if org_ids is not None:
             filters.append(FinancialSummary.org_id.in_(org_ids))
         if source_year is not None:
@@ -743,8 +776,9 @@ class SummaryService:
         platform_names = split_filter_values(platform_name)
         if platform_names:
             filters.append(FinancialSummary.report_platform_code.in_(platform_names))
-        if shop_id is not None:
-            filters.append(FinancialSummary.shop_id == shop_id)
+        shop_id_list = split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(FinancialSummary.shop_id.in_(shop_id_list))
         shop_names = split_filter_values(shop_name)
         if shop_names:
             filters.append(FinancialSummary.shop_name.in_(shop_names))

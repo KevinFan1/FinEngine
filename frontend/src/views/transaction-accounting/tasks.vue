@@ -89,7 +89,7 @@
                 </el-form-item>
                 <el-form-item label="店铺">
                     <el-select
-                        v-model="searchForm.shopNames"
+                        v-model="searchForm.shopIds"
                         clearable
                         placeholder="店铺"
                         multiple
@@ -101,9 +101,9 @@
                     >
                         <el-option
                             v-for="shop in filteredShopOptions"
-                            :key="`${shop.platform_name}-${shop.shop_name}`"
+                            :key="shop.id"
                             :label="shop.shop_name"
-                            :value="shop.shop_name"
+                            :value="shop.id"
                         >
                             <ShopBadge
                                 :label="shop.shop_name"
@@ -165,7 +165,6 @@
                 v-loading="loading"
                 stripe
                 border
-                height="calc(100vh - 278px)"
                 row-key="id"
                 @selection-change="handleSelectionChange"
             >
@@ -421,7 +420,7 @@ const searchForm = reactive({
     orgIds: [] as number[],
     platforms: [] as string[],
     statuses: [] as string[],
-    shopNames: [] as string[],
+    shopIds: [] as number[],
     keyword: "",
 });
 const shopLoading = ref(false);
@@ -446,8 +445,8 @@ const selectedOrgIdsParam = computed(
 const selectedStatusesParam = computed(
     () => searchForm.statuses.join(",") || undefined,
 );
-const selectedShopNamesParam = computed(
-    () => searchForm.shopNames.join(",") || undefined,
+const selectedShopIdsParam = computed(
+    () => searchForm.shopIds.join(",") || undefined,
 );
 const selectedReportPlatformsParam = computed(() => {
     const values = new Set(
@@ -486,7 +485,7 @@ const selectedRecalculableRows = computed(() =>
 );
 
 interface TaskFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "createdTimeRange" | "orgIds" | "platforms" | "statuses" | "shopNames" | "keyword";
+    key: "monthRange" | "createdTimeRange" | "orgIds" | "platforms" | "statuses" | "shopIds" | "keyword";
 }
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
@@ -499,7 +498,10 @@ const activeFilterTags = computed<TaskFilterTag[]>(() => {
     });
     searchForm.platforms.forEach((value) => tags.push({ key: "platforms", label: "平台", value: getPlatformLabel(value) }));
     searchForm.statuses.forEach((value) => tags.push({ key: "statuses", label: "状态", value: taskStatusLabel(value) }));
-    searchForm.shopNames.forEach((value) => tags.push({ key: "shopNames", label: "店铺", value }));
+    searchForm.shopIds.forEach((value) => {
+        const shop = shopOptions.value.find((s) => s.id === value);
+        tags.push({ key: "shopIds", label: "店铺", value: shop?.shop_name || `店铺#${value}` });
+    });
     if (searchForm.keyword) tags.push({ key: "keyword", label: "搜索", value: searchForm.keyword });
     return tags;
 });
@@ -542,7 +544,7 @@ function queryParams() {
         org_id: selectedOrgIdsParam.value,
         status: selectedStatusesParam.value,
         platform_code: selectedPlatformsParam.value,
-        shop_name: selectedShopNamesParam.value,
+        shop_ids: selectedShopIdsParam.value,
         keyword: searchForm.keyword || undefined,
         created_start_time: searchForm.createdTimeRange[0] || undefined,
         created_end_time: searchForm.createdTimeRange[1] || undefined,
@@ -601,21 +603,21 @@ async function fetchOrgOptions() {
 
 async function handlePlatformChange() {
     await fetchShopOptions();
-    const availableShopNames = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
-        availableShopNames.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((shopId) =>
+        availableShopIds.has(shopId),
     );
 }
 
 async function handleOrgChange() {
     await fetchShopOptions();
-    const availableShopNames = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
-        availableShopNames.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((shopId) =>
+        availableShopIds.has(shopId),
     );
 }
 
@@ -630,7 +632,7 @@ function handleReset() {
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.statuses = [];
-    searchForm.shopNames = [];
+    searchForm.shopIds = [];
     searchForm.keyword = "";
     fetchShopOptions();
     handleSearch();
@@ -649,11 +651,16 @@ async function removeFilterTag(tag: TaskFilterTag) {
     if (tag.key === "platforms") {
         searchForm.platforms = searchForm.platforms.filter((item) => getPlatformLabel(item) !== tag.value);
         await fetchShopOptions();
-        const availableShopNames = new Set(filteredShopOptions.value.map((shop) => shop.shop_name));
-        searchForm.shopNames = searchForm.shopNames.filter((shopName) => availableShopNames.has(shopName));
+        const availableShopIds = new Set(filteredShopOptions.value.map((shop) => shop.id));
+        searchForm.shopIds = searchForm.shopIds.filter((shopId) => availableShopIds.has(shopId));
     }
     if (tag.key === "statuses") searchForm.statuses = searchForm.statuses.filter((item) => taskStatusLabel(item) !== tag.value);
-    if (tag.key === "shopNames") searchForm.shopNames = searchForm.shopNames.filter((item) => item !== tag.value);
+    if (tag.key === "shopIds") {
+        searchForm.shopIds = searchForm.shopIds.filter((item) => {
+            const shop = shopOptions.value.find((s) => s.id === item);
+            return (shop?.shop_name || `店铺#${item}`) !== tag.value;
+        });
+    }
     if (tag.key === "keyword") searchForm.keyword = "";
     handleSearch();
 }

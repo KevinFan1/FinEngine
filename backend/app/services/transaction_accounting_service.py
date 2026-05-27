@@ -11,6 +11,8 @@ from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
+from openpyxl.styles import Font
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -75,6 +77,14 @@ SUMMARY_EXPORT_HEADERS = [
     "科目",
     "汇总金额",
 ]
+
+EXCEL_EXPORT_ROW_LIMIT = 20000
+
+
+def _ensure_export_row_limit(label: str, row_count: int) -> None:
+    if row_count > EXCEL_EXPORT_ROW_LIMIT:
+        raise ValueError(f"{label}导出数据量 {row_count} 行，超过系统上限 {EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出")
+
 
 TRANSACTION_PLATFORM_LABELS = {
     "douyin": "抖音",
@@ -797,7 +807,7 @@ class TransactionAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         accounting_year: int | None = None,
         accounting_month: int | None = None,
         accounting_start_year: int | None = None,
@@ -822,8 +832,9 @@ class TransactionAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionUploadFile.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(TransactionUploadFile.shop_id == shop_id)
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(TransactionUploadFile.shop_id.in_(shop_id_list))
         if accounting_year is not None:
             filters.append(TransactionUploadFile.accounting_year == accounting_year)
         if accounting_month is not None:
@@ -876,7 +887,7 @@ class TransactionAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -938,8 +949,9 @@ class TransactionAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionDetail.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(TransactionDetail.shop_id == shop_id)
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(TransactionDetail.shop_id.in_(shop_id_list))
         major_category_ids = TransactionAccountingService._split_int_filter_values(major_category_id)
         if major_category_ids:
             filters.append(resolved_major_category_id.in_(major_category_ids))
@@ -1065,7 +1077,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -1103,8 +1115,9 @@ class TransactionAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionSummaryRow.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(TransactionSummaryRow.shop_id == shop_id)
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(TransactionSummaryRow.shop_id.in_(shop_id_list))
         major_category_ids = TransactionAccountingService._split_int_filter_values(major_category_id)
         if major_category_ids:
             filters.append(TransactionSummaryRow.major_category_id.in_(major_category_ids))
@@ -1265,7 +1278,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -1287,7 +1300,7 @@ class TransactionAccountingService:
             task_id=task_id,
             platform_code=platform_code,
             shop_name=shop_name,
-            shop_id=shop_id,
+            shop_ids=shop_ids,
             major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
@@ -1317,7 +1330,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -1338,7 +1351,7 @@ class TransactionAccountingService:
             task_id=task_id,
             platform_code=platform_code,
             shop_name=shop_name,
-            shop_id=shop_id,
+            shop_ids=shop_ids,
             major_category_id=major_category_id,
             subject_id=subject_id,
             category_id=category_id,
@@ -1363,7 +1376,7 @@ class TransactionAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -1385,36 +1398,48 @@ class TransactionAccountingService:
         page: int | None = None,
         page_size: int | None = None,
     ) -> io.BytesIO:
-        rows, _total = await TransactionAccountingService.list_details(
-            db,
-            user=user,
-            org_id=org_id,
-            task_id=task_id,
-            status=status,
-            platform_code=platform_code,
-            shop_name=shop_name,
-            shop_id=shop_id,
-            major_category_id=major_category_id,
-            subject_id=subject_id,
-            category_id=category_id,
-            transaction_direction=transaction_direction,
-            accounting_year=accounting_year,
-            accounting_month=accounting_month,
-            accounting_start_year=accounting_start_year,
-            accounting_start_month=accounting_start_month,
-            accounting_end_year=accounting_end_year,
-            accounting_end_month=accounting_end_month,
-            upload_accounting_year=upload_accounting_year,
-            upload_accounting_month=upload_accounting_month,
-            upload_accounting_start_year=upload_accounting_start_year,
-            upload_accounting_start_month=upload_accounting_start_month,
-            upload_accounting_end_year=upload_accounting_end_year,
-            upload_accounting_end_month=upload_accounting_end_month,
-            keyword=keyword,
-            ids=ids,
-            page=page,
-            page_size=page_size,
-        )
+        if page is not None and page_size is not None:
+            rows, _ = await TransactionAccountingService.list_details(
+                db, user=user, org_id=org_id, task_id=task_id, status=status,
+                platform_code=platform_code, shop_name=shop_name, shop_ids=shop_ids,
+                major_category_id=major_category_id, subject_id=subject_id,
+                category_id=category_id, transaction_direction=transaction_direction,
+                accounting_year=accounting_year, accounting_month=accounting_month,
+                accounting_start_year=accounting_start_year, accounting_start_month=accounting_start_month,
+                accounting_end_year=accounting_end_year, accounting_end_month=accounting_end_month,
+                upload_accounting_year=upload_accounting_year, upload_accounting_month=upload_accounting_month,
+                upload_accounting_start_year=upload_accounting_start_year, upload_accounting_start_month=upload_accounting_start_month,
+                upload_accounting_end_year=upload_accounting_end_year, upload_accounting_end_month=upload_accounting_end_month,
+                keyword=keyword, ids=ids, page=page, page_size=page_size,
+            )
+        else:
+            _, total = await TransactionAccountingService.list_details(
+                db, user=user, org_id=org_id, task_id=task_id, status=status,
+                platform_code=platform_code, shop_name=shop_name, shop_ids=shop_ids,
+                major_category_id=major_category_id, subject_id=subject_id,
+                category_id=category_id, transaction_direction=transaction_direction,
+                accounting_year=accounting_year, accounting_month=accounting_month,
+                accounting_start_year=accounting_start_year, accounting_start_month=accounting_start_month,
+                accounting_end_year=accounting_end_year, accounting_end_month=accounting_end_month,
+                upload_accounting_year=upload_accounting_year, upload_accounting_month=upload_accounting_month,
+                upload_accounting_start_year=upload_accounting_start_year, upload_accounting_start_month=upload_accounting_start_month,
+                upload_accounting_end_year=upload_accounting_end_year, upload_accounting_end_month=upload_accounting_end_month,
+                keyword=keyword, ids=ids, page=1, page_size=1,
+            )
+            _ensure_export_row_limit("动账明细", total)
+            rows, _ = await TransactionAccountingService.list_details(
+                db, user=user, org_id=org_id, task_id=task_id, status=status,
+                platform_code=platform_code, shop_name=shop_name, shop_ids=shop_ids,
+                major_category_id=major_category_id, subject_id=subject_id,
+                category_id=category_id, transaction_direction=transaction_direction,
+                accounting_year=accounting_year, accounting_month=accounting_month,
+                accounting_start_year=accounting_start_year, accounting_start_month=accounting_start_month,
+                accounting_end_year=accounting_end_year, accounting_end_month=accounting_end_month,
+                upload_accounting_year=upload_accounting_year, upload_accounting_month=upload_accounting_month,
+                upload_accounting_start_year=upload_accounting_start_year, upload_accounting_start_month=upload_accounting_start_month,
+                upload_accounting_end_year=upload_accounting_end_year, upload_accounting_end_month=upload_accounting_end_month,
+                keyword=keyword, ids=ids, page=None, page_size=None,
+            )
         return TransactionAccountingService._build_detail_workbook(rows)
 
     @staticmethod
@@ -1426,7 +1451,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -1448,35 +1473,48 @@ class TransactionAccountingService:
         page: int | None = None,
         page_size: int | None = None,
     ) -> io.BytesIO:
-        rows, _total = await TransactionAccountingService.list_summaries(
-            db,
-            user=user,
-            org_id=org_id,
-            task_id=task_id,
-            platform_code=platform_code,
-            shop_name=shop_name,
-            shop_id=shop_id,
-            major_category_id=major_category_id,
-            subject_id=subject_id,
-            category_id=category_id,
-            transaction_direction=transaction_direction,
-            accounting_year=accounting_year,
-            accounting_month=accounting_month,
-            accounting_start_year=accounting_start_year,
-            accounting_start_month=accounting_start_month,
-            accounting_end_year=accounting_end_year,
-            accounting_end_month=accounting_end_month,
-            upload_accounting_year=upload_accounting_year,
-            upload_accounting_month=upload_accounting_month,
-            upload_accounting_start_year=upload_accounting_start_year,
-            upload_accounting_start_month=upload_accounting_start_month,
-            upload_accounting_end_year=upload_accounting_end_year,
-            upload_accounting_end_month=upload_accounting_end_month,
-            keyword=keyword,
-            ids=ids,
-            page=page,
-            page_size=page_size,
-        )
+        if page is not None and page_size is not None:
+            rows, _ = await TransactionAccountingService.list_summaries(
+                db, user=user, org_id=org_id, task_id=task_id,
+                platform_code=platform_code, shop_name=shop_name, shop_ids=shop_ids,
+                major_category_id=major_category_id, subject_id=subject_id,
+                category_id=category_id, transaction_direction=transaction_direction,
+                accounting_year=accounting_year, accounting_month=accounting_month,
+                accounting_start_year=accounting_start_year, accounting_start_month=accounting_start_month,
+                accounting_end_year=accounting_end_year, accounting_end_month=accounting_end_month,
+                upload_accounting_year=upload_accounting_year, upload_accounting_month=upload_accounting_month,
+                upload_accounting_start_year=upload_accounting_start_year, upload_accounting_start_month=upload_accounting_start_month,
+                upload_accounting_end_year=upload_accounting_end_year, upload_accounting_end_month=upload_accounting_end_month,
+                keyword=keyword, ids=ids, page=page, page_size=page_size,
+            )
+        else:
+            _, total = await TransactionAccountingService.list_summaries(
+                db, user=user, org_id=org_id, task_id=task_id,
+                platform_code=platform_code, shop_name=shop_name, shop_ids=shop_ids,
+                major_category_id=major_category_id, subject_id=subject_id,
+                category_id=category_id, transaction_direction=transaction_direction,
+                accounting_year=accounting_year, accounting_month=accounting_month,
+                accounting_start_year=accounting_start_year, accounting_start_month=accounting_start_month,
+                accounting_end_year=accounting_end_year, accounting_end_month=accounting_end_month,
+                upload_accounting_year=upload_accounting_year, upload_accounting_month=upload_accounting_month,
+                upload_accounting_start_year=upload_accounting_start_year, upload_accounting_start_month=upload_accounting_start_month,
+                upload_accounting_end_year=upload_accounting_end_year, upload_accounting_end_month=upload_accounting_end_month,
+                keyword=keyword, ids=ids, page=1, page_size=1,
+            )
+            _ensure_export_row_limit("动账汇总", total)
+            rows, _ = await TransactionAccountingService.list_summaries(
+                db, user=user, org_id=org_id, task_id=task_id,
+                platform_code=platform_code, shop_name=shop_name, shop_ids=shop_ids,
+                major_category_id=major_category_id, subject_id=subject_id,
+                category_id=category_id, transaction_direction=transaction_direction,
+                accounting_year=accounting_year, accounting_month=accounting_month,
+                accounting_start_year=accounting_start_year, accounting_start_month=accounting_start_month,
+                accounting_end_year=accounting_end_year, accounting_end_month=accounting_end_month,
+                upload_accounting_year=upload_accounting_year, upload_accounting_month=upload_accounting_month,
+                upload_accounting_start_year=upload_accounting_start_year, upload_accounting_start_month=upload_accounting_start_month,
+                upload_accounting_end_year=upload_accounting_end_year, upload_accounting_end_month=upload_accounting_end_month,
+                keyword=keyword, ids=ids, page=None, page_size=None,
+            )
         return TransactionAccountingService._build_summary_workbook(rows)
 
     @staticmethod
@@ -1967,7 +2005,7 @@ class TransactionAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         major_category_id: int | str | None = None,
         subject_id: int | str | None = None,
         category_id: int | str | None = None,
@@ -1999,8 +2037,9 @@ class TransactionAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(TransactionSummaryRow.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(TransactionSummaryRow.shop_id == shop_id)
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(TransactionSummaryRow.shop_id.in_(shop_id_list))
         major_category_ids = TransactionAccountingService._split_int_filter_values(major_category_id)
         if major_category_ids:
             filters.append(TransactionSummaryRow.major_category_id.in_(major_category_ids))
@@ -2221,11 +2260,19 @@ class TransactionAccountingService:
         return TRANSACTION_PLATFORM_LABELS.get(key) or TRANSACTION_PLATFORM_LABELS.get(key.lower(), key)
 
     @staticmethod
+    def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
+        cells: list[WriteOnlyCell] = []
+        for label in headers:
+            cell = WriteOnlyCell(sheet, value=label)
+            cell.font = Font(bold=True)
+            cells.append(cell)
+        return cells
+
+    @staticmethod
     def _build_detail_workbook(rows: list[TransactionDetail]) -> io.BytesIO:
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = "动账汇总明细"
-        worksheet.append(DETAIL_EXPORT_HEADERS)
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title="动账汇总明细")
+        worksheet.append(TransactionAccountingService._write_only_header_row(worksheet, DETAIL_EXPORT_HEADERS))
         for index, detail in enumerate(rows, start=1):
             worksheet.append(
                 [
@@ -2239,14 +2286,16 @@ class TransactionAccountingService:
                     float(detail.calculated_amount or 0),
                 ]
             )
-        return TransactionAccountingService._finalize_workbook(workbook)
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        return buffer
 
     @staticmethod
     def _build_summary_workbook(rows: list[TransactionSummaryRow]) -> io.BytesIO:
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = "动账汇总报表"
-        worksheet.append(SUMMARY_EXPORT_HEADERS)
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title="动账汇总报表")
+        worksheet.append(TransactionAccountingService._write_only_header_row(worksheet, SUMMARY_EXPORT_HEADERS))
         for index, row in enumerate(rows, start=1):
             worksheet.append(
                 [
@@ -2263,15 +2312,17 @@ class TransactionAccountingService:
                     float(row.total_amount or 0),
                 ]
             )
-        return TransactionAccountingService._finalize_workbook(workbook)
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        return buffer
 
     @staticmethod
     def _build_annual_summary_workbook(*, year: int, rows: list[TransactionAnnualSummaryReportRow]) -> io.BytesIO:
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = f"{year}资金报表"
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title=f"{year}资金报表")
         month_keys = TransactionAccountingService._annual_month_keys(year)
-        worksheet.append(["序号", f"{year}年", *month_keys, "合计"])
+        worksheet.append(TransactionAccountingService._write_only_header_row(worksheet, ["序号", f"{year}年", *month_keys, "合计"]))
         for row in rows:
             worksheet.append(
                 [
@@ -2281,16 +2332,6 @@ class TransactionAccountingService:
                     float(row.total_amount or Decimal("0")),
                 ]
             )
-        return TransactionAccountingService._finalize_workbook(workbook)
-
-    @staticmethod
-    def _finalize_workbook(workbook: Workbook) -> io.BytesIO:
-        worksheet = workbook.active
-        for cell in worksheet[1]:
-            cell.style = "Headline 3"
-        for column_cells in worksheet.columns:
-            max_length = max(len(str(cell.value or "")) for cell in column_cells)
-            worksheet.column_dimensions[column_cells[0].column_letter].width = min(max(max_length + 2, 10), 36)
         buffer = io.BytesIO()
         workbook.save(buffer)
         buffer.seek(0)

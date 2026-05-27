@@ -1,7 +1,7 @@
 """BIC accounting API."""
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from app.core.database import get_async_session
 from app.core.deps import get_current_user, require_org_admin_or_above
 from app.models.bic_accounting import BicTask, BicUploadFile
 from app.models.user import User
-from app.schemas.bic_accounting import BicDetailOut, BicReportOut, BicTaskOut
+from app.schemas.bic_accounting import BicDetailOut, BicSourceRowOut, BicTaskOut
 from app.schemas.common import ApiResponse, PageResponse
 from app.services.bic_accounting_service import BicAccountingService
 from app.utils.query_filters import parse_query_datetime
@@ -66,20 +66,28 @@ def _task_out(task, upload_file, org_name: str | None = None) -> BicTaskOut:
 def _normalize_bic_summary(result_summary: dict | None) -> dict | None:
     if not result_summary:
         return result_summary
+    hidden_keys = {
+        "report_groups",
+        "report_ids",
+        "report_id",
+        "报表分组数",
+        "报表记录ID列表",
+        "首个报表记录ID",
+    }
     labels = {
         "type": "文件类型",
         "total_rows": "总行数",
         "success_rows": "符合条件行数",
         "failed_rows": "失败行数",
         "groups": "明细分组数",
-        "report_groups": "报表分组数",
+        "source_rows": "源数据行数",
         "errors": "错误明细",
         "detail_ids": "明细记录ID列表",
-        "report_ids": "报表记录ID列表",
-        "report_id": "首个报表记录ID",
     }
     normalized: dict = {}
     for key, value in result_summary.items():
+        if key in hidden_keys:
+            continue
         label = labels.get(key, key)
         if key == "type" and isinstance(value, str) and value.lower() == "bic":
             value = "BIC"
@@ -113,7 +121,7 @@ async def list_tasks(
     status: str | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     accounting_start_year: int | None = Query(None),
     accounting_start_month: int | None = Query(None),
     accounting_end_year: int | None = Query(None),
@@ -132,7 +140,7 @@ async def list_tasks(
         status=status,
         platform_code=platform_code,
         shop_name=shop_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         accounting_start_year=accounting_start_year,
         accounting_start_month=accounting_start_month,
         accounting_end_year=accounting_end_year,
@@ -237,7 +245,7 @@ async def list_details(
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     service_provider: str | None = Query(None),
     qic_warehouse: str | None = Query(None),
     accounting_year: int | None = Query(None),
@@ -257,7 +265,7 @@ async def list_details(
         task_id=task_id,
         platform_code=platform_code,
         shop_name=shop_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         service_provider=service_provider,
         qic_warehouse=qic_warehouse,
         accounting_year=accounting_year,
@@ -274,11 +282,14 @@ async def list_details(
 
 @router.get("/details/export")
 async def export_details(
+    scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     service_provider: str | None = Query(None),
     qic_warehouse: str | None = Query(None),
     accounting_year: int | None = Query(None),
@@ -291,36 +302,46 @@ async def export_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    buffer = await BicAccountingService.export_details(
-        db,
-        user=current_user,
-        org_id=org_id,
-        ids=_parse_ids(ids) if ids else None,
-        task_id=task_id,
-        platform_code=platform_code,
-        shop_name=shop_name,
-        shop_id=shop_id,
-        service_provider=service_provider,
-        qic_warehouse=qic_warehouse,
-        accounting_year=accounting_year,
-        accounting_month=accounting_month,
-        accounting_start_year=accounting_start_year,
-        accounting_start_month=accounting_start_month,
-        accounting_end_year=accounting_end_year,
-        accounting_end_month=accounting_end_month,
-    )
-    return _export_response(buffer, "BIC明细.xlsx")
+    selected_ids = _parse_ids(ids) if ids else []
+    if scope == "selected" and not selected_ids:
+        raise HTTPException(status_code=400, detail="请选择要导出的汇总")
+    try:
+        buffer = await BicAccountingService.export_details(
+            db,
+            scope=scope,
+            user=current_user,
+            org_id=org_id,
+            ids=selected_ids if scope == "selected" else None,
+            page=page,
+            page_size=page_size,
+            task_id=task_id,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_ids=shop_ids,
+            service_provider=service_provider,
+            qic_warehouse=qic_warehouse,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            accounting_start_year=accounting_start_year,
+            accounting_start_month=accounting_start_month,
+            accounting_end_year=accounting_end_year,
+            accounting_end_month=accounting_end_month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _export_response(buffer, "BIC汇总.xlsx")
 
 
-@router.get("/summary", response_model=ApiResponse[PageResponse[BicReportOut]])
-async def list_reports(
+@router.get("/source-rows", response_model=ApiResponse[PageResponse[BicSourceRowOut]])
+async def list_source_rows(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     service_provider: str | None = Query(None),
+    qic_warehouse: str | None = Query(None),
     accounting_year: int | None = Query(None),
     accounting_month: int | None = Query(None),
     accounting_start_year: int | None = Query(None),
@@ -331,15 +352,16 @@ async def list_reports(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    rows, total = await BicAccountingService.list_reports(
+    rows, total = await BicAccountingService.list_source_rows(
         db,
         user=current_user,
         org_id=org_id,
         task_id=task_id,
         platform_code=platform_code,
         shop_name=shop_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         service_provider=service_provider,
+        qic_warehouse=qic_warehouse,
         accounting_year=accounting_year,
         accounting_month=accounting_month,
         accounting_start_year=accounting_start_year,
@@ -349,17 +371,21 @@ async def list_reports(
         page=page,
         page_size=page_size,
     )
-    return ApiResponse(data=PageResponse(items=[BicReportOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
+    return ApiResponse(data=PageResponse(items=[BicSourceRowOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
 
 
-@router.get("/summary/export")
-async def export_reports(
+@router.get("/source-rows/export")
+async def export_source_rows(
+    scope: str = Query("current_page", pattern="^(current_page|selected)$"),
     ids: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     service_provider: str | None = Query(None),
+    qic_warehouse: str | None = Query(None),
     accounting_year: int | None = Query(None),
     accounting_month: int | None = Query(None),
     accounting_start_year: int | None = Query(None),
@@ -370,21 +396,83 @@ async def export_reports(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    buffer = await BicAccountingService.export_reports(
+    selected_ids = _parse_ids(ids) if ids else []
+    if scope == "selected" and not selected_ids:
+        raise HTTPException(status_code=400, detail="请选择要导出的源数据")
+    try:
+        buffer = await BicAccountingService.export_source_rows(
+            db,
+            scope=scope,
+            user=current_user,
+            org_id=org_id,
+            ids=selected_ids if scope == "selected" else None,
+            task_id=task_id,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_ids=shop_ids,
+            service_provider=service_provider,
+            qic_warehouse=qic_warehouse,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            accounting_start_year=accounting_start_year,
+            accounting_start_month=accounting_start_month,
+            accounting_end_year=accounting_end_year,
+            accounting_end_month=accounting_end_month,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _export_response(buffer, "BIC明细.xlsx")
+
+
+@router.get("/details/{detail_id}/source-rows", response_model=ApiResponse[PageResponse[BicSourceRowOut]])
+async def list_detail_source_rows(
+    detail_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await BicAccountingService.list_source_rows(
         db,
         user=current_user,
         org_id=org_id,
-        ids=_parse_ids(ids) if ids else None,
-        task_id=task_id,
-        platform_code=platform_code,
-        shop_name=shop_name,
-        shop_id=shop_id,
-        service_provider=service_provider,
-        accounting_year=accounting_year,
-        accounting_month=accounting_month,
-        accounting_start_year=accounting_start_year,
-        accounting_start_month=accounting_start_month,
-        accounting_end_year=accounting_end_year,
-        accounting_end_month=accounting_end_month,
+        detail_id=detail_id,
+        page=page,
+        page_size=page_size,
     )
-    return _export_response(buffer, "BIC报表.xlsx")
+    return ApiResponse(data=PageResponse(items=[BicSourceRowOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
+
+
+@router.get("/reconciliation/export")
+async def export_reconciliation(
+    accounting_year: int = Query(...),
+    accounting_month: int = Query(..., ge=1, le=12),
+    service_provider: str = Query(..., min_length=1),
+    platform_code: str | None = Query(None),
+    shop_name: str | None = Query(None),
+    shop_ids: str | None = Query(None),
+    qic_warehouse: str | None = Query(None),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        buffer = await BicAccountingService.export_reconciliation(
+            db,
+            user=current_user,
+            org_id=org_id,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            service_provider=service_provider,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_ids=shop_ids,
+            qic_warehouse=qic_warehouse,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    filename = f"{accounting_year}-{accounting_month:02d}_{service_provider}_BIC对账表.xlsx"
+    return _export_response(buffer, filename)

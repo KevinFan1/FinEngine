@@ -91,7 +91,7 @@
       </template>
 
       <!-- Table -->
-      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%" height="calc(100vh - 278px)">
+      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%">
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}

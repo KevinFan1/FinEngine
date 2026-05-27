@@ -2852,7 +2852,7 @@ function exportFailedList() {
 
 .upload-confirm-table {
     :deep(.el-table__cell) {
-        vertical-align: top;
+        vertical-align: middle;
     }
 }
 

@@ -165,7 +165,6 @@
                 stripe
                 border
                 style="width: 100%"
-                height="calc(100vh - 430px)"
             >
                 <el-table-column label="序号" width="70" align="center">
                     <template #default="{ $index }">
@@ -1125,7 +1124,6 @@ usePageRefresh(async () => {
 
 <style scoped lang="scss">
 .category-dict-page {
-    display: grid;
     gap: 0;
 }
 

@@ -93,6 +93,7 @@ export interface SummaryListParams {
     platform_name?: string;
     report_platform_name?: string;
     shop_name?: string;
+    shop_ids?: string;
     keyword?: string;
     org_id?: number | string;
 }

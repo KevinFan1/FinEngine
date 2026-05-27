@@ -84,7 +84,7 @@ async def list_summaries(
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
     report_platform_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
     org_id: str | None = Query(None),
@@ -117,7 +117,7 @@ async def list_summaries(
         source_end_month=source_end_month,
         platform_name=platform_name,
         report_platform_name=report_platform_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         shop_name=shop_name,
         keyword=keyword,
         page=page,
@@ -223,7 +223,7 @@ async def list_report_summaries(
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
     report_platform_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
     org_id: str | None = Query(None),
@@ -262,7 +262,7 @@ async def list_report_summaries(
         source_end_month=range_end_month,
         platform_name=platform_name,
         report_platform_name=report_platform_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         shop_name=shop_name,
         keyword=keyword,
         page=page,
@@ -291,7 +291,7 @@ def to_summary_report_out(row: dict) -> SummaryReportOut:
         id=record_id,
         org_id=int(row.get("org_id") or 0),
         org_name=row.get("org_name"),
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         source_year=source_year,
         source_month=source_month,
         source_date=month_date_label(source_year, source_month),
@@ -353,7 +353,7 @@ async def export_report_summaries(
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
     report_platform_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
     org_id: str | None = Query(None),
@@ -394,7 +394,7 @@ async def export_report_summaries(
         source_end_month=range_end_month,
         platform_name=platform_name,
         report_platform_name=report_platform_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         shop_name=shop_name,
         keyword=keyword,
         ids=selected_ids,
@@ -417,8 +417,8 @@ async def export_report_summaries(
         parts.append(platform_name)
     if shop_name:
         parts.append(shop_name)
-    elif shop_id is not None:
-        parts.append(f"店铺{shop_id}")
+    elif shop_ids:
+        parts.append(f"店铺{shop_ids}")
     if scope == "current_page":
         parts.append(f"第{page}页")
     if scope == "selected":
@@ -447,7 +447,7 @@ async def export_report_summaries(
             "accounting_end_year": range_end_year,
             "accounting_end_month": range_end_month,
             "platform": platform_name,
-            "shop_id": shop_id,
+            "shop_ids": shop_ids,
             "shop": shop_name,
             "keyword": keyword,
             "scope": scope,
@@ -481,7 +481,7 @@ async def export_summaries(
     source_month: int | None = Query(None),
     platform_name: str | None = Query(None),
     report_platform_name: str | None = Query(None),
-    shop_id: int | None = Query(None),
+    shop_ids: str | None = Query(None),
     shop_name: str | None = Query(None),
     keyword: str | None = Query(None),
     org_id: str | None = Query(None),
@@ -517,7 +517,7 @@ async def export_summaries(
         source_end_month=source_end_month,
         platform_name=platform_name,
         report_platform_name=report_platform_name,
-        shop_id=shop_id,
+        shop_ids=shop_ids,
         shop_name=shop_name,
         keyword=keyword,
         ids=selected_ids,
@@ -551,8 +551,8 @@ async def export_summaries(
         parts.append(platform_name)
     if shop_name:
         parts.append(shop_name)
-    elif shop_id is not None:
-        parts.append(f"店铺{shop_id}")
+    elif shop_ids:
+        parts.append(f"店铺{shop_ids}")
     if scope == "current_page":
         parts.append(f"第{page}页")
     if scope == "selected":
@@ -589,7 +589,7 @@ async def export_summaries(
             "source_end_month": source_end_month,
             "platform": platform_name,
             "report_platform": report_platform_name,
-            "shop_id": shop_id,
+            "shop_ids": shop_ids,
             "shop": shop_name,
             "keyword": keyword,
             "scope": scope,

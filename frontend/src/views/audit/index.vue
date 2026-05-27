@@ -114,7 +114,6 @@
         stripe
         border
         style="width: 100%"
-        height="calc(100vh - 278px)"
       >
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">

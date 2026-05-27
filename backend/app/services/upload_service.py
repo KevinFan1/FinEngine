@@ -16,6 +16,7 @@ from app.services.bic_accounting_service import BicAccountingService
 from app.services.platform_profile_service import resolve_platform_profile
 from app.services.quota_service import QuotaService
 from app.services.shop_service import ShopService
+from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
 
 
@@ -333,7 +334,15 @@ class UploadService:
 
     @staticmethod
     async def get_batch_files(db: AsyncSession, batch_id: int, user: User | None = None) -> list[UploadFile]:
-        stmt = select(UploadFile).where(UploadFile.batch_id == batch_id, UploadFile.is_deleted.is_(False)).order_by(UploadFile.id)
+        stmt = (
+            select(UploadFile)
+            .where(
+                UploadFile.batch_id == batch_id,
+                UploadFile.is_deleted.is_(False),
+                active_shop_filter(UploadFile.shop_id),
+            )
+            .order_by(UploadFile.id)
+        )
         if user is not None and user.role != "superadmin":
             stmt = stmt.where(UploadFile.org_id == user.org_id)
         result = await db.execute(stmt)

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 import uuid
 from typing import Any
 
 from loguru import logger
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-
 
 SENSITIVE_KEYS = {
     "access_key_secret",
@@ -25,12 +25,12 @@ SENSITIVE_KEYS = {
     "token",
 }
 REQUEST_ID_HEADER = b"x-request-id"
+MAX_BODY_BYTES = 8192
 
 
 class ApiLoggingMiddleware:
-    def __init__(self, app: ASGIApp, *, max_body_bytes: int = 8192) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.max_body_bytes = max_body_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -49,129 +49,76 @@ class ApiLoggingMiddleware:
         response_headers: list[tuple[bytes, bytes]] = []
         response_body = bytearray()
         response_body_truncated = False
-        response_bytes = 0
 
         async def receive_wrapper() -> Message:
             nonlocal request_body_truncated
             message = await receive()
             if message["type"] == "http.request" and _should_log_body(request_content_type):
                 body = message.get("body", b"")
-                request_body_truncated = _append_limited(request_body, body, self.max_body_bytes) or request_body_truncated
+                request_body_truncated = _append_limited(request_body, body) or request_body_truncated
             return message
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal response_body_truncated, response_bytes, response_headers, response_status
+            nonlocal response_body_truncated, response_headers, response_status
             if message["type"] == "http.response.start":
                 response_status = int(message["status"])
                 response_headers = list(message.get("headers") or [])
             elif message["type"] == "http.response.body":
-                body = message.get("body", b"")
-                response_bytes += len(body)
-                response_content_type = _header_value(response_headers, b"content-type")
-                if _should_log_body(response_content_type):
-                    response_body_truncated = _append_limited(response_body, body, self.max_body_bytes) or response_body_truncated
+                if _should_log_body(_header_value(response_headers, b"content-type")):
+                    body = message.get("body", b"")
+                    response_body_truncated = _append_limited(response_body, body) or response_body_truncated
             await send(message)
 
+        exc_info: BaseException | None = None
         try:
             await self.app(request_scope, receive_wrapper, send_wrapper)
         except Exception:
+            exc_info = sys.exc_info()[1]
+            raise
+        finally:
             duration_ms = (time.perf_counter() - start) * 1000
             method = str(request_scope.get("method") or "-")
             path = str(request_scope.get("path") or "-")
-            query = _query_string(request_scope)
-            http_version = _http_version(request_scope)
-            client_ip = _client_ip(request_scope, request_headers)
-            user_agent = _header_value(request_headers, b"user-agent") or "-"
-            referer = _header_value(request_headers, b"referer") or "-"
-            logger.bind(
-                event="api.exception",
-                request_id=request_id,
-                method=method,
-                path=path,
-                query=query,
-                http_version=http_version,
-                response_bytes=response_bytes,
-                duration_ms=round(duration_ms, 1),
-                client_ip=client_ip,
-                referer=referer,
-                user_agent=user_agent,
-                request_content_type=request_content_type or "-",
-                response_content_type="-",
-                request_body=_format_body(bytes(request_body), request_content_type, request_body_truncated),
-            ).exception(
-                _request_log_message(
-                    method=method,
-                    path=path,
-                    query=query,
-                    http_version=http_version,
-                    http_status=500,
-                    response_bytes=response_bytes,
-                    api_code="-",
-                    api_message="unhandled exception",
-                    duration_ms=duration_ms,
-                    client_ip=client_ip,
-                    referer=referer,
-                    user_agent=user_agent,
-                    request_id=request_id,
-                )
+            api_code, api_message = _api_code_message(
+                response_body, _header_value(response_headers, b"content-type"),
             )
-            raise
-        finally:
-            if response_headers:
-                duration_ms = (time.perf_counter() - start) * 1000
-                response_content_type = _header_value(response_headers, b"content-type")
-                api_code, api_message = _api_code_message(response_body, response_content_type)
-                method = str(request_scope.get("method") or "-")
-                path = str(request_scope.get("path") or "-")
-                query = _query_string(request_scope)
-                http_version = _http_version(request_scope)
-                client_ip = _client_ip(request_scope, request_headers)
-                user_agent = _header_value(request_headers, b"user-agent") or "-"
-                referer = _header_value(request_headers, b"referer") or "-"
-                log = logger.bind(
-                    event="api.request",
-                    request_id=request_id,
-                    method=method,
-                    path=path,
-                    query=query,
-                    http_version=http_version,
-                    http_status=response_status,
-                    response_bytes=response_bytes,
-                    api_code=api_code,
-                    api_message=api_message,
-                    duration_ms=round(duration_ms, 1),
-                    client_ip=client_ip,
-                    referer=referer,
-                    user_agent=user_agent,
-                    request_content_type=request_content_type or "-",
-                    response_content_type=response_content_type or "-",
-                    request_body=_format_body(bytes(request_body), request_content_type, request_body_truncated),
-                )
-                log.log(
-                    _request_log_level(response_status, api_code),
-                    _request_log_message(
-                        method=method,
-                        path=path,
-                        query=query,
-                        http_version=http_version,
-                        http_status=response_status,
-                        response_bytes=response_bytes,
-                        api_code=api_code,
-                        api_message=api_message,
-                        duration_ms=duration_ms,
-                        client_ip=client_ip,
-                        referer=referer,
-                        user_agent=user_agent,
-                        request_id=request_id,
-                    ),
+            level = _log_level(response_status, api_code, exc_info is not None)
+
+            bind_fields: dict[str, Any] = {
+                "request_id": request_id,
+                "method": method,
+                "path": path,
+                "status": response_status,
+                "duration_ms": round(duration_ms, 1),
+                "client_ip": _client_ip(request_scope, request_headers),
+            }
+            if api_code and api_code != "-":
+                bind_fields["api_code"] = api_code
+            if api_message and api_message != "-":
+                bind_fields["api_message"] = api_message
+
+            if exc_info is not None:
+                bind_fields["request_body"] = _format_body(
+                    bytes(request_body), request_content_type, request_body_truncated,
                 )
 
+            message = f"{method} {path} {response_status} {duration_ms:.1f}ms"
+
+            log = logger.opt(depth=1).bind(**bind_fields)
+            if exc_info is not None:
+                log.opt(exception=exc_info).error(message)
+            else:
+                log.log(level, message)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _ensure_request_id(headers: list[tuple[bytes, bytes]]) -> str:
     request_id = _header_value(headers, REQUEST_ID_HEADER).strip()
     if request_id:
         return request_id
-
     request_id = str(uuid.uuid4())
     headers.append((REQUEST_ID_HEADER, request_id.encode("ascii")))
     return request_id
@@ -183,71 +130,6 @@ def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> str:
         if key.lower() == lowered:
             return value.decode("latin-1")
     return ""
-
-
-def _query_string(scope: Scope) -> str:
-    query = scope.get("query_string") or b""
-    return query.decode("latin-1") if query else "-"
-
-
-def _http_version(scope: Scope) -> str:
-    return str(scope.get("http_version") or "1.1")
-
-
-def _request_log_message(
-    *,
-    method: str,
-    path: str,
-    query: str,
-    http_version: str,
-    http_status: int,
-    response_bytes: int,
-    api_code: str,
-    api_message: str,
-    duration_ms: float,
-    client_ip: str,
-    referer: str,
-    user_agent: str,
-    request_id: str,
-) -> str:
-    request_line = f"{method} {_request_target(path, query)} HTTP/{http_version}"
-    parts = [
-        f'{client_ip} - {_quote_log_value(request_line)} {http_status} {response_bytes} '
-        f'{_quote_log_value(referer)} {_quote_log_value(user_agent)}',
-        f"duration_ms={duration_ms:.1f}",
-        f"request_id={json.dumps(request_id, ensure_ascii=False)}",
-    ]
-    if api_code and api_code != "-":
-        parts.append(f"api_code={json.dumps(api_code, ensure_ascii=False)}")
-    if api_message and api_message != "-":
-        parts.append(f"api_message={json.dumps(api_message, ensure_ascii=False)}")
-    return " ".join(parts)
-
-
-def _request_target(path: str, query: str) -> str:
-    return f"{path}?{query}" if query and query != "-" else path
-
-
-def _quote_log_value(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def _request_log_level(http_status: int, api_code: str) -> str:
-    business_code = _safe_int(api_code)
-    effective_code = business_code if business_code is not None and business_code != 200 else http_status
-    if effective_code >= 500:
-        return "ERROR"
-    if effective_code >= 400:
-        return "WARNING"
-    return "INFO"
-
-
-def _safe_int(value: str) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _client_ip(scope: Scope, headers: list[tuple[bytes, bytes]]) -> str:
@@ -267,10 +149,10 @@ def _should_log_body(content_type: str) -> bool:
     return "json" in lowered or lowered.startswith("text/") or "x-www-form-urlencoded" in lowered
 
 
-def _append_limited(target: bytearray, chunk: bytes, limit: int) -> bool:
-    if not chunk or len(target) >= limit:
+def _append_limited(target: bytearray, chunk: bytes) -> bool:
+    if not chunk or len(target) >= MAX_BODY_BYTES:
         return bool(chunk)
-    remaining = limit - len(target)
+    remaining = MAX_BODY_BYTES - len(target)
     target.extend(chunk[:remaining])
     return len(chunk) > remaining
 
@@ -278,25 +160,14 @@ def _append_limited(target: bytearray, chunk: bytes, limit: int) -> bool:
 def _format_body(body: bytes, content_type: str, truncated: bool) -> Any:
     if not body:
         return "-"
-
     text = body.decode("utf-8", errors="replace")
     if "json" in content_type.lower():
         try:
             payload: Any = _redact(json.loads(text))
-            if truncated:
-                return {
-                    "truncated": True,
-                    "payload": payload,
-                }
-            return payload
+            return {"truncated": True, "payload": payload} if truncated else payload
         except json.JSONDecodeError:
             pass
-    if truncated:
-        return {
-            "truncated": True,
-            "payload": text,
-        }
-    return text
+    return {"truncated": True, "payload": text} if truncated else text
 
 
 def _redact(value: Any) -> Any:
@@ -310,6 +181,25 @@ def _redact(value: Any) -> Any:
     return value
 
 
+def _log_level(http_status: int, api_code: str, is_exception: bool) -> str:
+    if is_exception:
+        return "ERROR"
+    business_code = _safe_int(api_code)
+    effective = business_code if business_code is not None and business_code != 200 else http_status
+    if effective >= 500:
+        return "ERROR"
+    if effective >= 400:
+        return "WARNING"
+    return "INFO"
+
+
+def _safe_int(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _api_code_message(body: bytearray, content_type: str) -> tuple[str, str]:
     if not body or "json" not in content_type.lower():
         return "-", "-"
@@ -320,9 +210,7 @@ def _api_code_message(body: bytearray, content_type: str) -> tuple[str, str]:
         return _api_code_message_from_partial(text)
     if not isinstance(parsed, dict):
         return "-", "-"
-    code = parsed.get("code", "-")
-    message = parsed.get("message", "-")
-    return str(code), str(message)
+    return str(parsed.get("code", "-")), str(parsed.get("message", "-"))
 
 
 def _api_code_message_from_partial(text: str) -> tuple[str, str]:

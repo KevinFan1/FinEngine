@@ -300,7 +300,7 @@
                 <h3>先上传，再按模块看任务和结果</h3>
                 <p class="guide-hero-desc">
                     当前账号角色：{{ currentRoleLabel }}。系统主流程以 “上传中心
-                    -> 核算任务 / 资金任务 / BIC任务 -> 明细 / 报表”
+                    -> 核算任务 / 资金任务 / BIC任务 -> 汇总 / 明细 / 报表”
                     为主，基础资料只需先配置一次，后续按月重复上传即可。
                 </p>
             </section>
@@ -511,9 +511,9 @@ const menuItems: MenuItem[] = [
                 icon: Document,
             },
             {
-                path: "/bic-report",
-                title: "BIC报表",
-                icon: DataAnalysis,
+                path: "/bic-summary",
+                title: "BIC汇总",
+                icon: Document,
             },
         ],
     },
@@ -648,8 +648,8 @@ const quickStartSteps = [
     },
     {
         index: "04",
-        title: "在明细和报表里核对数据",
-        desc: "明细看原始处理结果，报表看聚合结果和调整后的金额，用于最终导出。",
+        title: "在汇总、明细和报表里核对数据",
+        desc: "汇总看聚合结果，明细看源数据，报表看调整后的金额，用于最终导出。",
     },
 ];
 
@@ -676,7 +676,7 @@ const guideSections = [
     },
     {
         title: "BIC核算",
-        desc: "BIC 文件走独立任务链路，适合单独核对 BIC 相关结果。",
+        desc: "BIC 文件走独立任务链路，汇总看店铺聚合结果，明细看质检费源数据。",
         tip: "独立模块",
     },
     {

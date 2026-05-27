@@ -41,6 +41,8 @@ export interface BicTaskBatchActionResult {
 }
 
 export type BicExportScope = "all" | "current_page" | "selected";
+export type BicSourceExportScope = "current_page" | "selected";
+export const BIC_EXCEL_EXPORT_ROW_LIMIT = 20000;
 
 export interface BicDetail {
     id: number;
@@ -56,6 +58,7 @@ export interface BicDetail {
     accounting_year: number;
     accounting_month: number;
     qic_warehouse: string;
+    row_count?: number;
     merchant?: string | null;
     tax_no?: string | null;
     shop_type?: string | null;
@@ -64,10 +67,11 @@ export interface BicDetail {
     created_at: string;
 }
 
-export interface BicReport {
+export interface BicSourceRow {
     id: number;
     task_id: number;
     file_id: number;
+    detail_id: number;
     org_id: number;
     org_name?: string | null;
     shop_id?: number | null;
@@ -77,12 +81,25 @@ export interface BicReport {
     shop_name: string;
     accounting_year: number;
     accounting_month: number;
-    row_count: number;
-    merchant?: string | null;
-    tax_no?: string | null;
-    shop_type?: string | null;
-    registered_address?: string | null;
-    total_amount: string;
+    qic_warehouse: string;
+    source_row_number: number;
+    settlement_no: string;
+    order_code: string;
+    related_order_no: string;
+    related_waybill_no: string;
+    fee_item: string;
+    settlement_amount: string;
+    billing_params: string;
+    billing_completed_time: string;
+    business_node: string;
+    business_occurred_time: string;
+    settled_at: string;
+    status: string;
+    transaction_account: string;
+    transaction_flow_no: string;
+    remark: string;
+    is_mudaibao: string;
+    is_child_order: string;
     created_at: string;
 }
 
@@ -93,6 +110,7 @@ export interface BicTaskListParams {
     status?: string;
     platform_code?: string;
     shop_name?: string;
+    shop_ids?: string;
     accounting_start_year?: number;
     accounting_start_month?: number;
     accounting_end_year?: number;
@@ -119,14 +137,17 @@ export interface BicDetailListParams {
     accounting_end_month?: number;
 }
 
-export interface BicReportListParams {
+export interface BicSourceRowListParams {
     page?: number;
     page_size?: number;
     org_id?: number | string;
+    detail_id?: number;
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    shop_ids?: string;
     service_provider?: string;
+    qic_warehouse?: string;
     accounting_year?: number;
     accounting_month?: number;
     accounting_start_year?: number;
@@ -137,6 +158,13 @@ export interface BicReportListParams {
 
 export interface BicExportParams {
     scope?: BicExportScope;
+    ids?: string;
+    page?: number;
+    page_size?: number;
+}
+
+export interface BicSourceExportParams {
+    scope?: BicSourceExportScope;
     ids?: string;
     page?: number;
     page_size?: number;
@@ -165,10 +193,27 @@ export function exportBicDetailsExcel(params: BicDetailListParams & BicExportPar
     return downloadBlob("/bic-accounting/details/export", params);
 }
 
-export function listBicReports(params: BicReportListParams) {
-    return get<PaginatedData<BicReport>>("/bic-accounting/summary", params);
+export function listBicSourceRows(params: BicSourceRowListParams) {
+    if (params.detail_id) {
+        const { detail_id, ...query } = params;
+        return get<PaginatedData<BicSourceRow>>(`/bic-accounting/details/${detail_id}/source-rows`, query);
+    }
+    return get<PaginatedData<BicSourceRow>>("/bic-accounting/source-rows", params);
 }
 
-export function exportBicReportsExcel(params: BicReportListParams & BicExportParams) {
-    return downloadBlob("/bic-accounting/summary/export", params);
+export function exportBicSourceRowsExcel(params: BicSourceRowListParams & BicSourceExportParams) {
+    return downloadBlob("/bic-accounting/source-rows/export", params);
+}
+
+export function exportBicReconciliationExcel(params: {
+    accounting_year: number;
+    accounting_month: number;
+    service_provider: string;
+    platform_code?: string;
+    shop_name?: string;
+    shop_id?: number;
+    qic_warehouse?: string;
+    org_id?: number | string;
+}) {
+    return downloadBlob("/bic-accounting/reconciliation/export", params);
 }

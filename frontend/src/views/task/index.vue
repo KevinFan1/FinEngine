@@ -214,7 +214,6 @@
                 stripe
                 border
                 style="width: 100%"
-                height="calc(100vh - 278px)"
                 row-key="id"
                 @selection-change="handleSelectionChange"
             >

@@ -75,7 +75,7 @@
                 </el-form-item>
                 <el-form-item label="店铺">
                     <el-select
-                        v-model="searchForm.shopNames"
+                        v-model="searchForm.shopIds"
                         clearable
                         filterable
                         multiple
@@ -87,9 +87,9 @@
                     >
                         <el-option
                             v-for="shop in filteredShopOptions"
-                            :key="`${shop.platform_name}-${shop.shop_name}`"
+                            :key="shop.id"
                             :label="shop.shop_name"
-                            :value="shop.shop_name"
+                            :value="shop.id"
                         >
                             <ShopBadge
                                 :label="shop.shop_name"
@@ -200,7 +200,6 @@
                 :fit="true"
                 style="width: 100%"
                 row-key="code"
-                height="calc(100vh - 270px)"
                 :row-class-name="annualRowClassName"
             >
                 <el-table-column
@@ -351,7 +350,7 @@ const searchForm = reactive({
     uploadMonthRange: [] as string[],
     orgIds: [] as number[],
     platforms: [] as string[],
-    shopNames: [] as string[],
+    shopIds: [] as number[],
     majorCategoryIds: [] as number[],
     subjectIds: [] as number[],
     categoryIds: [] as number[],
@@ -394,7 +393,7 @@ interface ReportFilterTag extends ActiveFilterTag {
         | "uploadMonthRange"
         | "orgIds"
         | "platforms"
-        | "shopNames"
+        | "shopIds"
         | "majorCategoryIds"
         | "subjectIds"
         | "categoryIds";
@@ -426,9 +425,14 @@ const activeFilterTags = computed<ReportFilterTag[]>(() => {
             value: getPlatformLabel(value),
         }),
     );
-    searchForm.shopNames.forEach((value) =>
-        tags.push({ key: "shopNames", label: "店铺", value }),
-    );
+    searchForm.shopIds.forEach((value) => {
+        const shop = shopOptions.value.find((item) => item.id === value);
+        tags.push({
+            key: "shopIds",
+            label: "店铺",
+            value: shop?.shop_name || String(value),
+        });
+    });
     searchForm.majorCategoryIds.forEach((value) => {
         const majorCategory = majorCategories.value.find((item) => item.id === value);
         tags.push({
@@ -468,7 +472,7 @@ function queryParams(): TransactionAnnualSummaryParams {
         year: searchForm.year,
         org_id: selectedOrgIdsParam.value,
         platform_code: selectedReportPlatformsParam.value,
-        shop_name: searchForm.shopNames.join(",") || undefined,
+        shop_ids: searchForm.shopIds.join(",") || undefined,
         major_category_id: searchForm.majorCategoryIds.join(",") || undefined,
         subject_id: searchForm.subjectIds.join(",") || undefined,
         category_id: searchForm.categoryIds.join(",") || undefined,
@@ -515,7 +519,7 @@ function handleReset() {
     searchForm.uploadMonthRange = [];
     searchForm.orgIds = [];
     searchForm.platforms = [];
-    searchForm.shopNames = [];
+    searchForm.shopIds = [];
     searchForm.majorCategoryIds = [];
     searchForm.subjectIds = [];
     searchForm.categoryIds = [];
@@ -566,21 +570,21 @@ async function fetchOrgOptions() {
 
 async function handlePlatformChange() {
     await fetchShopOptions();
-    const availableShopNames = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
-        availableShopNames.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((shopId) =>
+        availableShopIds.has(shopId),
     );
 }
 
 async function handleOrgChange() {
     await fetchShopOptions();
-    const availableShopNames = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shopNames = searchForm.shopNames.filter((shopName) =>
-        availableShopNames.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((shopId) =>
+        availableShopIds.has(shopId),
     );
 }
 
@@ -625,10 +629,11 @@ async function removeFilterTag(tag: ReportFilterTag) {
             (item) => getPlatformLabel(item) !== tag.value,
         );
         await handlePlatformChange();
-    } else if (tag.key === "shopNames") {
-        searchForm.shopNames = searchForm.shopNames.filter(
-            (item) => item !== tag.value,
-        );
+    } else if (tag.key === "shopIds") {
+        searchForm.shopIds = searchForm.shopIds.filter((item) => {
+            const shop = shopOptions.value.find((shopItem) => shopItem.id === item);
+            return (shop?.shop_name || String(item)) !== tag.value;
+        });
     } else if (tag.key === "majorCategoryIds") {
         searchForm.majorCategoryIds = searchForm.majorCategoryIds.filter(
             (item) => {
@@ -669,7 +674,7 @@ async function handleExport() {
             `${searchForm.year}年`,
             monthRangeLabel(searchForm.uploadMonthRange) || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
-            `店铺${summarizeFilenameValues(searchForm.shopNames, "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || String(id)), "全部")}`,
             `大分类${summarizeFilenameValues(searchForm.majorCategoryIds.map(majorCategoryName), "全部")}`,
             `科目${summarizeFilenameValues(searchForm.subjectIds.map(subjectName), "全部")}`,
             `重分类${summarizeFilenameValues(searchForm.categoryIds.map(categoryName), "全部")}`,

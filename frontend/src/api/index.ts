@@ -93,7 +93,7 @@ service.interceptors.response.use(
 
         return response;
     },
-    (error) => {
+    async (error) => {
         if (isRequestErrorShown(error)) {
             return Promise.reject(error);
         }
@@ -102,10 +102,11 @@ service.interceptors.response.use(
             const status = error.response.status;
             const data = error.response.data;
 
-            const message = userFacingApiMessage(status, data?.message || `请求失败 (${status})`);
+            const backendMessage = await responseErrorMessage(data);
+            const message = userFacingApiMessage(status, backendMessage || `请求失败 (${status})`);
             markRequestErrorShown(error, message);
 
-            if (status === 401 || data?.code === 401) {
+            if (status === 401 || (data && typeof data === "object" && "code" in data && data.code === 401)) {
                 forceLogout({ message });
             } else {
                 ElMessage.error(message);
@@ -137,6 +138,25 @@ function userFacingApiMessage(code: number, message: string) {
         return "操作太频繁了，请稍后再试";
     }
     return message;
+}
+
+async function responseErrorMessage(data: unknown): Promise<string | undefined> {
+    if (!data) return undefined;
+    if (data instanceof Blob) {
+        const contentType = data.type || "";
+        if (!contentType.includes("application/json")) return undefined;
+        try {
+            const parsed = JSON.parse(await data.text());
+            return parsed?.message || parsed?.detail;
+        } catch {
+            return undefined;
+        }
+    }
+    if (typeof data === "object") {
+        const payload = data as { message?: string; detail?: string };
+        return payload.message || payload.detail;
+    }
+    return undefined;
 }
 
 function markRequestErrorShown(error: unknown, message: string) {

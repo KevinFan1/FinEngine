@@ -105,22 +105,41 @@ class BicDetail(SoftDeleteMixin, Base):
     qic_warehouse: Mapped[str] = mapped_column(String(200), nullable=False, comment="QIC仓")
     row_count: Mapped[int] = mapped_column(Integer, default=0, comment="汇总行数")
     total_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="结算金额合计")
-    raw_rows: Mapped[list | None] = mapped_column(JSONB, nullable=True, comment="参与汇总的原始行")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
 
 
-class BicReportRow(SoftDeleteMixin, Base):
-    __tablename__ = "fin_bic_report_rows"
+class BicSourceRow(SoftDeleteMixin, Base):
+    __tablename__ = "fin_bic_source_rows"
     __table_args__ = (
-        Index("idx_fin_bic_report_task", "task_id"),
-        Index("idx_fin_bic_report_org_period", "org_id", "accounting_year", "accounting_month"),
-        Index("idx_fin_bic_report_provider", "service_provider"),
-        {"comment": "BIC 核算报表汇总表"},
+        Index(
+            "uq_fin_bic_source_platform_flow",
+            "platform_code",
+            "transaction_flow_no",
+            unique=True,
+            postgresql_where=text("is_deleted = false AND transaction_flow_no <> ''"),
+        ),
+        Index("idx_fin_bic_source_detail", "detail_id"),
+        Index("idx_fin_bic_source_task", "task_id"),
+        Index("idx_fin_bic_source_org_period_provider", "org_id", "accounting_year", "accounting_month", "service_provider"),
+        Index("idx_fin_bic_source_export", "org_id", "accounting_year", "accounting_month", "service_provider", "shop_id", "qic_warehouse"),
+        Index(
+            "idx_fin_bic_source_filters",
+            "org_id",
+            "platform_code",
+            "accounting_year",
+            "accounting_month",
+            "shop_id",
+            "qic_warehouse",
+            "service_provider",
+            postgresql_where=text("is_deleted = false"),
+        ),
+        {"comment": "BIC 源数据明细表"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_tasks.id"), nullable=False, comment="处理任务ID")
     file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_upload_files.id"), nullable=False, comment="上传文件ID")
+    detail_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_bic_details.id"), nullable=False, comment="BIC明细汇总ID")
     org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
     shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID")
     platform_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台编码")
@@ -128,6 +147,23 @@ class BicReportRow(SoftDeleteMixin, Base):
     accounting_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算年份")
     accounting_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="文件名核算月份")
     service_provider: Mapped[str] = mapped_column(String(200), nullable=False, default="-", comment="服务商")
-    row_count: Mapped[int] = mapped_column(Integer, default=0, comment="汇总行数")
-    total_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), default=0, comment="结算金额合计")
+    qic_warehouse: Mapped[str] = mapped_column(String(200), nullable=False, default="-", comment="QIC仓")
+    source_row_number: Mapped[int] = mapped_column(Integer, default=0, comment="源文件行号")
+    settlement_no: Mapped[str] = mapped_column(String(300), nullable=False, default="", comment="结算单号")
+    order_code: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="订单码")
+    related_order_no: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="关联订单号")
+    related_waybill_no: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="关联运单号")
+    fee_item: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="费用项")
+    settlement_amount: Mapped[float] = mapped_column(NUMERIC(14, 2), nullable=False, default=0, comment="结算金额")
+    billing_params: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="计费参数")
+    billing_completed_time: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="计费完成时间")
+    business_node: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="业务节点")
+    business_occurred_time: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="业务发生时间")
+    settled_at: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="结算时间")
+    status: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="状态")
+    transaction_account: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="动账账户")
+    transaction_flow_no: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="动账流水号")
+    remark: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="备注")
+    is_mudaibao: Mapped[str] = mapped_column(String(20), nullable=False, default="", comment="是否木带宝")
+    is_child_order: Mapped[str] = mapped_column(String(20), nullable=False, default="", comment="是否子单")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")

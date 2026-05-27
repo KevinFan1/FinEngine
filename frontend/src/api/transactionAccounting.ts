@@ -225,6 +225,7 @@ export interface TransactionTaskListParams {
     status?: string;
     platform_code?: string;
     shop_name?: string;
+    shop_ids?: string;
     accounting_year?: number;
     accounting_month?: number;
     accounting_start_year?: number;
@@ -244,6 +245,7 @@ export interface TransactionDetailListParams {
     status?: string;
     platform_code?: string;
     shop_name?: string;
+    shop_ids?: string;
     major_category_id?: number | string;
     subject_id?: number | string;
     category_id?: number | string;
@@ -270,6 +272,7 @@ export interface TransactionSummaryListParams {
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    shop_ids?: string;
     major_category_id?: number | string;
     subject_id?: number | string;
     category_id?: number | string;
@@ -295,6 +298,7 @@ export interface TransactionAnnualSummaryParams {
     task_id?: number;
     platform_code?: string;
     shop_name?: string;
+    shop_ids?: string;
     major_category_id?: number | string;
     subject_id?: number | string;
     category_id?: number | string;

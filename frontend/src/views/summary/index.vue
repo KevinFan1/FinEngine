@@ -102,7 +102,7 @@
                 </el-form-item>
                 <el-form-item label="店铺">
                     <el-select
-                        v-model="searchForm.shops"
+                        v-model="searchForm.shopIds"
                         placeholder="店铺"
                         clearable
                         collapse-tags
@@ -116,7 +116,7 @@
                             v-for="shop in filteredShopOptions"
                             :key="shop.id"
                             :label="shop.shop_name"
-                            :value="shop.shop_name"
+                            :value="shop.id"
                         >
                             <ShopBadge
                                 :label="shop.shop_name"
@@ -202,7 +202,6 @@
                 :summary-method="getSummary"
                 :fit="false"
                 style="width: 100%"
-                height="calc(100vh - 278px)"
                 row-key="id"
                 @selection-change="handleSelectionChange"
             >
@@ -559,7 +558,7 @@ interface FilterTag extends ActiveFilterTag {
         | "orgIds"
         | "platforms"
         | "reportPlatforms"
-        | "shops"
+        | "shopIds"
         | "keyword";
 }
 
@@ -576,7 +575,7 @@ const searchForm = reactive({
     orgIds: [] as number[],
     platforms: [] as string[],
     reportPlatforms: [] as string[],
-    shops: [] as string[],
+    shopIds: [] as number[],
     keyword: "",
 });
 
@@ -668,7 +667,7 @@ const selectedReportPlatformSet = computed(() => {
     return new Set(values);
 });
 const selectedShopsParam = computed(
-    () => searchForm.shops.join(",") || undefined,
+    () => searchForm.shopIds.join(",") || undefined,
 );
 const keywordParam = computed(() => searchForm.keyword.trim() || undefined);
 const selectedRows = computed(() => Array.from(selectedRowMap.value.values()));
@@ -712,8 +711,9 @@ const activeFilterTags = computed<FilterTag[]>(() => {
             value: getPlatformLabel(value),
         });
     });
-    searchForm.shops.forEach((value) => {
-        tags.push({ key: "shops", label: "店铺", value });
+    searchForm.shopIds.forEach((value) => {
+        const shop = shopOptions.value.find((item) => item.id === value);
+        tags.push({ key: "shopIds", label: "店铺", value: shop?.shop_name || `店铺#${value}` });
     });
     if (searchForm.keyword.trim()) {
         tags.push({
@@ -786,7 +786,7 @@ async function fetchData() {
             source_end_month: selectedSourceEnd.value.month,
             platform_name: selectedSourcePlatformsParam.value,
             report_platform_name: selectedReportPlatformsParam.value,
-            shop_name: selectedShopsParam.value,
+            shop_ids: selectedShopsParam.value,
             keyword: keywordParam.value,
         });
         tableData.value = res.items || [];
@@ -841,31 +841,31 @@ async function fetchOrgOptions() {
 }
 
 function handlePlatformChange() {
-    const availableShops = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shops = searchForm.shops.filter((shopName) =>
-        availableShops.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((id) =>
+        availableShopIds.has(id),
     );
     fetchShopOptions();
 }
 
 function handleOrgChange() {
-    const availableShops = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shops = searchForm.shops.filter((shopName) =>
-        availableShops.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((id) =>
+        availableShopIds.has(id),
     );
     fetchShopOptions();
 }
 
 function handleReportPlatformChange() {
-    const availableShops = new Set(
-        filteredShopOptions.value.map((shop) => shop.shop_name),
+    const availableShopIds = new Set(
+        filteredShopOptions.value.map((shop) => shop.id),
     );
-    searchForm.shops = searchForm.shops.filter((shopName) =>
-        availableShops.has(shopName),
+    searchForm.shopIds = searchForm.shopIds.filter((id) =>
+        availableShopIds.has(id),
     );
     fetchShopOptions();
 }
@@ -882,7 +882,7 @@ function handleReset() {
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.reportPlatforms = [];
-    searchForm.shops = [];
+    searchForm.shopIds = [];
     searchForm.keyword = "";
     pagination.page = 1;
     clearSelectedRows(false);
@@ -939,10 +939,11 @@ function removeFilterTag(tag: FilterTag) {
         searchForm.reportPlatforms = searchForm.reportPlatforms.filter(
             (item) => getPlatformLabel(item) !== tag.value,
         );
-    } else if (tag.key === "shops") {
-        searchForm.shops = searchForm.shops.filter(
-            (item) => item !== tag.value,
-        );
+    } else if (tag.key === "shopIds") {
+        searchForm.shopIds = searchForm.shopIds.filter((item) => {
+            const shop = shopOptions.value.find((s) => s.id === item);
+            return (shop?.shop_name || `店铺#${item}`) !== tag.value;
+        });
     } else if (tag.key === "keyword") {
         searchForm.keyword = "";
     }
@@ -962,7 +963,8 @@ function applyQuickFilter(
     } else if (type === "reportPlatform") {
         searchForm.reportPlatforms = [value];
     } else {
-        searchForm.shops = [value];
+        const shop = shopOptions.value.find((s) => s.shop_name === value);
+        searchForm.shopIds = shop ? [shop.id] : [];
     }
 
     handleReportPlatformChange();
@@ -998,7 +1000,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             source_end_month: selectedSourceEnd.value.month,
             platform_name: selectedSourcePlatformsParam.value,
             report_platform_name: selectedReportPlatformsParam.value,
-            shop_name: selectedShopsParam.value,
+            shop_ids: selectedShopsParam.value,
             keyword: keywordParam.value,
             scope,
             ids:
@@ -1025,7 +1027,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                 "全部核算年月",
             `来源平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `归集平台${summarizeFilenameValues(searchForm.reportPlatforms.map(getPlatformLabel), "全部")}`,
-            `店铺${summarizeFilenameValues(searchForm.shops, "全部")}`,
+            `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
             searchForm.keyword.trim()
                 ? `关键词${searchForm.keyword.trim()}`
                 : "关键词全部",
@@ -1085,7 +1087,7 @@ function applyRouteQuery() {
     searchForm.orgIds = splitQueryNumberList(route.query.org_id);
     searchForm.platforms = splitQueryList(route.query.platforms);
     searchForm.reportPlatforms = splitQueryList(route.query.reportPlatforms);
-    searchForm.shops = splitQueryList(route.query.shops);
+    searchForm.shopIds = splitQueryNumberList(route.query.shop_ids);
     searchForm.keyword = queryString(route.query.keyword);
 }
 </script>

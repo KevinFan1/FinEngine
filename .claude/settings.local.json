@@ -28,7 +28,12 @@
       "Bash(grep -E \"\\\\.py$\")",
       "Bash(rtk find *)",
       "Bash(rtk ls *)",
-      "Bash(rtk npm *)"
+      "Bash(rtk npm *)",
+      "Bash(git *)",
+      "Bash(sqlite3 /Users/kevinfan/Desktop/projects/FinEngine/.codegraph/codegraph.db \".tables\")",
+      "Bash(sqlite3 *)",
+      "Bash(grep -v '^--$')",
+      "Bash(python -c \"import app.api.v1.bic_accounting; import app.api.v1.transaction_accounting; import app.api.v1.summaries; print\\('OK'\\)\")"
     ]
   }
 }

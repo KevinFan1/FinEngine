@@ -676,7 +676,6 @@ usePageRefresh(loadData);
 
 <style scoped lang="scss">
 .major-category-page {
-    display: grid;
     gap: 16px;
 }
 

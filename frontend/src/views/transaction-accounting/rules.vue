@@ -1274,7 +1274,6 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 @use "./transaction.scss";
 
 .split-rule-page {
-    display: grid;
     gap: 16px;
 }
 

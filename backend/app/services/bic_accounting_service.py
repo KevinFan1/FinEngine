@@ -1,5 +1,6 @@
 """Service layer for independent BIC accounting."""
 
+from collections import defaultdict
 import io
 import tempfile
 from datetime import datetime, timezone
@@ -7,12 +8,14 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Iterable
 
+from openpyxl.cell import WriteOnlyCell
 from openpyxl import Workbook
+from openpyxl.styles import Font
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import register_after_commit
-from app.models.bic_accounting import BicDetail, BicReportRow, BicTask, BicUploadFile
+from app.models.bic_accounting import BicDetail, BicSourceRow, BicTask, BicUploadFile
 from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.upload import UploadFile
@@ -28,9 +31,10 @@ from app.utils.money import safe_decimal
 
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
 BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
-BIC_REPORT_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
+BIC_SOURCE_EXPORT_HEADERS = DOUYIN_BIC_HEADERS
 BIC_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
 BIC_ERROR_SAMPLE_LIMIT = 10
+BIC_EXCEL_EXPORT_ROW_LIMIT = 20000
 
 
 def _capture_bic_result_state(task: BicTask) -> dict[str, object]:
@@ -55,6 +59,212 @@ def _service_provider_filter(column, service_provider: str | None):
     if not values:
         return None
     return or_(*(column.ilike(f"%{value}%") for value in values))
+
+
+def _normalize_bic_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ", timespec="seconds")
+    return safe_str(value)
+
+
+def _sheet_name_base(value: str) -> str:
+    cleaned = safe_str(value).replace("/", "_").replace("\\", "_").replace("?", "_").replace("*", "_").replace("[", "_").replace("]", "_")
+    cleaned = cleaned.replace(":", "_").replace("\n", " ").replace("\r", " ")
+    return cleaned[:31] or "Sheet"
+
+
+def _dedupe_sheet_name(name: str, used: set[str]) -> str:
+    base = _sheet_name_base(name)
+    candidate = base
+    index = 2
+    while candidate in used:
+        suffix = f"_{index}"
+        candidate = f"{base[: max(0, 31 - len(suffix))]}{suffix}"
+        index += 1
+    used.add(candidate)
+    return candidate
+
+
+def _format_source_value(value: object) -> str:
+    return _normalize_bic_text(value)
+
+
+def _source_row_payload(
+    *,
+    task: BicTask,
+    upload_file: BicUploadFile,
+    detail_id: int,
+    shop_id: int | None,
+    shop_name: str,
+    platform_code: str,
+    source_row: dict[str, object],
+    source_row_number: int,
+) -> BicSourceRow:
+    return BicSourceRow(
+        task_id=task.id,
+        file_id=upload_file.id,
+        detail_id=detail_id,
+        org_id=task.org_id,
+        shop_id=shop_id,
+        platform_code=platform_code,
+        shop_name=shop_name,
+        accounting_year=int(upload_file.accounting_year),
+        accounting_month=int(upload_file.accounting_month),
+        service_provider=_format_source_value(source_row.get("service_provider")) or "-",
+        qic_warehouse=_format_source_value(source_row.get("qic_warehouse")) or "-",
+        source_row_number=source_row_number,
+        settlement_no=_format_source_value(source_row.get("settlement_no")),
+        order_code=_format_source_value(source_row.get("order_code")),
+        related_order_no=_format_source_value(source_row.get("related_order_no")),
+        related_waybill_no=_format_source_value(source_row.get("related_waybill_no")),
+        fee_item=_format_source_value(source_row.get("fee_item")),
+        settlement_amount=safe_decimal(source_row.get("amount")),
+        billing_params=_format_source_value(source_row.get("billing_params")),
+        billing_completed_time=_format_source_value(source_row.get("billing_completed_time")),
+        business_node=_format_source_value(source_row.get("business_node")),
+        business_occurred_time=_format_source_value(source_row.get("business_occurred_time")),
+        settled_at=_format_source_value(source_row.get("settled_at")),
+        status=_format_source_value(source_row.get("status")),
+        transaction_account=_format_source_value(source_row.get("transaction_account")),
+        transaction_flow_no=_format_source_value(source_row.get("transaction_flow_no")),
+        remark=_format_source_value(source_row.get("remark")),
+        is_mudaibao=_format_source_value(source_row.get("is_mudaibao")),
+        is_child_order=_format_source_value(source_row.get("is_child_order")),
+    )
+
+
+def _dedupe_bic_rows(rows: Iterable[dict[str, object]]) -> list[dict[str, object]]:
+    deduped: list[dict[str, object]] = []
+    positions: dict[str, int] = {}
+    for row in rows:
+        flow_no = safe_str(row.get("transaction_flow_no"))
+        if not flow_no:
+            deduped.append(row)
+            continue
+        if flow_no in positions:
+            deduped[positions[flow_no]] = row
+        else:
+            positions[flow_no] = len(deduped)
+            deduped.append(row)
+    return deduped
+
+
+_SOURCE_ROW_OVERWRITE_FIELDS = (
+    "task_id",
+    "file_id",
+    "detail_id",
+    "org_id",
+    "shop_id",
+    "platform_code",
+    "shop_name",
+    "accounting_year",
+    "accounting_month",
+    "service_provider",
+    "qic_warehouse",
+    "source_row_number",
+    "settlement_no",
+    "order_code",
+    "related_order_no",
+    "related_waybill_no",
+    "fee_item",
+    "settlement_amount",
+    "billing_params",
+    "billing_completed_time",
+    "business_node",
+    "business_occurred_time",
+    "settled_at",
+    "status",
+    "transaction_account",
+    "transaction_flow_no",
+    "remark",
+    "is_mudaibao",
+    "is_child_order",
+)
+
+
+def _overwrite_source_row(target: BicSourceRow, source: BicSourceRow) -> BicSourceRow:
+    for field in _SOURCE_ROW_OVERWRITE_FIELDS:
+        setattr(target, field, getattr(source, field))
+    target.is_deleted = False
+    target.deleted_at = None
+    return target
+
+
+async def _upsert_source_rows_by_flow(
+    db: AsyncSession,
+    *,
+    platform_code: str,
+    source_rows: Iterable[BicSourceRow],
+) -> list[BicSourceRow]:
+    rows = list(source_rows)
+    flow_nos = sorted({safe_str(row.transaction_flow_no) for row in rows if safe_str(row.transaction_flow_no)})
+    existing_by_flow: dict[str, BicSourceRow] = {}
+
+    chunk_size = 500
+    for index in range(0, len(flow_nos), chunk_size):
+        chunk = flow_nos[index:index + chunk_size]
+        result = await db.execute(
+            select(BicSourceRow).where(
+                BicSourceRow.is_deleted.is_(False),
+                BicSourceRow.platform_code == platform_code,
+                BicSourceRow.transaction_flow_no.in_(chunk),
+            )
+        )
+        for existing in result.scalars().all():
+            existing_by_flow[safe_str(existing.transaction_flow_no)] = existing
+
+    synced_rows: list[BicSourceRow] = []
+    new_rows: list[BicSourceRow] = []
+    for row in rows:
+        flow_no = safe_str(row.transaction_flow_no)
+        existing = existing_by_flow.get(flow_no) if flow_no else None
+        if existing is None:
+            new_rows.append(row)
+            synced_rows.append(row)
+        else:
+            synced_rows.append(_overwrite_source_row(existing, row))
+
+    if new_rows:
+        db.add_all(new_rows)
+    return synced_rows
+
+
+def _apply_sheet_style(sheet) -> None:
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    max_columns = sheet.max_column
+    for column_index in range(1, max_columns + 1):
+        column_letter = sheet.cell(row=1, column=column_index).column_letter
+        max_length = len(str(sheet.cell(row=1, column=column_index).value or ""))
+        for row_index in range(2, min(sheet.max_row, 200) + 1):
+            value = sheet.cell(row=row_index, column=column_index).value
+            if value is not None:
+                max_length = max(max_length, len(str(value)))
+        sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 36)
+    sheet.freeze_panes = "A2"
+
+
+def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
+    cells: list[WriteOnlyCell] = []
+    for label in headers:
+        cell = WriteOnlyCell(sheet, value=label)
+        cell.font = Font(bold=True)
+        cells.append(cell)
+    return cells
+
+
+def _export_row_limit_message(label: str, row_count: int) -> str:
+    return f"{label}导出数据量 {row_count} 行，超过系统上限 {BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出"
+
+
+def _ensure_export_row_limit(label: str, row_count: int) -> None:
+    if row_count > BIC_EXCEL_EXPORT_ROW_LIMIT:
+        raise ValueError(_export_row_limit_message(label, row_count))
 
 
 class BicAccountingService:
@@ -294,7 +504,7 @@ class BicAccountingService:
         status: str | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         accounting_start_year: int | None = None,
         accounting_start_month: int | None = None,
         accounting_end_year: int | None = None,
@@ -317,8 +527,9 @@ class BicAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicUploadFile.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(BicUploadFile.shop_id == shop_id)
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(BicUploadFile.shop_id.in_(shop_id_list))
         filters.extend(
             TransactionAccountingService._period_filters(
                 BicUploadFile.accounting_year * 100 + BicUploadFile.accounting_month,
@@ -367,7 +578,7 @@ class BicAccountingService:
         task_id: int | None = None,
         platform_code: str | None = None,
         shop_name: str | None = None,
-        shop_id: int | None = None,
+        shop_ids: str | None = None,
         service_provider: str | None = None,
         qic_warehouse: str | None = None,
         accounting_year: int | None = None,
@@ -401,8 +612,9 @@ class BicAccountingService:
         shop_names = TransactionAccountingService._split_filter_values(shop_name)
         if shop_names:
             filters.append(BicDetail.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(BicDetail.shop_id == shop_id)
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(BicDetail.shop_id.in_(shop_id_list))
         qic_values = TransactionAccountingService._split_filter_values(qic_warehouse)
         if qic_values:
             filters.append(BicDetail.qic_warehouse.in_(qic_values))
@@ -434,6 +646,7 @@ class BicAccountingService:
                 BicDetail.accounting_year.label("accounting_year"),
                 BicDetail.accounting_month.label("accounting_month"),
                 BicDetail.qic_warehouse.label("qic_warehouse"),
+                BicDetail.row_count.label("row_count"),
                 BicDetail.total_amount.label("total_amount"),
                 BicDetail.created_at.label("created_at"),
                 Shop.store_short_id.label("store_short_id"),
@@ -456,105 +669,6 @@ class BicAccountingService:
             )
         )
         count_stmt = select(func.count()).select_from(BicDetail).where(*filters)
-        total = (await db.execute(count_stmt)).scalar() or 0
-        if page is not None and page_size is not None:
-            stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-        result = await db.execute(stmt)
-        return [dict(row) for row in result.mappings().all()], total
-
-    @staticmethod
-    async def list_reports(
-        db: AsyncSession,
-        *,
-        user: User,
-        org_id: int | None = None,
-        task_id: int | None = None,
-        platform_code: str | None = None,
-        shop_name: str | None = None,
-        shop_id: int | None = None,
-        service_provider: str | None = None,
-        accounting_year: int | None = None,
-        accounting_month: int | None = None,
-        accounting_start_year: int | None = None,
-        accounting_start_month: int | None = None,
-        accounting_end_year: int | None = None,
-        accounting_end_month: int | None = None,
-        ids: list[int] | None = None,
-        page: int | None = 1,
-        page_size: int | None = 50,
-    ) -> tuple[list[dict[str, object]], int]:
-        filters = [BicReportRow.is_deleted.is_(False)]
-        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
-        if org_ids is not None:
-            filters.append(BicReportRow.org_id.in_(org_ids))
-        if ids is not None:
-            if not ids:
-                return [], 0
-            filters.append(BicReportRow.id.in_(ids))
-        if task_id is not None:
-            filters.append(BicReportRow.task_id == task_id)
-        else:
-            filters.append(BicReportRow.task_id.in_(BicAccountingService._latest_result_task_ids_select()))
-        platform_codes = TransactionAccountingService._split_filter_values(platform_code)
-        if platform_codes:
-            filters.append(BicReportRow.platform_code.in_(platform_codes))
-        service_provider_filter = _service_provider_filter(BicReportRow.service_provider, service_provider)
-        if service_provider_filter is not None:
-            filters.append(service_provider_filter)
-        shop_names = TransactionAccountingService._split_filter_values(shop_name)
-        if shop_names:
-            filters.append(BicReportRow.shop_name.in_(shop_names))
-        if shop_id is not None:
-            filters.append(BicReportRow.shop_id == shop_id)
-        if accounting_year is not None:
-            filters.append(BicReportRow.accounting_year == accounting_year)
-        if accounting_month is not None:
-            filters.append(BicReportRow.accounting_month == accounting_month)
-        filters.extend(
-            TransactionAccountingService._period_filters(
-                BicReportRow.accounting_year * 100 + BicReportRow.accounting_month,
-                start_year=accounting_start_year,
-                start_month=accounting_start_month,
-                end_year=accounting_end_year,
-                end_month=accounting_end_month,
-            )
-        )
-
-        stmt = (
-            select(
-                BicReportRow.id.label("id"),
-                BicReportRow.task_id.label("task_id"),
-                BicReportRow.file_id.label("file_id"),
-                BicReportRow.org_id.label("org_id"),
-                Organization.name.label("org_name"),
-                BicReportRow.shop_id.label("shop_id"),
-                BicReportRow.platform_code.label("platform_code"),
-                BicReportRow.service_provider.label("service_provider"),
-                BicReportRow.shop_name.label("shop_name"),
-                BicReportRow.accounting_year.label("accounting_year"),
-                BicReportRow.accounting_month.label("accounting_month"),
-                BicReportRow.row_count.label("row_count"),
-                BicReportRow.total_amount.label("total_amount"),
-                BicReportRow.created_at.label("created_at"),
-                Shop.store_short_id.label("store_short_id"),
-                Shop.merchant.label("merchant"),
-                Shop.tax_no.label("tax_no"),
-                Shop.shop_type.label("shop_type"),
-                Shop.registered_address.label("registered_address"),
-            )
-            .outerjoin(Shop, Shop.id == BicReportRow.shop_id)
-            .outerjoin(Organization, Organization.id == BicReportRow.org_id)
-            .where(*filters)
-            .order_by(
-                BicReportRow.accounting_year.desc(),
-                BicReportRow.accounting_month.desc(),
-                BicReportRow.platform_code,
-                BicReportRow.service_provider,
-                BicReportRow.shop_id,
-                BicReportRow.shop_name,
-            )
-        )
-        count_stmt = select(func.count()).select_from(BicReportRow).where(*filters)
         total = (await db.execute(count_stmt)).scalar() or 0
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
@@ -654,32 +768,51 @@ class BicAccountingService:
             upload_file.shop_id = shop_id
             upload_file.shop_name = shop.shop_name
 
-        await db.execute(delete(BicDetail).where(BicDetail.task_id == task.id))
-        await db.execute(delete(BicReportRow).where(BicReportRow.task_id == task.id))
+        old_detail_result = await db.execute(select(BicDetail.id).where(BicDetail.task_id == task.id))
+        old_detail_ids = list(old_detail_result.scalars().all())
 
         parse_result = BicAccountingService.parse_file(file_path)
         detail_rows: list[BicDetail] = []
-        report_rows: list[BicReportRow] = []
-        if not parse_result.get("fatal_error"):
+        source_rows: list[BicSourceRow] = []
+        if parse_result.get("fatal_error"):
+            await db.execute(delete(BicSourceRow).where(BicSourceRow.task_id == task.id))
+            if old_detail_ids:
+                await db.execute(delete(BicDetail).where(BicDetail.id.in_(old_detail_ids)))
+        else:
+            parsed_rows = _dedupe_bic_rows(parse_result.get("bic_rows", []))
             detail_rows = BicAccountingService._build_detail_rows(
                 task=task,
                 upload_file=upload_file,
-                rows=parse_result.get("bic_rows", []),
+                rows=parsed_rows,
                 platform_code=platform_code,
                 shop_id=shop_id,
                 shop_name=shop_name,
             )
             db.add_all(detail_rows)
+            await db.flush()
 
-            report_rows = BicAccountingService._build_report_rows(
+            source_rows = BicAccountingService._build_source_rows(
                 task=task,
                 upload_file=upload_file,
                 detail_rows=detail_rows,
+                rows=parsed_rows,
                 platform_code=platform_code,
                 shop_id=shop_id,
                 shop_name=shop_name,
             )
-            db.add_all(report_rows)
+            source_rows = await _upsert_source_rows_by_flow(
+                db,
+                platform_code=platform_code,
+                source_rows=source_rows,
+            )
+            await db.flush()
+            synced_source_ids = [row.id for row in source_rows if row.id is not None]
+            stale_source_filters = [BicSourceRow.task_id == task.id]
+            if synced_source_ids:
+                stale_source_filters.append(BicSourceRow.id.notin_(synced_source_ids))
+            await db.execute(delete(BicSourceRow).where(*stale_source_filters))
+            if old_detail_ids:
+                await db.execute(delete(BicDetail).where(BicDetail.id.in_(old_detail_ids)))
         await db.flush()
 
         summary = {
@@ -688,7 +821,7 @@ class BicAccountingService:
             "符合条件行数": parse_result.get("success_rows", 0),
             "失败行数": parse_result.get("failed_rows", 0),
             "明细分组数": len(detail_rows),
-            "报表分组数": len(report_rows),
+            "源数据行数": len(source_rows),
         }
         errors = parse_result.get("errors", [])[:BIC_ERROR_SAMPLE_LIMIT]
         if errors:
@@ -742,11 +875,26 @@ class BicAccountingService:
                         continue
                     result["bic_rows"].append(
                         {
+                            "source_row_number": result["total_rows"] + header_row_number,
+                            "settlement_no": safe_str(vals.get("结算单号")),
+                            "order_code": safe_str(vals.get("订单码")),
+                            "related_order_no": safe_str(vals.get("关联订单号")),
+                            "related_waybill_no": safe_str(vals.get("关联运单号")),
+                            "fee_item": safe_str(vals.get("费用项")),
                             "service_provider": safe_str(vals.get("服务商")) or "-",
                             "qic_warehouse": safe_str(vals.get("QIC仓")) or "-",
                             "amount": safe_decimal(vals.get("结算金额")),
-                            "fee_item": BIC_TARGET_FEE_ITEM,
-                            "raw_row": TransactionAccountingService._json_safe_raw_row(vals),
+                            "billing_params": safe_str(vals.get("计费参数")),
+                            "billing_completed_time": safe_str(vals.get("计费完成时间")),
+                            "business_node": safe_str(vals.get("业务节点")),
+                            "business_occurred_time": safe_str(vals.get("业务发生时间")),
+                            "settled_at": safe_str(vals.get("结算时间")),
+                            "status": safe_str(vals.get("状态")),
+                            "transaction_account": safe_str(vals.get("动账账户")),
+                            "transaction_flow_no": safe_str(vals.get("动账流水号")),
+                            "remark": safe_str(vals.get("备注")),
+                            "is_mudaibao": safe_str(vals.get("是否木带宝")),
+                            "is_child_order": safe_str(vals.get("是否子单")),
                         }
                     )
                     result["success_rows"] += 1
@@ -772,12 +920,9 @@ class BicAccountingService:
             service_provider = safe_str(row.get("service_provider")) or "-"
             qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
             group_key = (service_provider, qic_warehouse)
-            group = groups.setdefault(group_key, {"amount": Decimal("0"), "row_count": 0, "raw_rows": []})
+            group = groups.setdefault(group_key, {"amount": Decimal("0"), "row_count": 0})
             group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.get("amount"))
             group["row_count"] = int(group["row_count"]) + 1
-            raw_rows = group["raw_rows"]
-            if isinstance(raw_rows, list):
-                raw_rows.append(row.get("raw_row") or {})
 
         return [
             BicDetail(
@@ -793,78 +938,312 @@ class BicAccountingService:
                 qic_warehouse=qic_warehouse,
                 row_count=int(group["row_count"]),
                 total_amount=safe_decimal(group["amount"]),
-                raw_rows=group["raw_rows"],
             )
             for (service_provider, qic_warehouse), group in groups.items()
         ]
 
     @staticmethod
-    def _build_report_rows(
+    def _build_source_rows(
         *,
         task: BicTask,
         upload_file: BicUploadFile,
         detail_rows: list[BicDetail],
+        rows: Iterable[dict],
         platform_code: str,
         shop_id: int | None,
         shop_name: str,
-    ) -> list[BicReportRow]:
-        if not detail_rows:
-            return [
-                BicReportRow(
-                    task_id=task.id,
-                    file_id=upload_file.id,
-                    org_id=task.org_id,
+    ) -> list[BicSourceRow]:
+        detail_map = {(row.service_provider, row.qic_warehouse): row.id for row in detail_rows}
+        source_rows: list[BicSourceRow] = []
+        for row in rows:
+            service_provider = safe_str(row.get("service_provider")) or "-"
+            qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
+            detail_id = detail_map.get((service_provider, qic_warehouse))
+            if detail_id is None:
+                continue
+            source_rows.append(
+                _source_row_payload(
+                    task=task,
+                    upload_file=upload_file,
+                    detail_id=detail_id,
                     shop_id=shop_id,
-                    platform_code=platform_code,
-                    service_provider="-",
                     shop_name=shop_name,
-                    accounting_year=int(upload_file.accounting_year),
-                    accounting_month=int(upload_file.accounting_month),
-                    row_count=0,
-                    total_amount=Decimal("0"),
+                    platform_code=platform_code,
+                    source_row=row,
+                    source_row_number=int(row.get("source_row_number") or 0),
                 )
-            ]
-
-        groups: dict[str, dict[str, object]] = {}
-        for row in detail_rows:
-            service_provider = safe_str(row.service_provider) or "-"
-            group = groups.setdefault(service_provider, {"amount": Decimal("0"), "row_count": 0})
-            group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.total_amount)
-            group["row_count"] = int(group["row_count"]) + int(row.row_count or 0)
-
-        return [
-            BicReportRow(
-                task_id=task.id,
-                file_id=upload_file.id,
-                org_id=task.org_id,
-                shop_id=shop_id,
-                platform_code=platform_code,
-                service_provider=service_provider,
-                shop_name=shop_name,
-                accounting_year=int(upload_file.accounting_year),
-                accounting_month=int(upload_file.accounting_month),
-                row_count=int(group["row_count"]),
-                total_amount=safe_decimal(group["amount"]),
             )
-            for service_provider, group in groups.items()
-        ]
+        return source_rows
 
     @staticmethod
-    async def export_details(db: AsyncSession, **kwargs) -> io.BytesIO:
-        rows, _ = await BicAccountingService.list_details(db, page=None, page_size=None, **kwargs)
+    async def export_details(
+        db: AsyncSession,
+        *,
+        scope: str = "all",
+        page: int | None = None,
+        page_size: int | None = None,
+        **kwargs,
+    ) -> io.BytesIO:
+        if scope == "current_page":
+            rows, _ = await BicAccountingService.list_details(db, page=page or 1, page_size=page_size or 50, **kwargs)
+            _ensure_export_row_limit("BIC汇总", len(rows))
+        else:
+            _, total = await BicAccountingService.list_details(db, page=1, page_size=1, **kwargs)
+            _ensure_export_row_limit("BIC汇总", total)
+            rows, _ = await BicAccountingService.list_details(db, page=None, page_size=None, **kwargs)
+            _ensure_export_row_limit("BIC汇总", len(rows))
         return BicAccountingService._build_detail_workbook(rows)
 
     @staticmethod
-    async def export_reports(db: AsyncSession, **kwargs) -> io.BytesIO:
-        rows, _ = await BicAccountingService.list_reports(db, page=None, page_size=None, **kwargs)
-        return BicAccountingService._build_report_workbook(rows)
+    async def export_source_rows(
+        db: AsyncSession,
+        *,
+        scope: str = "current_page",
+        page: int | None = None,
+        page_size: int | None = None,
+        **kwargs,
+    ) -> io.BytesIO:
+        if scope == "current_page":
+            rows, _ = await BicAccountingService.list_source_rows(db, page=page or 1, page_size=page_size or 50, **kwargs)
+            _ensure_export_row_limit("BIC明细", len(rows))
+        else:
+            _, total = await BicAccountingService.list_source_rows(db, page=1, page_size=1, **kwargs)
+            _ensure_export_row_limit("BIC明细", total)
+            rows, _ = await BicAccountingService.list_source_rows(db, page=None, page_size=None, **kwargs)
+            _ensure_export_row_limit("BIC明细", len(rows))
+        return BicAccountingService._build_source_workbook(rows, title="BIC明细")
+
+    @staticmethod
+    async def list_source_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        org_id: int | None = None,
+        detail_id: int | None = None,
+        task_id: int | None = None,
+        platform_code: str | None = None,
+        shop_name: str | None = None,
+        shop_ids: str | None = None,
+        service_provider: str | None = None,
+        exact_service_provider: bool = False,
+        qic_warehouse: str | None = None,
+        accounting_year: int | None = None,
+        accounting_month: int | None = None,
+        accounting_start_year: int | None = None,
+        accounting_start_month: int | None = None,
+        accounting_end_year: int | None = None,
+        accounting_end_month: int | None = None,
+        ids: list[int] | None = None,
+        page: int | None = 1,
+        page_size: int | None = 50,
+    ) -> tuple[list[dict[str, object]], int]:
+        filters = [BicSourceRow.is_deleted.is_(False)]
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        if org_ids is not None:
+            filters.append(BicSourceRow.org_id.in_(org_ids))
+        if ids is not None:
+            if not ids:
+                return [], 0
+            filters.append(BicSourceRow.id.in_(ids))
+        if detail_id is not None:
+            filters.append(BicSourceRow.detail_id == detail_id)
+        elif task_id is not None:
+            filters.append(BicSourceRow.task_id == task_id)
+        else:
+            filters.append(BicSourceRow.task_id.in_(BicAccountingService._latest_result_task_ids_select()))
+        platform_codes = TransactionAccountingService._split_filter_values(platform_code)
+        if platform_codes:
+            filters.append(BicSourceRow.platform_code.in_(platform_codes))
+        service_provider_values = TransactionAccountingService._split_filter_values(
+            service_provider.replace("，", ",") if service_provider else service_provider
+        )
+        if exact_service_provider and service_provider_values:
+            filters.append(BicSourceRow.service_provider == service_provider_values[0])
+        else:
+            service_provider_filter = _service_provider_filter(BicSourceRow.service_provider, service_provider)
+            if service_provider_filter is not None:
+                filters.append(service_provider_filter)
+        shop_names = TransactionAccountingService._split_filter_values(shop_name)
+        if shop_names:
+            filters.append(BicSourceRow.shop_name.in_(shop_names))
+        shop_id_list = TransactionAccountingService._split_int_filter_values(shop_ids)
+        if shop_id_list:
+            filters.append(BicSourceRow.shop_id.in_(shop_id_list))
+        qic_values = TransactionAccountingService._split_filter_values(qic_warehouse)
+        if qic_values:
+            filters.append(BicSourceRow.qic_warehouse.in_(qic_values))
+        if accounting_year is not None:
+            filters.append(BicSourceRow.accounting_year == accounting_year)
+        if accounting_month is not None:
+            filters.append(BicSourceRow.accounting_month == accounting_month)
+        filters.extend(
+            TransactionAccountingService._period_filters(
+                BicSourceRow.accounting_year * 100 + BicSourceRow.accounting_month,
+                start_year=accounting_start_year,
+                start_month=accounting_start_month,
+                end_year=accounting_end_year,
+                end_month=accounting_end_month,
+            )
+        )
+
+        stmt = (
+            select(
+                BicSourceRow.id.label("id"),
+                BicSourceRow.task_id.label("task_id"),
+                BicSourceRow.file_id.label("file_id"),
+                BicSourceRow.detail_id.label("detail_id"),
+                BicSourceRow.org_id.label("org_id"),
+                Organization.name.label("org_name"),
+                BicSourceRow.shop_id.label("shop_id"),
+                BicSourceRow.platform_code.label("platform_code"),
+                BicSourceRow.service_provider.label("service_provider"),
+                BicSourceRow.shop_name.label("shop_name"),
+                BicSourceRow.accounting_year.label("accounting_year"),
+                BicSourceRow.accounting_month.label("accounting_month"),
+                BicSourceRow.qic_warehouse.label("qic_warehouse"),
+                BicSourceRow.source_row_number.label("source_row_number"),
+                BicSourceRow.settlement_no.label("settlement_no"),
+                BicSourceRow.order_code.label("order_code"),
+                BicSourceRow.related_order_no.label("related_order_no"),
+                BicSourceRow.related_waybill_no.label("related_waybill_no"),
+                BicSourceRow.fee_item.label("fee_item"),
+                BicSourceRow.settlement_amount.label("settlement_amount"),
+                BicSourceRow.billing_params.label("billing_params"),
+                BicSourceRow.billing_completed_time.label("billing_completed_time"),
+                BicSourceRow.business_node.label("business_node"),
+                BicSourceRow.business_occurred_time.label("business_occurred_time"),
+                BicSourceRow.settled_at.label("settled_at"),
+                BicSourceRow.status.label("status"),
+                BicSourceRow.transaction_account.label("transaction_account"),
+                BicSourceRow.transaction_flow_no.label("transaction_flow_no"),
+                BicSourceRow.remark.label("remark"),
+                BicSourceRow.is_mudaibao.label("is_mudaibao"),
+                BicSourceRow.is_child_order.label("is_child_order"),
+                BicSourceRow.created_at.label("created_at"),
+                Shop.store_short_id.label("store_short_id"),
+                Shop.merchant.label("merchant"),
+                Shop.tax_no.label("tax_no"),
+                Shop.shop_type.label("shop_type"),
+                Shop.registered_address.label("registered_address"),
+            )
+            .outerjoin(Shop, Shop.id == BicSourceRow.shop_id)
+            .outerjoin(Organization, Organization.id == BicSourceRow.org_id)
+            .where(*filters)
+            .order_by(
+                BicSourceRow.accounting_year.desc(),
+                BicSourceRow.accounting_month.desc(),
+                BicSourceRow.platform_code,
+                BicSourceRow.service_provider,
+                BicSourceRow.shop_id,
+                BicSourceRow.shop_name,
+                BicSourceRow.qic_warehouse,
+                BicSourceRow.source_row_number,
+            )
+        )
+        count_stmt = select(func.count()).select_from(BicSourceRow).where(*filters)
+        total = (await db.execute(count_stmt)).scalar() or 0
+        if page is not None and page_size is not None:
+            stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(stmt)
+        return [dict(row) for row in result.mappings().all()], total
+
+    @staticmethod
+    async def export_reconciliation(
+        db: AsyncSession,
+        *,
+        user: User,
+        org_id: int | None = None,
+        accounting_year: int,
+        accounting_month: int,
+        service_provider: str,
+        platform_code: str | None = None,
+        shop_name: str | None = None,
+        shop_ids: str | None = None,
+        qic_warehouse: str | None = None,
+    ) -> io.BytesIO:
+        service_provider_values = TransactionAccountingService._split_filter_values(service_provider.replace("，", ","))
+        if len(service_provider_values) != 1:
+            raise ValueError("请选择服务商")
+        normalized_provider = service_provider_values[0]
+
+        _, total = await BicAccountingService.list_source_rows(
+            db,
+            user=user,
+            org_id=org_id,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_ids=shop_ids,
+            service_provider=normalized_provider,
+            qic_warehouse=qic_warehouse,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            page=1,
+            page_size=1,
+        )
+        if total == 0:
+            raise ValueError("未找到符合条件的BIC对账数据，请检查月份、服务商和筛选条件")
+        _ensure_export_row_limit("BIC对账表", total)
+
+        rows, _ = await BicAccountingService.list_source_rows(
+            db,
+            user=user,
+            org_id=org_id,
+            platform_code=platform_code,
+            shop_name=shop_name,
+            shop_ids=shop_ids,
+            service_provider=normalized_provider,
+            qic_warehouse=qic_warehouse,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            page=None,
+            page_size=None,
+        )
+        _ensure_export_row_limit("BIC对账表", len(rows))
+        return BicAccountingService._build_reconciliation_workbook(rows, accounting_year, accounting_month, normalized_provider)
+
+    @staticmethod
+    def _append_source_row(worksheet, row: dict[str, object]) -> None:
+        worksheet.append(
+            [
+                row.get("settlement_no") or "",
+                row.get("order_code") or "",
+                row.get("related_order_no") or "",
+                row.get("related_waybill_no") or "",
+                row.get("fee_item") or "",
+                row.get("service_provider") or "",
+                row.get("qic_warehouse") or "",
+                float(row.get("settlement_amount") or 0),
+                row.get("billing_params") or "",
+                row.get("billing_completed_time") or "",
+                row.get("business_node") or "",
+                row.get("business_occurred_time") or "",
+                row.get("settled_at") or "",
+                row.get("status") or "",
+                row.get("transaction_account") or "",
+                row.get("transaction_flow_no") or "",
+                row.get("remark") or "",
+                row.get("is_mudaibao") or "",
+                row.get("is_child_order") or "",
+            ]
+        )
+
+    @staticmethod
+    def _build_source_workbook(rows: list[dict[str, object]], *, title: str) -> io.BytesIO:
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title=_dedupe_sheet_name(title, set()))
+        worksheet.append(_write_only_header_row(worksheet, BIC_SOURCE_EXPORT_HEADERS))
+        for row in rows:
+            BicAccountingService._append_source_row(worksheet, row)
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        return buffer
 
     @staticmethod
     def _build_detail_workbook(rows: list[dict[str, object]]) -> io.BytesIO:
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = "BIC明细"
-        worksheet.append(BIC_DETAIL_EXPORT_HEADERS)
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title="BIC汇总")
+        worksheet.append(_write_only_header_row(worksheet, BIC_DETAIL_EXPORT_HEADERS))
         for index, row in enumerate(rows, start=1):
             worksheet.append(
                 [
@@ -887,26 +1266,64 @@ class BicAccountingService:
         return buffer
 
     @staticmethod
-    def _build_report_workbook(rows: list[dict[str, object]]) -> io.BytesIO:
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = "BIC报表"
-        worksheet.append(BIC_REPORT_EXPORT_HEADERS)
-        for index, row in enumerate(rows, start=1):
+    def _build_reconciliation_workbook(
+        rows: list[dict[str, object]],
+        accounting_year: int,
+        accounting_month: int,
+        service_provider: str,
+    ) -> io.BytesIO:
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title="汇总")
+        worksheet.append(_write_only_header_row(worksheet, ["店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]))
+
+        summary_map: dict[tuple[str, str], dict[str, object]] = {}
+        shop_sheet_rows: dict[str, list[dict[str, object]]] = defaultdict(list)
+        shop_sheet_titles: dict[str, str] = {}
+        for row in rows:
+            shop_key = safe_str(row.get("shop_name")) or "-"
+            qic_key = safe_str(row.get("qic_warehouse")) or "-"
+            shop_sheet_key = safe_str(row.get("shop_id")) or shop_key
+            group_key = (shop_sheet_key, qic_key)
+            group = summary_map.setdefault(
+                group_key,
+                {
+                    "shop_id": row.get("shop_id"),
+                    "store_short_id": row.get("store_short_id"),
+                    "shop_name": shop_key,
+                    "qic_warehouse": qic_key,
+                    "merchant": row.get("merchant") or "",
+                    "tax_no": row.get("tax_no") or "",
+                    "shop_type": row.get("shop_type") or "",
+                    "registered_address": row.get("registered_address") or "",
+                    "amount": Decimal("0"),
+                },
+            )
+            group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.get("settlement_amount"))
+            shop_sheet_rows[shop_sheet_key].append(row)
+            shop_sheet_titles[shop_sheet_key] = shop_key
+
+        for group_key in sorted(summary_map, key=lambda key: (safe_str(summary_map[key]["shop_name"]), safe_str(summary_map[key]["qic_warehouse"]))):
+            group = summary_map[group_key]
             worksheet.append(
                 [
-                    index,
-                    TransactionAccountingService._format_platform(str(row.get("platform_code") or "")),
-                    row.get("service_provider") or "",
-                    row.get("store_short_id") or "",
-                    row.get("shop_name") or "",
-                    row.get("merchant") or "",
-                    row.get("tax_no") or "",
-                    row.get("shop_type") or "",
-                    row.get("registered_address") or "",
-                    float(row.get("total_amount") or 0),
+                    group["store_short_id"] or group["shop_id"] or "",
+                    group["shop_name"] or "",
+                    group["qic_warehouse"] or "",
+                    group["merchant"] or "",
+                    group["tax_no"] or "",
+                    group["shop_type"] or "",
+                    group["registered_address"] or "",
+                    float(group["amount"] or 0),
                 ]
             )
+
+        used_sheet_names: set[str] = {worksheet.title}
+        for shop_key in sorted(shop_sheet_rows, key=lambda key: (shop_sheet_titles.get(key) or key, key)):
+            sheet_name = _dedupe_sheet_name(shop_sheet_titles.get(shop_key) or shop_key, used_sheet_names)
+            sheet = workbook.create_sheet(sheet_name)
+            sheet.append(_write_only_header_row(sheet, BIC_SOURCE_EXPORT_HEADERS))
+            for row in shop_sheet_rows[shop_key]:
+                BicAccountingService._append_source_row(sheet, {**row, "service_provider": row.get("service_provider") or service_provider})
         buffer = io.BytesIO()
         workbook.save(buffer)
         buffer.seek(0)

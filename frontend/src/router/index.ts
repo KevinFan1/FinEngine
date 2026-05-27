@@ -146,16 +146,16 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "BIC任务", icon: "List" },
             },
             {
-                path: "bic-details",
-                name: "BicDetails",
+                path: "bic-summary",
+                name: "BicSummary",
                 component: () => import("@/views/bic-accounting/details.vue"),
-                meta: { title: "BIC明细", icon: "Document" },
+                meta: { title: "BIC汇总", icon: "Document" },
             },
             {
-                path: "bic-report",
-                name: "BicReport",
-                component: () => import("@/views/bic-accounting/report.vue"),
-                meta: { title: "BIC报表", icon: "DataAnalysis" },
+                path: "bic-details",
+                name: "BicDetails",
+                component: () => import("@/views/bic-accounting/source.vue"),
+                meta: { title: "BIC明细", icon: "Document" },
             },
             {
                 path: "audit-logs",

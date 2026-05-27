@@ -73,6 +73,7 @@ class BicDetailOut(BaseModel):
     accounting_year: int
     accounting_month: int
     qic_warehouse: str
+    row_count: int = 0
     merchant: str | None = None
     tax_no: str | None = None
     shop_type: str | None = None
@@ -84,10 +85,11 @@ class BicDetailOut(BaseModel):
         from_attributes = True
 
 
-class BicReportOut(BaseModel):
+class BicSourceRowOut(BaseModel):
     id: int
     task_id: int
     file_id: int
+    detail_id: int
     org_id: int
     org_name: str | None = None
     shop_id: int | None = None
@@ -97,12 +99,25 @@ class BicReportOut(BaseModel):
     shop_name: str
     accounting_year: int
     accounting_month: int
-    row_count: int
-    merchant: str | None = None
-    tax_no: str | None = None
-    shop_type: str | None = None
-    registered_address: str | None = None
-    total_amount: Decimal
+    qic_warehouse: str
+    source_row_number: int
+    settlement_no: str
+    order_code: str
+    related_order_no: str
+    related_waybill_no: str
+    fee_item: str
+    settlement_amount: Decimal
+    billing_params: str
+    billing_completed_time: str
+    business_node: str
+    business_occurred_time: str
+    settled_at: str
+    status: str
+    transaction_account: str
+    transaction_flow_no: str
+    remark: str
+    is_mudaibao: str
+    is_child_order: str
     created_at: datetime
 
     class Config:
