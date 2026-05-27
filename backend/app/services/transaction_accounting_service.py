@@ -46,6 +46,7 @@ from app.schemas.transaction_accounting import (
 from app.services.audit_service import AuditService
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
 from app.services.shop_service import ShopService
+from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
@@ -821,7 +822,11 @@ class TransactionAccountingService:
         page_size: int = 20,
     ) -> tuple[list[tuple[TransactionTask, TransactionUploadFile, str | None]], int]:
         org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
-        filters = [TransactionTask.is_deleted.is_(False), TransactionUploadFile.is_deleted.is_(False)]
+        filters = [
+            TransactionTask.is_deleted.is_(False),
+            TransactionUploadFile.is_deleted.is_(False),
+            active_shop_filter(TransactionUploadFile.shop_id),
+        ]
         if org_ids is not None:
             filters.append(TransactionTask.org_id.in_(org_ids))
         if status:
@@ -916,6 +921,8 @@ class TransactionAccountingService:
             TransactionDetail.is_deleted.is_(False),
             TransactionUploadFile.is_deleted.is_(False),
             TransactionTask.is_deleted.is_(False),
+            active_shop_filter(TransactionDetail.shop_id),
+            active_shop_filter(TransactionUploadFile.shop_id),
         ]
         if org_ids is not None:
             filters.append(TransactionDetail.org_id.in_(org_ids))
@@ -1102,7 +1109,12 @@ class TransactionAccountingService:
         org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         if ids is not None and not ids:
             return [], 0
-        filters = [TransactionSummaryRow.is_deleted.is_(False), TransactionUploadFile.is_deleted.is_(False)]
+        filters = [
+            TransactionSummaryRow.is_deleted.is_(False),
+            TransactionUploadFile.is_deleted.is_(False),
+            active_shop_filter(TransactionSummaryRow.shop_id),
+            active_shop_filter(TransactionUploadFile.shop_id),
+        ]
         if org_ids is not None:
             filters.append(TransactionSummaryRow.org_id.in_(org_ids))
         if task_id is not None:
@@ -1960,6 +1972,7 @@ class TransactionAccountingService:
             .where(
                 TransactionTask.is_deleted.is_(False),
                 TransactionUploadFile.is_deleted.is_(False),
+                active_shop_filter(TransactionUploadFile.shop_id),
                 TransactionTask.status.in_(TRANSACTION_RESULT_TASK_STATUSES),
             )
             .group_by(
@@ -2022,6 +2035,8 @@ class TransactionAccountingService:
         filters = [
             TransactionSummaryRow.is_deleted.is_(False),
             TransactionUploadFile.is_deleted.is_(False),
+            active_shop_filter(TransactionSummaryRow.shop_id),
+            active_shop_filter(TransactionUploadFile.shop_id),
             TransactionSummaryRow.accounting_year == year,
             TransactionSummaryRow.accounting_month.is_not(None),
         ]

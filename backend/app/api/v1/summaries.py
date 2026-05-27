@@ -291,7 +291,7 @@ def to_summary_report_out(row: dict) -> SummaryReportOut:
         id=record_id,
         org_id=int(row.get("org_id") or 0),
         org_name=row.get("org_name"),
-        shop_ids=shop_ids,
+        shop_id=shop_id,
         source_year=source_year,
         source_month=source_month,
         source_date=month_date_label(source_year, source_month),

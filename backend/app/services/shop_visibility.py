@@ -11,5 +11,5 @@ def active_shop_filter(shop_id_column):
         select(1).select_from(Shop).where(
             Shop.id == shop_id_column,
             Shop.is_deleted.is_(False),
-        )
+        ).correlate_except(Shop)
     )
