@@ -9,6 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import worker_process_shutdown
 
 from app.core.config import settings
@@ -28,11 +29,18 @@ celery_app.conf.update(
     task_soft_time_limit=3600,
     task_time_limit=7200,
 )
+celery_app.conf.beat_schedule = {
+    "ensure-source-partitions-daily": {
+        "task": "app.tasks.partition_maintenance.ensure_source_partitions_task",
+        "schedule": crontab(minute=0, hour=0),
+    }
+}
 
 celery_app.autodiscover_tasks(["app.tasks"])
 celery_app.conf.imports = (
     "app.tasks.transaction_accounting",
     "app.tasks.bic_accounting",
+    "app.tasks.partition_maintenance",
 )
 
 logger = logging.getLogger("finengine.worker")
@@ -86,6 +94,7 @@ def _mark_task_failed(task, upload_file, error: Exception | str, *, previous_sta
     error_message = SOURCE_FILE_UNAVAILABLE_MESSAGE if is_expired else str(error)
     _restore_processing_result_state(task, upload_file, previous_state)
     task.status = "expired" if is_expired else "failed"
+    task.progress = 100
     task.error_message = error_message
     task.finished_at = datetime.now(timezone.utc)
     if upload_file:
@@ -401,6 +410,10 @@ def recover_queued_processing_tasks(limit: int = 100) -> int:
     return _run_async_in_worker(_recover_queued_processing_tasks_async(limit=limit))
 
 
+def reconcile_terminal_running_processing_tasks(limit: int = 100) -> int:
+    return _run_async_in_worker(_reconcile_terminal_running_processing_tasks_async(limit=limit))
+
+
 async def _recover_queued_processing_tasks_async(limit: int = 100) -> int:
     from sqlalchemy import select
 
@@ -435,6 +448,45 @@ async def _recover_queued_processing_tasks_async(limit: int = 100) -> int:
             dispatched += 1
         await db.commit()
         return dispatched
+
+
+async def _reconcile_terminal_running_processing_tasks_async(limit: int = 100) -> int:
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.task import ProcessingTask
+    from app.models.upload import UploadFile
+
+    terminal_failed_states = {"FAILURE", "REVOKED"}
+    async with async_session_factory() as db:
+        task_rows = await db.execute(
+            select(ProcessingTask, UploadFile)
+            .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
+            .where(
+                ProcessingTask.status == "running",
+                ProcessingTask.celery_task_id.is_not(None),
+                ProcessingTask.is_deleted.is_(False),
+                UploadFile.is_deleted.is_(False),
+            )
+            .order_by(ProcessingTask.id.asc())
+            .limit(limit)
+        )
+        rows = task_rows.all()
+        reconciled = 0
+        for task, upload_file in rows:
+            celery_result = celery_app.AsyncResult(task.celery_task_id)
+            if celery_result.state not in terminal_failed_states:
+                continue
+
+            error = celery_result.result
+            if error is None:
+                error = f"Celery任务已结束但数据库仍为运行中，状态: {celery_result.state}"
+            _mark_task_failed(task, upload_file, error)
+            reconciled += 1
+
+        if reconciled:
+            await db.commit()
+        return reconciled
 
 
 async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id: int) -> int:
@@ -527,6 +579,7 @@ async def _process_file_platform_async(
         task = result.scalar_one_or_none()
         if not task:
             return
+        task_id = task.id
 
         previous_result_state = _capture_processing_result_state(task, None)
         task.status = "running"
@@ -1011,6 +1064,7 @@ async def _process_file_platform_async(
                 from app.tasks.aggregation import AggregationService
 
                 summary_ids: list[int] = []
+                summary_lookup: dict[tuple[int, int], int] = {}
                 for group_key_str, agg_values in proc_result["groups"].items():
                     parts = group_key_str.split("|")
                     g_shop, g_year, g_month = parts[0], int(parts[1]), int(parts[2])
@@ -1032,6 +1086,32 @@ async def _process_file_platform_async(
                         shop_platform_code=report_platform_code,
                     )
                     summary_ids.append(summary.id)
+                    summary_lookup[(g_year, g_month)] = summary.id
+
+                if (
+                    file_type == "动账"
+                    and platform_code == "douyin"
+                    and proc_result.get("detail_rows")
+                    and shop_id is not None
+                    and source_year is not None
+                    and source_month is not None
+                ):
+                    from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
+
+                    await DouyinDongzhangDetailService.sync_details(
+                        db,
+                        task_id=task.id,
+                        file_id=file_id,
+                        org_id=org_id,
+                        shop_id=shop_id,
+                        shop_name=shop_name,
+                        source_year=int(source_year),
+                        source_month=int(source_month),
+                        source_platform_code=platform_code,
+                        report_platform_code=report_platform_code,
+                        detail_rows=list(proc_result.get("detail_rows") or []),
+                        summary_lookup=summary_lookup,
+                    )
 
                 # 8. Update final status
                 task.status = _result_task_status_from_processor_result(proc_result)
@@ -1058,7 +1138,7 @@ async def _process_file_platform_async(
 
         except Exception as e:
             await db.rollback()
-            task_result = await db.execute(select(ProcessingTask).where(ProcessingTask.id == task.id, ProcessingTask.is_deleted.is_(False)))
+            task_result = await db.execute(select(ProcessingTask).where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False)))
             task = task_result.scalar_one_or_none()
             upload_file = None
             if task is not None:

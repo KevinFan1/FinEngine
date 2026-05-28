@@ -12,6 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
+from app.services.douyin_dongzhang_detail_service import (
+    DONGZHANG_DETAIL_EXPORT_COLUMNS,
+    MONEY_FIELDS as DONGZHANG_DETAIL_MONEY_FIELDS,
+    DouyinDongzhangDetailService,
+)
 from app.services.summary_adjustment_service import SummaryAdjustmentService
 from app.services.shop_visibility import active_shop_filter
 
@@ -283,12 +288,8 @@ class SummaryService:
             count_stmt = count_stmt.where(keyword_cond)
 
         stmt = stmt.order_by(
-            FinancialSummary.source_year.desc(),
-            FinancialSummary.source_month.desc(),
-            FinancialSummary.summary_year.desc(),
-            FinancialSummary.summary_month.desc(),
-            FinancialSummary.source_platform_code,
-            FinancialSummary.shop_name,
+            FinancialSummary.updated_at.desc(),
+            FinancialSummary.id.desc(),
         )
 
         total_result = await db.execute(count_stmt)
@@ -332,6 +333,7 @@ class SummaryService:
         ids: list[int] | None = None,
         page: int | None = None,
         page_size: int | None = None,
+        include_dongzhang_details: bool = False,
     ) -> io.BytesIO:
         """Export financial summaries to an Excel file (in-memory BytesIO)."""
         # Query all matching rows (no pagination)
@@ -397,12 +399,8 @@ class SummaryService:
             )
 
         stmt = stmt.order_by(
-            FinancialSummary.source_year.desc(),
-            FinancialSummary.source_month.desc(),
-            FinancialSummary.summary_year.desc(),
-            FinancialSummary.summary_month.desc(),
-            FinancialSummary.source_platform_code,
-            FinancialSummary.shop_name,
+            FinancialSummary.updated_at.desc(),
+            FinancialSummary.id.desc(),
         )
 
         if page is not None and page_size is not None:
@@ -415,7 +413,14 @@ class SummaryService:
         result = await db.execute(stmt)
         rows = list(result.scalars().all())
 
-        return SummaryService._build_summary_workbook(rows)
+        detail_rows = []
+        if include_dongzhang_details:
+            detail_rows = await DouyinDongzhangDetailService.load_export_rows_for_summary_ids(
+                db,
+                summary_ids=[row.id for row in rows],
+            )
+
+        return SummaryService._build_summary_workbook(rows, detail_rows=detail_rows)
 
     @staticmethod
     async def list_report_summaries(
@@ -484,6 +489,7 @@ class SummaryService:
             .where(*filters)
             .group_by(*group_cols)
             .order_by(
+                func.max(FinancialSummary.updated_at).desc(),
                 FinancialSummary.source_year.desc(),
                 FinancialSummary.source_month.desc(),
                 FinancialSummary.report_platform_code,
@@ -529,6 +535,7 @@ class SummaryService:
         ids: list[str] | None = None,
         page: int | None = None,
         page_size: int | None = None,
+        include_dongzhang_details: bool = False,
     ) -> io.BytesIO:
         """Export accounting-month aggregated summaries to Excel."""
         shop_id = single_int_filter_value(shop_ids)
@@ -573,6 +580,7 @@ class SummaryService:
             .where(*filters)
             .group_by(*group_cols)
             .order_by(
+                func.max(FinancialSummary.updated_at).desc(),
                 FinancialSummary.source_year.desc(),
                 FinancialSummary.source_month.desc(),
                 FinancialSummary.report_platform_code,
@@ -607,10 +615,20 @@ class SummaryService:
         if ids is not None:
             selected_ids = set(ids)
             rows = [row for row in rows if SummaryService.report_row_id(row) in selected_ids]
-        return SummaryService._build_report_workbook(rows)
+        detail_rows = []
+        if include_dongzhang_details:
+            detail_rows = await DouyinDongzhangDetailService.load_export_rows_for_report_rows(
+                db,
+                rows=rows,
+            )
+        return SummaryService._build_report_workbook(rows, detail_rows=detail_rows)
 
     @staticmethod
-    def _build_summary_workbook(rows: list[FinancialSummary]) -> io.BytesIO:
+    def _build_summary_workbook(
+        rows: list[FinancialSummary],
+        *,
+        detail_rows: list[dict[str, object]] | None = None,
+    ) -> io.BytesIO:
         wb = Workbook(write_only=True)
         ws = wb.create_sheet(title="财务汇总")
         ws.append(_write_only_header_row(ws, EXPORT_HEADERS))
@@ -636,13 +654,19 @@ class SummaryService:
                     float(s.bic or 0),
                 ]
             )
+        if detail_rows is not None:
+            SummaryService._append_dongzhang_detail_sheet(wb, detail_rows)
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
         return buffer
 
     @staticmethod
-    def _build_report_workbook(rows: list[dict]) -> io.BytesIO:
+    def _build_report_workbook(
+        rows: list[dict],
+        *,
+        detail_rows: list[dict[str, object]] | None = None,
+    ) -> io.BytesIO:
         wb = Workbook(write_only=True)
         ws = wb.create_sheet(title="汇总报表")
         ws.append(_write_only_header_row(ws, REPORT_EXPORT_HEADERS))
@@ -667,10 +691,27 @@ class SummaryService:
                     float(row.get("bic") or 0),
                 ]
             )
+        if detail_rows is not None:
+            SummaryService._append_dongzhang_detail_sheet(wb, detail_rows)
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
         return buffer
+
+    @staticmethod
+    def _append_dongzhang_detail_sheet(wb: Workbook, detail_rows: list[dict[str, object]]) -> None:
+        ws = wb.create_sheet(title="Douyin动账源明细")
+        ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
+        for row in detail_rows:
+            ws.append(
+                [
+                    DouyinDongzhangDetailService._format_export_value(
+                        row.get(field),
+                        money=(field in DONGZHANG_DETAIL_MONEY_FIELDS),
+                    )
+                    for field, _label in DONGZHANG_DETAIL_EXPORT_COLUMNS
+                ]
+            )
 
     @staticmethod
     def _platform_label(platform_name: str) -> str:

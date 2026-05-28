@@ -2,7 +2,7 @@
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,8 +10,9 @@ from app.core.database import get_async_session
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
-from app.schemas.summary import SummaryOut, SummaryReportOut
+from app.schemas.summary import SummaryDongzhangDetailOut, SummaryOut, SummaryReportOut
 from app.services.audit_service import AuditService
+from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
 from app.services.summary_service import SummaryService
 from app.utils.query_filters import resolve_org_ids
 
@@ -340,6 +341,106 @@ def month_date_label(year: int | None, month: int | None) -> str:
     return f"{int(year)}-{int(month):02d}"
 
 
+@router.get("/{summary_id}/dongzhang-details", response_model=ApiResponse[PageResponse[SummaryDongzhangDetailOut]])
+async def list_summary_dongzhang_details(
+    summary_id: int,
+    org_id: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    org_ids = resolve_org_ids(
+        user_role=current_user.role,
+        user_org_id=current_user.org_id,
+        requested_org_id=org_id,
+    )
+    try:
+        _summary, org_name, shop_color, rows, total = await DouyinDongzhangDetailService.get_summary_details(
+            db,
+            summary_id=summary_id,
+            org_ids=org_ids,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return ApiResponse(
+        data=PageResponse(
+            items=[
+                SummaryDongzhangDetailOut(**DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name, shop_color=shop_color))
+                for row in rows
+            ],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
+@router.get("/{summary_id}/dongzhang-details/export")
+async def export_summary_dongzhang_details(
+    summary_id: int,
+    request: Request,
+    org_id: str | None = Query(None),
+    scope: str = Query("all", pattern="^(all|current_page|selected)$"),
+    ids: str | None = Query(None, description="Comma-separated detail IDs for selected export"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    org_ids = resolve_org_ids(
+        user_role=current_user.role,
+        user_org_id=current_user.org_id,
+        requested_org_id=org_id,
+    )
+    detail_ids = parse_summary_ids(ids) if scope == "selected" else None
+    try:
+        summary, buffer = await DouyinDongzhangDetailService.export_summary_details(
+            db,
+            summary_id=summary_id,
+            org_ids=org_ids,
+            ids=detail_ids,
+            page=page if scope == "current_page" else None,
+            page_size=page_size if scope == "current_page" else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    filename = quote(
+        f"Douyin动账源明细_{summary.source_year or 0}{summary.source_month or 0:02d}_{summary.shop_name}_{'选中' if scope == 'selected' else f'第{page}页' if scope == 'current_page' else '全部'}.xlsx"
+    )
+
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    await AuditService.log(
+        db,
+        user_id=current_user.id,
+        username=current_user.username,
+        display_name=current_user.display_name,
+        org_id=current_user.org_id,
+        module="summary",
+        action="export",
+        description=f"用户 [{current_user.display_name}] 导出动账源明细",
+        ip=ip,
+        user_agent=ua,
+        extra_data={
+            "summary_id": summary_id,
+            "scope": scope,
+            "ids": detail_ids,
+            "page": page if scope == "current_page" else None,
+            "page_size": page_size if scope == "current_page" else None,
+        },
+    )
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
 @router.get("/report/export")
 async def export_report_summaries(
     request: Request,
@@ -359,6 +460,7 @@ async def export_report_summaries(
     org_id: str | None = Query(None),
     scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None, description="Comma-separated report row IDs for selected export"),
+    include_dongzhang_details: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -400,6 +502,7 @@ async def export_report_summaries(
         ids=selected_ids,
         page=page if scope == "current_page" else None,
         page_size=page_size if scope == "current_page" else None,
+        include_dongzhang_details=include_dongzhang_details,
     )
 
     parts = ["汇总报表"]
@@ -487,6 +590,7 @@ async def export_summaries(
     org_id: str | None = Query(None),
     scope: str = Query("all", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None, description="Comma-separated summary IDs for selected export"),
+    include_dongzhang_details: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -523,6 +627,7 @@ async def export_summaries(
         ids=selected_ids,
         page=page if scope == "current_page" else None,
         page_size=page_size if scope == "current_page" else None,
+        include_dongzhang_details=include_dongzhang_details,
     )
 
     # Build filename

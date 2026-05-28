@@ -2,6 +2,7 @@ from app.models.base import Base
 from app.models.bic_accounting import BicDetail, BicSourceRow, BicTask, BicUploadFile
 from app.models.cash_flow import CashFlowItem
 from app.models.category_dict import CategoryDict
+from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
 from app.models.file_spec import FileSpec
 from app.models.operation_log import OperationLog
 from app.models.order_index import OrderIndex
@@ -23,6 +24,7 @@ from app.models.transaction_accounting import (
 )
 from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
+from app.models.user_preference import UserPreference
 
 __all__ = [
     "Base",
@@ -32,6 +34,7 @@ __all__ = [
     "BicUploadFile",
     "CashFlowItem",
     "CategoryDict",
+    "DouyinDongzhangDetail",
     "FileSpec",
     "Organization",
     "User",
@@ -52,4 +55,5 @@ __all__ = [
     "OperationLog",
     "OrderIndex",
     "Shop",
+    "UserPreference",
 ]

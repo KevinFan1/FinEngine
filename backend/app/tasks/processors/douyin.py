@@ -15,6 +15,74 @@ from app.tasks.processors.base import (
 from app.utils.money import ZERO_MONEY, safe_decimal
 from app.utils.text_classifier import classify_text
 
+DOUYIN_DONGZHANG_DETAIL_FIELD_MAP: tuple[tuple[str, str], ...] = (
+    ("transaction_time", "动账时间"),
+    ("transaction_flow_no", "动帐流水号"),
+    ("transaction_direction", "动账方向"),
+    ("transaction_amount", "动账金额"),
+    ("transaction_account", "动账账户"),
+    ("transaction_scene", "动账场景"),
+    ("billing_type", "计费类型"),
+    ("sub_order_no", "子订单号"),
+    ("order_no", "订单号"),
+    ("after_sale_no", "售后编号"),
+    ("order_time", "下单时间"),
+    ("product_id", "商品ID"),
+    ("product_name", "商品名称"),
+    ("author_id", "达人ID"),
+    ("author_name", "达人名称"),
+    ("order_type", "订单类型"),
+    ("order_paid_amount_raw", "订单实付应结"),
+    ("shipping_fee", "运费实付"),
+    ("platform_subsidy_shipping", "实际平台补贴_运费"),
+    ("platform_subsidy", "实际平台补贴"),
+    ("other_platform_subsidy", "其他平台补贴"),
+    ("trade_in_deduction", "以旧换新抵扣"),
+    ("gov_subsidy_platform", "政府补贴平台垫资"),
+    ("author_subsidy", "实际达人补贴"),
+    ("douyin_pay_subsidy", "实际抖音支付补贴"),
+    ("douyin_monthly_subsidy", "实际抖音月付营销补贴"),
+    ("bank_subsidy", "银行补贴"),
+    ("order_refund_raw", "订单退款"),
+    ("platform_fee_raw", "平台服务费"),
+    ("commission_raw", "佣金"),
+    ("provider_commission_raw", "服务商佣金"),
+    ("channel_share", "渠道分成"),
+    ("merchant_fee_raw", "招商服务费"),
+    ("promotion_fee_raw", "站外推广费"),
+    ("other_share", "其他分成"),
+    ("is_commission_free", "是否免佣"),
+    ("commission_free_amount", "免佣金额"),
+    ("merchant_name", "商户主体名称"),
+    ("remark", "备注"),
+)
+
+DOUYIN_DONGZHANG_DECIMAL_FIELDS: frozenset[str] = frozenset(
+    {
+        "transaction_amount",
+        "order_paid_amount_raw",
+        "shipping_fee",
+        "platform_subsidy_shipping",
+        "platform_subsidy",
+        "other_platform_subsidy",
+        "trade_in_deduction",
+        "gov_subsidy_platform",
+        "author_subsidy",
+        "douyin_pay_subsidy",
+        "douyin_monthly_subsidy",
+        "bank_subsidy",
+        "order_refund_raw",
+        "platform_fee_raw",
+        "commission_raw",
+        "provider_commission_raw",
+        "channel_share",
+        "merchant_fee_raw",
+        "promotion_fee_raw",
+        "other_share",
+        "commission_free_amount",
+    }
+)
+
 # ── Douyin 动账 expected headers ─────────────────────────────────────────────
 DOUYIN_DONGZHANG_HEADERS: list[str] = [
     "动账时间",
@@ -217,10 +285,16 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         )
 
     def compute_year_month(self, vals: dict[str, object]) -> tuple[int, int] | None:
+        period = self.compute_summary_period(vals)
+        if period is None:
+            return None
+        return period[0], period[1]
+
+    def compute_summary_period(self, vals: dict[str, object]) -> tuple[int, int, str] | None:
         """Compute 调年月 from 下单时间 (preferred) or 动账时间 (fallback)."""
         order_time = parse_datetime(vals.get("下单时间"))
         if order_time is not None:
-            return (order_time.year, order_time.month)
+            return (order_time.year, order_time.month, "order_time")
 
         action_time = parse_datetime(vals.get("动账时间"))
         if action_time is not None:
@@ -229,7 +303,7 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             if month <= 0:
                 year -= 1
                 month = 12
-            return (year, month)
+            return (year, month, "transaction_time_previous_month")
 
         return None
 
@@ -238,22 +312,12 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         vals: dict[str, object],
         category_dict: dict[str, list[str]] | None = None,
     ) -> dict[str, Decimal]:
-        beizhu = canonical_remark(safe_str(vals.get("备注")))
-
-        matched_compensation = self._match_compensation(beizhu, category_dict)
-
-        refund_to_compensation = ZERO_MONEY
-        if "退款转赔付" in beizhu:
-            refund_to_compensation = safe_decimal(vals.get("动账金额"))
-
-        cashback = ZERO_MONEY
-        if "返现" in beizhu and safe_str(vals.get("动账方向")) == "入账":
-            cashback = safe_decimal(vals.get("动账金额"))
+        detail_logic = self._compute_detail_logic(vals, category_dict)
 
         order_paid = safe_decimal(vals.get("订单实付应结"))
         order_refund = safe_decimal(vals.get("订单退款"))
-        order_paid_amount = order_paid - cashback
-        refund_amount = refund_to_compensation - order_refund
+        order_paid_amount = order_paid - detail_logic["cashback"]
+        refund_amount = detail_logic["refund_to_compensation"] - order_refund
         gmv = order_paid_amount - refund_amount
 
         platform_income = safe_decimal(vals.get("实际平台补贴")) + safe_decimal(vals.get("实际抖音支付补贴")) + safe_decimal(vals.get("实际抖音月付营销补贴"))
@@ -264,7 +328,7 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             "gmv": gmv,
             "platform_income": platform_income,
             "platform_fee": -safe_decimal(vals.get("平台服务费")),
-            "return_cost": safe_decimal(vals.get("动账金额")) if matched_compensation else ZERO_MONEY,
+            "return_cost": detail_logic["return_cost"],
             "commission": safe_decimal(vals.get("佣金")),
             "merchant_fee": safe_decimal(vals.get("招商服务费")),
             "promotion_fee": safe_decimal(vals.get("站外推广费")),
@@ -283,6 +347,71 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             return None
 
         return classify_text(beizhu, category_dict).category
+
+    def build_detail_row(
+        self,
+        vals: dict[str, object],
+        *,
+        row_values: dict[str, Decimal],
+        source_row_number: int,
+        category_dict: dict[str, list[str]] | None = None,
+    ) -> dict[str, object] | None:
+        period = self.compute_summary_period(vals)
+        if period is None:
+            return None
+
+        detail_logic = self._compute_detail_logic(vals, category_dict)
+        detail_row: dict[str, object] = {
+            "source_row_number": source_row_number,
+            "summary_year": period[0],
+            "summary_month": period[1],
+            "period_source": period[2],
+            "matched_compensation": detail_logic["matched_compensation"],
+            "refund_to_compensation": detail_logic["refund_to_compensation"],
+            "cashback": detail_logic["cashback"],
+            "order_paid": row_values["order_paid_amount"],
+            "refund_amount": row_values["refund_amount"],
+            "gmv": row_values["gmv"],
+            "platform_income": row_values["platform_income"],
+            "platform_fee_positive": row_values["platform_fee"],
+            "return_cost": row_values["return_cost"],
+            "commission_derived": row_values["commission"],
+            "bic": ZERO_MONEY,
+            "insurance_fee": ZERO_MONEY,
+        }
+
+        for field_name, header in DOUYIN_DONGZHANG_DETAIL_FIELD_MAP:
+            raw_value = vals.get(header)
+            if field_name in DOUYIN_DONGZHANG_DECIMAL_FIELDS:
+                detail_row[field_name] = safe_decimal(raw_value)
+            else:
+                detail_row[field_name] = safe_str(raw_value)
+        return detail_row
+
+    def _compute_detail_logic(
+        self,
+        vals: dict[str, object],
+        category_dict: dict[str, list[str]] | None = None,
+    ) -> dict[str, Decimal | str]:
+        beizhu = canonical_remark(safe_str(vals.get("备注")))
+        matched_compensation = self._match_compensation(beizhu, category_dict) or ""
+
+        refund_to_compensation = ZERO_MONEY
+        if "退款转赔付" in beizhu:
+            refund_to_compensation = safe_decimal(vals.get("动账金额"))
+
+        cashback = ZERO_MONEY
+        if "返现" in beizhu and safe_str(vals.get("动账方向")) == "入账":
+            cashback = safe_decimal(vals.get("动账金额"))
+
+        return_cost = safe_decimal(vals.get("动账金额")) if matched_compensation else ZERO_MONEY
+
+        return {
+            "matched_compensation": matched_compensation,
+            "refund_to_compensation": refund_to_compensation,
+            "cashback": cashback,
+            "return_cost": return_cost,
+        }
 
 
 class DouyinProcessor(FinancialSummaryExcelProcessorMixin, SimpleMonthlySumProcessorMixin):

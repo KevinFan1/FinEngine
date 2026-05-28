@@ -17,6 +17,7 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.task import TaskListOut, TaskOut
 from app.services.platform_profile_service import resolve_platform_profile
+from app.services.shop_visibility import active_shop_filter
 from app.utils.query_filters import datetime_range_filters, parse_query_datetime, split_int_filter_values
 
 router = APIRouter()
@@ -85,14 +86,22 @@ async def list_tasks(
             Organization,
             and_(Organization.id == ProcessingTask.org_id, Organization.is_deleted.is_(False)),
         )
-        .where(ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
-        .order_by(ProcessingTask.id.desc())
+        .where(
+            ProcessingTask.is_deleted.is_(False),
+            UploadFile.is_deleted.is_(False),
+            active_shop_filter(UploadFile.shop_id),
+        )
+        .order_by(ProcessingTask.updated_at.desc(), ProcessingTask.id.desc())
     )
     count_stmt = (
         select(func.count())
         .select_from(ProcessingTask)
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
-        .where(ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
+        .where(
+            ProcessingTask.is_deleted.is_(False),
+            UploadFile.is_deleted.is_(False),
+            active_shop_filter(UploadFile.shop_id),
+        )
     )
 
     # Scope: non-superadmin only sees own org
@@ -214,6 +223,7 @@ def build_task_list_out(
         started_at=task.started_at,
         finished_at=task.finished_at,
         created_at=task.created_at,
+        updated_at=task.updated_at,
     )
 
 
@@ -240,7 +250,12 @@ async def _load_task_with_file(
     result = await db.execute(
         select(ProcessingTask, UploadFile)
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
-        .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
+        .where(
+            ProcessingTask.id == task_id,
+            ProcessingTask.is_deleted.is_(False),
+            UploadFile.is_deleted.is_(False),
+            active_shop_filter(UploadFile.shop_id),
+        )
     )
     row = result.one_or_none()
     if row is None:
@@ -362,7 +377,12 @@ async def get_task(
             Organization,
             and_(Organization.id == ProcessingTask.org_id, Organization.is_deleted.is_(False)),
         )
-        .where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False), UploadFile.is_deleted.is_(False))
+        .where(
+            ProcessingTask.id == task_id,
+            ProcessingTask.is_deleted.is_(False),
+            UploadFile.is_deleted.is_(False),
+            active_shop_filter(UploadFile.shop_id),
+        )
     )
     row = result.one_or_none()
     if row is None:
@@ -470,7 +490,16 @@ async def get_task_progress(
 
     Returns only status, progress percentage, and row counts.
     """
-    result = await db.execute(select(ProcessingTask).where(ProcessingTask.id == task_id, ProcessingTask.is_deleted.is_(False)))
+    result = await db.execute(
+        select(ProcessingTask)
+        .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
+        .where(
+            ProcessingTask.id == task_id,
+            ProcessingTask.is_deleted.is_(False),
+            UploadFile.is_deleted.is_(False),
+            active_shop_filter(UploadFile.shop_id),
+        )
+    )
     task = result.scalar_one_or_none()
     if task is None:
         return ApiResponse(code=404, message="任务不存在")

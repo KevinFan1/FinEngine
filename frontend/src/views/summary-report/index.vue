@@ -119,6 +119,9 @@
                         >
                     </div>
                     <div class="card-header-actions">
+                        <el-checkbox v-model="includeDongzhangDetailsInExport">
+                            导出附带源明细
+                        </el-checkbox>
                         <el-button
                             :disabled="selectedCount === 0"
                             @click="clearSelectedRows"
@@ -546,6 +549,7 @@ const shopOptions = ref<Shop[]>([]);
 const summaryTableRef = ref<SummaryTableInstance>();
 const detailDrawerVisible = ref(false);
 const detailContext = ref<SummaryDetailContext | null>(null);
+const includeDongzhangDetailsInExport = ref(false);
 
 const pagination = reactive({
     page: 1,
@@ -883,6 +887,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             page: scope === "current_page" ? pagination.page : undefined,
             page_size:
                 scope === "current_page" ? pagination.pageSize : undefined,
+            include_dongzhang_details: includeDongzhangDetailsInExport.value,
         });
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -901,6 +906,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                 ? `关键词${searchForm.keyword.trim()}`
                 : "关键词全部",
             "汇总报表",
+            includeDongzhangDetailsInExport.value ? "附带源明细" : null,
             scopeLabel,
         ]);
         document.body.appendChild(link);

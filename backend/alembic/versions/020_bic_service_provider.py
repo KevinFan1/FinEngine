@@ -23,7 +23,7 @@ def upgrade() -> None:
         "fin_bic_details",
         sa.Column(
             "service_provider",
-            sa.String(length=200),
+            sa.String(length=500),
             nullable=False,
             server_default="-",
             comment="服务商",

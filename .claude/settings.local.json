@@ -34,7 +34,8 @@
       "Bash(sqlite3 *)",
       "Bash(grep -v '^--$')",
       "Bash(python -c \"import app.api.v1.bic_accounting; import app.api.v1.transaction_accounting; import app.api.v1.summaries; print\\('OK'\\)\")",
-      "Bash(/Users/kevinfan/Desktop/projects/FinEngine/backend/.venv/bin/python *)"
+      "Bash(/Users/kevinfan/Desktop/projects/FinEngine/backend/.venv/bin/python *)",
+      "Bash(rtk git *)"
     ]
   }
 }

@@ -235,7 +235,7 @@
                 <section class="reconciliation-preview">
                     <div class="reconciliation-preview-header">
                         <div class="reconciliation-panel-title">导出预览</div>
-                        <div class="reconciliation-panel-note">导出将按店铺自动拆分 sheet，明细写入对应源数据。</div>
+                        <div class="reconciliation-panel-note">导出包含汇总和统一明细两个 sheet，明细会额外带出店铺列。</div>
                     </div>
                     <div class="reconciliation-preview-grid">
                         <div class="reconciliation-preview-card">
@@ -434,7 +434,7 @@ const reconciliationPreviewHint = computed(() => {
         return `当前条件预计命中 ${reconciliationPreviewTotal.value?.toLocaleString("zh-CN")} 行，超过系统上限 ${BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请继续缩小范围。`;
     }
     if (reconciliationPreviewTotal.value === 0) return "当前条件会导出一个仅含表头的空白工作簿。";
-    if (reconciliationPreviewTotal.value !== null) return `当前条件预计命中 ${reconciliationPreviewTotal.value.toLocaleString("zh-CN")} 行源数据，可以直接导出。`;
+    if (reconciliationPreviewTotal.value !== null) return `当前条件预计命中 ${reconciliationPreviewTotal.value.toLocaleString("zh-CN")} 行源数据，将汇总到同一个明细 sheet 导出。`;
     return "";
 });
 const reconciliationExportDisabled = computed(() => {

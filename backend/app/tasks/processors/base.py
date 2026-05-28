@@ -33,6 +33,8 @@ DATE_FORMATS: tuple[str, ...] = (
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
     "%Y-%m-%d",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
     "%Y年%m月%d日 %H:%M:%S",
     "%Y年%m月%d日 %H:%M",
     "%Y年%m月%d日",
@@ -98,7 +100,10 @@ def safe_str(value: object) -> str:
     """Convert a cell value to stripped string, returning '' for None."""
     if value is None:
         return ""
-    return str(value).strip()
+    text = str(value).strip()
+    if text.startswith("'"):
+        return text[1:].strip()
+    return text
 
 
 def canonical_remark(value: str):
@@ -397,6 +402,17 @@ class FinancialSummaryStrategy(ABC):
     def finalize_agg(self, agg: dict[str, Decimal]) -> dict[str, Decimal]:
         return normalize_positive_summary_fields(agg)
 
+    def build_detail_row(
+        self,
+        vals: dict[str, object],
+        *,
+        row_values: dict[str, Decimal],
+        source_row_number: int,
+        category_dict: dict[str, list[str]] | None = None,
+    ) -> dict[str, object] | None:
+        _ = vals, row_values, source_row_number, category_dict
+        return None
+
 
 class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
     """Template method implementation for summary-field tabular processors."""
@@ -463,14 +479,16 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
 
             groups: dict[GroupKey, dict[str, Decimal]] = {}
 
-            for row in row_iter:
+            detail_rows: list[dict[str, object]] = []
+
+            for row_number, row in enumerate(row_iter, start=_header_row_number + 1):
                 result["total_rows"] += 1
                 try:
                     vals = self._row_to_values(row, col_idx)
                     year_month = strategy.compute_year_month(vals)
                     if year_month is None:
                         result["failed_rows"] += 1
-                        result["errors"].append(f"Row {result['total_rows'] + 1}: 无法解析归属年月")
+                        result["errors"].append(f"Row {row_number}: 无法解析归属年月")
                         continue
 
                     key = GroupKey(shop=shop_name, year=year_month[0], month=year_month[1])
@@ -479,12 +497,23 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
                     for field, value in row_values.items():
                         agg[field] = agg.get(field, ZERO_MONEY) + safe_decimal(value)
 
+                    detail_row = strategy.build_detail_row(
+                        vals,
+                        row_values=row_values,
+                        source_row_number=row_number,
+                        category_dict=category_dict,
+                    )
+                    if detail_row:
+                        detail_rows.append(detail_row)
+
                     result["success_rows"] += 1
                 except Exception as e:
                     result["failed_rows"] += 1
-                    result["errors"].append(f"Row {result['total_rows'] + 1}: {e}")
+                    result["errors"].append(f"Row {row_number}: {e}")
 
         result["groups"] = self._serialize_groups({key: strategy.finalize_agg(agg) for key, agg in groups.items()})
+        if detail_rows:
+            result["detail_rows"] = detail_rows
         return result
 
     @staticmethod

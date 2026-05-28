@@ -2,11 +2,17 @@
     <div class="page-container transaction-page split-rule-page">
         <el-card shadow="never" class="search-card">
             <div class="rule-toolbar">
-                <SearchCardIntro
-                    kicker="RULE TREE"
-                    title="资金重分类规则"
-                    tip="左侧只看科目和重分类，右侧专门维护当前重分类下的规则"
-                />
+                <div class="rule-toolbar__intro">
+                    <div class="rule-toolbar__head">
+                        <div class="rule-toolbar__copy">
+                            <p class="rule-toolbar__kicker">RULE TREE</p>
+                            <h2 class="rule-toolbar__title">资金重分类规则</h2>
+                        </div>
+                        <div class="rule-toolbar__tip">
+                            <span>左侧只看科目和重分类，右侧专门维护当前重分类下的规则</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="rule-toolbar__actions">
                     <el-input
                         v-model="searchText"
@@ -51,86 +57,34 @@
                     </div>
                 </template>
 
-                <div class="rule-tree">
-                    <template v-if="filteredSubjectNodes.length">
-                        <section
-                            v-for="subject in filteredSubjectNodes"
-                            :key="subject.key"
-                            class="tree-group"
-                        >
-                            <div class="tree-row tree-row--subject">
-                                <button
-                                    type="button"
-                                    class="tree-row__main"
-                                    @click="toggleExpandedSubject(subject.key)"
-                                >
-                                    <span class="tree-row__icon">
-                                        <el-icon v-if="subject.categories.length">
-                                            <ArrowDown
-                                                v-if="shouldExpandSubject(subject.key)"
-                                            />
-                                            <ArrowRight v-else />
-                                        </el-icon>
-                                    </span>
-                                    <span class="tree-row__copy">
-                                        <strong>{{ subject.subject.name }}</strong>
-                                        <small>
-                                            {{ subject.categories.length }} 个重分类 ·
-                                            {{ subject.ruleCount }} 条规则
-                                        </small>
-                                    </span>
-                                </button>
-
-                                <el-dropdown
-                                    trigger="click"
-                                    @command="
-                                        (command) =>
-                                            handleSubjectCommand(subject, String(command))
-                                    "
-                                >
-                                    <button
-                                        type="button"
-                                        class="tree-row__more"
-                                        :disabled="isBusy"
-                                    >
-                                        ···
-                                    </button>
-                                    <template #dropdown>
-                                        <el-dropdown-menu>
-                                            <el-dropdown-item command="create-category">
-                                                新增重分类
-                                            </el-dropdown-item>
-                                            <el-dropdown-item command="rename">
-                                                改名
-                                            </el-dropdown-item>
-                                            <el-dropdown-item command="delete">
-                                                删除
-                                            </el-dropdown-item>
-                                        </el-dropdown-menu>
-                                    </template>
-                                </el-dropdown>
-                            </div>
-
-                            <div
-                                v-if="shouldExpandSubject(subject.key)"
-                                class="tree-group__children"
+                <div class="rule-tree__scroll">
+                    <div class="rule-tree">
+                        <template v-if="filteredSubjectNodes.length">
+                            <section
+                                v-for="subject in filteredSubjectNodes"
+                                :key="subject.key"
+                                class="tree-group"
                             >
-                                <div
-                                    v-for="category in subject.categories"
-                                    :key="category.key"
-                                    class="tree-row tree-row--category"
-                                    :class="{
-                                        'is-active': activeCategoryKey === category.key,
-                                    }"
-                                >
+                                <div class="tree-row tree-row--subject">
                                     <button
                                         type="button"
-                                        class="tree-row__main tree-row__main--category"
-                                        @click="selectCategory(category.key)"
+                                        class="tree-row__main"
+                                        @click="toggleExpandedSubject(subject.key)"
                                     >
+                                        <span class="tree-row__icon">
+                                            <el-icon v-if="subject.categories.length">
+                                                <ArrowDown
+                                                    v-if="shouldExpandSubject(subject.key)"
+                                                />
+                                                <ArrowRight v-else />
+                                            </el-icon>
+                                        </span>
                                         <span class="tree-row__copy">
-                                            <strong>{{ category.category.name }}</strong>
-                                            <small>{{ categoryRuleText(category) }}</small>
+                                            <strong>{{ subject.subject.name }}</strong>
+                                            <small>
+                                                {{ subject.categories.length }} 个重分类 ·
+                                                {{ subject.ruleCount }} 条规则
+                                            </small>
                                         </span>
                                     </button>
 
@@ -138,11 +92,7 @@
                                         trigger="click"
                                         @command="
                                             (command) =>
-                                                handleCategoryCommand(
-                                                    subject,
-                                                    category,
-                                                    String(command),
-                                                )
+                                                handleSubjectCommand(subject, String(command))
                                         "
                                     >
                                         <button
@@ -154,8 +104,8 @@
                                         </button>
                                         <template #dropdown>
                                             <el-dropdown-menu>
-                                                <el-dropdown-item command="create-rule">
-                                                    新增规则
+                                                <el-dropdown-item command="create-category">
+                                                    新增重分类
                                                 </el-dropdown-item>
                                                 <el-dropdown-item command="rename">
                                                     改名
@@ -169,22 +119,83 @@
                                 </div>
 
                                 <div
-                                    v-if="!subject.categories.length"
-                                    class="tree-empty-row"
+                                    v-if="shouldExpandSubject(subject.key)"
+                                    class="tree-group__children"
                                 >
-                                    暂无重分类
-                                </div>
-                            </div>
-                        </section>
-                    </template>
+                                    <div
+                                        v-for="category in subject.categories"
+                                        :key="category.key"
+                                        class="tree-row tree-row--category"
+                                        :class="{
+                                            'is-active':
+                                                activeCategoryKey === category.key,
+                                        }"
+                                    >
+                                        <button
+                                            type="button"
+                                            class="tree-row__main tree-row__main--category"
+                                            @click="selectCategory(category.key)"
+                                        >
+                                            <span class="tree-row__copy">
+                                                <strong>{{ category.category.name }}</strong>
+                                                <small>{{ categoryRuleText(category) }}</small>
+                                            </span>
+                                        </button>
 
-                    <el-empty
-                        v-else
-                        :description="
-                            searchText.trim() ? '没有匹配到层级节点' : '暂无资金重分类规则'
-                        "
-                        :image-size="80"
-                    />
+                                        <el-dropdown
+                                            trigger="click"
+                                            @command="
+                                                (command) =>
+                                                    handleCategoryCommand(
+                                                        subject,
+                                                        category,
+                                                        String(command),
+                                                    )
+                                            "
+                                        >
+                                            <button
+                                                type="button"
+                                                class="tree-row__more"
+                                                :disabled="isBusy"
+                                            >
+                                                ···
+                                            </button>
+                                            <template #dropdown>
+                                                <el-dropdown-menu>
+                                                    <el-dropdown-item command="create-rule">
+                                                        新增规则
+                                                    </el-dropdown-item>
+                                                    <el-dropdown-item command="rename">
+                                                        改名
+                                                    </el-dropdown-item>
+                                                    <el-dropdown-item command="delete">
+                                                        删除
+                                                    </el-dropdown-item>
+                                                </el-dropdown-menu>
+                                            </template>
+                                        </el-dropdown>
+                                    </div>
+
+                                    <div
+                                        v-if="!subject.categories.length"
+                                        class="tree-empty-row"
+                                    >
+                                        暂无重分类
+                                    </div>
+                                </div>
+                            </section>
+                        </template>
+
+                        <el-empty
+                            v-else
+                            :description="
+                                searchText.trim()
+                                    ? '没有匹配到层级节点'
+                                    : '暂无资金重分类规则'
+                            "
+                            :image-size="80"
+                        />
+                    </div>
                 </div>
             </el-card>
 
@@ -222,237 +233,239 @@
                     </div>
                 </template>
 
-                <div v-if="activeCategoryContext" class="rule-list">
-                    <div class="rule-list__head">
-                        <span>平台</span>
-                        <span>规则说明</span>
-                        <span>取值表头</span>
-                        <span>结果</span>
-                        <span>操作</span>
-                    </div>
+                <div class="rule-detail__scroll">
+                    <div v-if="activeCategoryContext" class="rule-list">
+                        <div class="rule-list__head">
+                            <span>平台</span>
+                            <span>规则说明</span>
+                            <span>取值表头</span>
+                            <span>结果</span>
+                            <span>操作</span>
+                        </div>
 
-                    <div
-                        v-if="isCreatingRuleForActiveCategory"
-                        class="rule-list__row rule-list__row--editing"
-                    >
-                        <div class="rule-list__platform">
-                            {{ platformLabel(editingDraft.platform_code) }}
-                        </div>
-                        <div class="rule-list__condition">
-                            <div class="rule-editor">
-                                <span>方向</span>
-                                <el-select
-                                    v-model="editingDraft.transaction_direction"
-                                    size="small"
-                                    class="rule-editor__field rule-editor__field--xs"
-                                >
-                                    <el-option
-                                        v-for="item in directionOptions"
-                                        :key="item.value"
-                                        :label="item.label"
-                                        :value="item.value"
-                                    />
-                                </el-select>
-
-                                <span>场景</span>
-                                <el-input
-                                    v-model="editingDraft.transaction_scene"
-                                    size="small"
-                                    class="rule-editor__field rule-editor__field--sm"
-                                    placeholder="可留空"
-                                />
-
-                                <span>备注条件</span>
-                                <el-select
-                                    v-model="editingDraft.match_type"
-                                    size="small"
-                                    class="rule-editor__field rule-editor__field--xs"
-                                >
-                                    <el-option
-                                        v-for="item in ruleMatchOptions"
-                                        :key="item.value"
-                                        :label="item.label"
-                                        :value="item.value"
-                                    />
-                                </el-select>
-                                <el-input
-                                    v-model="editingDraft.remark_pattern"
-                                    size="small"
-                                    class="rule-editor__field rule-editor__field--sm"
-                                    placeholder="输入备注内容"
-                                />
-                            </div>
-                        </div>
-                        <div class="rule-list__amount">
-                            <el-input
-                                v-model="editingDraft.amount_field"
-                                size="small"
-                                class="rule-editor__field rule-editor__field--md"
-                                placeholder="动账金额"
-                            />
-                        </div>
-                        <div class="rule-list__result">
-                            <el-select
-                                v-model="editingDraft.result_direction"
-                                size="small"
-                                class="rule-editor__field rule-editor__field--sm"
-                            >
-                                <el-option
-                                    v-for="item in resultDirectionOptions"
-                                    :key="item.value"
-                                    :label="item.label"
-                                    :value="item.value"
-                                />
-                            </el-select>
-                        </div>
-                        <div class="rule-list__actions">
-                            <el-button type="primary" link @click="saveEditingRow">
-                                保存
-                            </el-button>
-                            <el-button link @click="cancelEditing">取消</el-button>
-                        </div>
-                    </div>
-
-                    <template
-                        v-for="rule in activeCategoryContext.category.rules"
-                        :key="rule.id"
-                    >
                         <div
-                            class="rule-list__row"
-                            :class="{ 'rule-list__row--editing': isEditingRule(rule) }"
+                            v-if="isCreatingRuleForActiveCategory"
+                            class="rule-list__row rule-list__row--editing"
                         >
-                            <template v-if="isEditingRule(rule)">
-                                <div class="rule-list__platform">
-                                    {{ platformLabel(editingDraft.platform_code) }}
-                                </div>
-                                <div class="rule-list__condition">
-                                    <div class="rule-editor">
-                                        <span>方向</span>
-                                        <el-select
-                                            v-model="editingDraft.transaction_direction"
-                                            size="small"
-                                            class="rule-editor__field rule-editor__field--xs"
-                                        >
-                                            <el-option
-                                                v-for="item in directionOptions"
-                                                :key="item.value"
-                                                :label="item.label"
-                                                :value="item.value"
-                                            />
-                                        </el-select>
-
-                                        <span>场景</span>
-                                        <el-input
-                                            v-model="editingDraft.transaction_scene"
-                                            size="small"
-                                            class="rule-editor__field rule-editor__field--sm"
-                                            placeholder="可留空"
-                                        />
-
-                                        <span>备注条件</span>
-                                        <el-select
-                                            v-model="editingDraft.match_type"
-                                            size="small"
-                                            class="rule-editor__field rule-editor__field--xs"
-                                        >
-                                            <el-option
-                                                v-for="item in ruleMatchOptions"
-                                                :key="item.value"
-                                                :label="item.label"
-                                                :value="item.value"
-                                            />
-                                        </el-select>
-                                        <el-input
-                                            v-model="editingDraft.remark_pattern"
-                                            size="small"
-                                            class="rule-editor__field rule-editor__field--sm"
-                                            placeholder="输入备注内容"
-                                        />
-                                    </div>
-                                </div>
-                                <div class="rule-list__amount">
-                                    <el-input
-                                        v-model="editingDraft.amount_field"
-                                        size="small"
-                                        class="rule-editor__field rule-editor__field--md"
-                                        placeholder="动账金额"
-                                    />
-                                </div>
-                                <div class="rule-list__result">
+                            <div class="rule-list__platform">
+                                {{ platformLabel(editingDraft.platform_code) }}
+                            </div>
+                            <div class="rule-list__condition">
+                                <div class="rule-editor">
+                                    <span>方向</span>
                                     <el-select
-                                        v-model="editingDraft.result_direction"
+                                        v-model="editingDraft.transaction_direction"
                                         size="small"
-                                        class="rule-editor__field rule-editor__field--sm"
+                                        class="rule-editor__field rule-editor__field--xs"
                                     >
                                         <el-option
-                                            v-for="item in resultDirectionOptions"
+                                            v-for="item in directionOptions"
                                             :key="item.value"
                                             :label="item.label"
                                             :value="item.value"
                                         />
                                     </el-select>
-                                </div>
-                                <div class="rule-list__actions">
-                                    <el-button type="primary" link @click="saveEditingRow">
-                                        保存
-                                    </el-button>
-                                    <el-button link @click="cancelEditing">取消</el-button>
-                                </div>
-                            </template>
 
-                            <template v-else>
-                                <div class="rule-list__platform">
-                                    {{ platformLabel(rule.platform_code) }}
-                                </div>
-                                <div class="rule-list__condition">
-                                    <div class="rule-summary-text">
-                                        <strong>{{ ruleDirectionSentence(rule) }}</strong>
-                                        <span>{{ ruleRemarkSentence(rule) }}</span>
-                                    </div>
-                                </div>
-                                <div class="rule-list__amount">
-                                    {{ rule.amount_field || "动账金额" }}
-                                </div>
-                                <div class="rule-list__result">
-                                    {{ resultDirectionText(rule.result_direction) }}
-                                </div>
-                                <div class="rule-list__actions">
-                                    <el-button
-                                        type="primary"
-                                        link
-                                        :disabled="isBusy"
-                                        @click="startEditRule(rule)"
+                                    <span>场景</span>
+                                    <el-input
+                                        v-model="editingDraft.transaction_scene"
+                                        size="small"
+                                        class="rule-editor__field rule-editor__field--sm"
+                                        placeholder="可留空"
+                                    />
+
+                                    <span>备注条件</span>
+                                    <el-select
+                                        v-model="editingDraft.match_type"
+                                        size="small"
+                                        class="rule-editor__field rule-editor__field--xs"
                                     >
-                                        编辑
-                                    </el-button>
-                                    <el-button
-                                        type="danger"
-                                        link
-                                        :disabled="isBusy"
-                                        @click="removeRule(rule)"
-                                    >
-                                        删除
-                                    </el-button>
+                                        <el-option
+                                            v-for="item in ruleMatchOptions"
+                                            :key="item.value"
+                                            :label="item.label"
+                                            :value="item.value"
+                                        />
+                                    </el-select>
+                                    <el-input
+                                        v-model="editingDraft.remark_pattern"
+                                        size="small"
+                                        class="rule-editor__field rule-editor__field--sm"
+                                        placeholder="输入备注内容"
+                                    />
                                 </div>
-                            </template>
+                            </div>
+                            <div class="rule-list__amount">
+                                <el-input
+                                    v-model="editingDraft.amount_field"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--md"
+                                    placeholder="动账金额"
+                                />
+                            </div>
+                            <div class="rule-list__result">
+                                <el-select
+                                    v-model="editingDraft.result_direction"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--sm"
+                                >
+                                    <el-option
+                                        v-for="item in resultDirectionOptions"
+                                        :key="item.value"
+                                        :label="item.label"
+                                        :value="item.value"
+                                    />
+                                </el-select>
+                            </div>
+                            <div class="rule-list__actions">
+                                <el-button type="primary" link @click="saveEditingRow">
+                                    保存
+                                </el-button>
+                                <el-button link @click="cancelEditing">取消</el-button>
+                            </div>
                         </div>
-                    </template>
 
-                    <el-empty
-                        v-if="
-                            !activeCategoryContext.category.rules.length &&
-                            !isCreatingRuleForActiveCategory
-                        "
-                        description="当前重分类暂无规则"
-                        :image-size="80"
-                    />
-                </div>
+                        <template
+                            v-for="rule in activeCategoryContext.category.rules"
+                            :key="rule.id"
+                        >
+                            <div
+                                class="rule-list__row"
+                                :class="{ 'rule-list__row--editing': isEditingRule(rule) }"
+                            >
+                                <template v-if="isEditingRule(rule)">
+                                    <div class="rule-list__platform">
+                                        {{ platformLabel(editingDraft.platform_code) }}
+                                    </div>
+                                    <div class="rule-list__condition">
+                                        <div class="rule-editor">
+                                            <span>方向</span>
+                                            <el-select
+                                                v-model="editingDraft.transaction_direction"
+                                                size="small"
+                                                class="rule-editor__field rule-editor__field--xs"
+                                            >
+                                                <el-option
+                                                    v-for="item in directionOptions"
+                                                    :key="item.value"
+                                                    :label="item.label"
+                                                    :value="item.value"
+                                                />
+                                            </el-select>
 
-                <div v-else class="rule-detail-empty">
-                    <el-empty
-                        description="请先在左侧选择一个重分类"
-                        :image-size="80"
-                    />
+                                            <span>场景</span>
+                                            <el-input
+                                                v-model="editingDraft.transaction_scene"
+                                                size="small"
+                                                class="rule-editor__field rule-editor__field--sm"
+                                                placeholder="可留空"
+                                            />
+
+                                            <span>备注条件</span>
+                                            <el-select
+                                                v-model="editingDraft.match_type"
+                                                size="small"
+                                                class="rule-editor__field rule-editor__field--xs"
+                                            >
+                                                <el-option
+                                                    v-for="item in ruleMatchOptions"
+                                                    :key="item.value"
+                                                    :label="item.label"
+                                                    :value="item.value"
+                                                />
+                                            </el-select>
+                                            <el-input
+                                                v-model="editingDraft.remark_pattern"
+                                                size="small"
+                                                class="rule-editor__field rule-editor__field--sm"
+                                                placeholder="输入备注内容"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div class="rule-list__amount">
+                                        <el-input
+                                            v-model="editingDraft.amount_field"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--md"
+                                            placeholder="动账金额"
+                                        />
+                                    </div>
+                                    <div class="rule-list__result">
+                                        <el-select
+                                            v-model="editingDraft.result_direction"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--sm"
+                                        >
+                                            <el-option
+                                                v-for="item in resultDirectionOptions"
+                                                :key="item.value"
+                                                :label="item.label"
+                                                :value="item.value"
+                                            />
+                                        </el-select>
+                                    </div>
+                                    <div class="rule-list__actions">
+                                        <el-button type="primary" link @click="saveEditingRow">
+                                            保存
+                                        </el-button>
+                                        <el-button link @click="cancelEditing">取消</el-button>
+                                    </div>
+                                </template>
+
+                                <template v-else>
+                                    <div class="rule-list__platform">
+                                        {{ platformLabel(rule.platform_code) }}
+                                    </div>
+                                    <div class="rule-list__condition">
+                                        <div class="rule-summary-text">
+                                            <strong>{{ ruleDirectionSentence(rule) }}</strong>
+                                            <span>{{ ruleRemarkSentence(rule) }}</span>
+                                        </div>
+                                    </div>
+                                    <div class="rule-list__amount">
+                                        {{ rule.amount_field || "动账金额" }}
+                                    </div>
+                                    <div class="rule-list__result">
+                                        {{ resultDirectionText(rule.result_direction) }}
+                                    </div>
+                                    <div class="rule-list__actions">
+                                        <el-button
+                                            type="primary"
+                                            link
+                                            :disabled="isBusy"
+                                            @click="startEditRule(rule)"
+                                        >
+                                            编辑
+                                        </el-button>
+                                        <el-button
+                                            type="danger"
+                                            link
+                                            :disabled="isBusy"
+                                            @click="removeRule(rule)"
+                                        >
+                                            删除
+                                        </el-button>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <el-empty
+                            v-if="
+                                !activeCategoryContext.category.rules.length &&
+                                !isCreatingRuleForActiveCategory
+                            "
+                            description="当前重分类暂无规则"
+                            :image-size="80"
+                        />
+                    </div>
+
+                    <div v-else class="rule-detail-empty">
+                        <el-empty
+                            description="请先在左侧选择一个重分类"
+                            :image-size="80"
+                        />
+                    </div>
                 </div>
             </el-card>
         </div>
@@ -486,7 +499,13 @@ defineOptions({ name: "TransactionRules" });
 
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
+import {
+    ArrowDown,
+    ArrowRight,
+    Plus,
+    Refresh,
+    Search,
+} from "@element-plus/icons-vue";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import { getPlatformList, type Platform } from "@/api/platform";
 import {
@@ -1275,13 +1294,83 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 
 .split-rule-page {
     gap: 16px;
+    flex: 1;
+    min-height: 0;
+}
+
+.search-card {
+    display: block;
+    flex: none;
+    height: auto;
+    min-height: fit-content;
+    overflow: visible;
+
+    :deep(.el-card__body) {
+        display: block;
+        flex: none;
+        height: auto;
+        min-height: fit-content;
+        overflow: visible;
+    }
 }
 
 .rule-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 16px;
+}
+
+.rule-toolbar__intro {
+    min-width: 0;
+}
+
+.rule-toolbar__head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
+    gap: 20px;
+    min-width: 0;
+}
+
+.rule-toolbar__copy {
+    min-width: 0;
+}
+
+.rule-toolbar__kicker {
+    margin: 0 0 4px;
+    color: var(--el-color-primary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+}
+
+.rule-toolbar__title {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.rule-toolbar__tip {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+}
+
+.rule-toolbar__tip span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rule-toolbar__actions {
@@ -1290,6 +1379,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
+    min-width: 0;
 }
 
 .rule-search-input {
@@ -1307,21 +1397,31 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     grid-template-columns: minmax(280px, 0.33fr) minmax(0, 1fr);
     gap: 16px;
     min-width: 0;
+    flex: 1;
+    min-height: 0;
 }
 
 .rule-tree-card,
 .rule-detail-card {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
+    min-height: 0;
 
     :deep(.el-card__header) {
         display: flex;
         align-items: center;
-        min-height: 78px;
-        padding: 14px 16px;
+        min-height: 68px;
+        padding: 12px 16px;
     }
 
     :deep(.el-card__body) {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
         padding: 0;
+        overflow: hidden;
     }
 }
 
@@ -1346,7 +1446,17 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 .rule-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
     min-width: 0;
+}
+
+.rule-tree__scroll,
+.rule-detail__scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
 }
 
 .tree-group + .tree-group {
@@ -1491,6 +1601,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 .rule-list {
+    display: grid;
     min-width: 0;
 }
 
@@ -1554,7 +1665,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 .rule-detail-empty {
-    padding: 32px 0;
+    padding: 28px 0;
 }
 
 .rule-editor {
@@ -1603,9 +1714,19 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     .rule-workspace {
         grid-template-columns: 1fr;
     }
+
+    .rule-tree-card,
+    .rule-detail-card {
+        min-height: 380px;
+    }
 }
 
 @media (max-width: 900px) {
+    .rule-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .rule-toolbar__head,
     .rule-tree-card,
     .rule-detail-card {
         :deep(.el-card__header) {
@@ -1613,7 +1734,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
         }
     }
 
-    .rule-toolbar {
+    .rule-toolbar__head {
         flex-direction: column;
     }
 
@@ -1626,6 +1747,10 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     .panel-header {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .rule-workspace {
+        flex: none;
     }
 
     .rule-list__head {

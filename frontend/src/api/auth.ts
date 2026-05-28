@@ -43,6 +43,11 @@ export interface ChangeMyPasswordPayload {
     new_password: string;
 }
 
+export interface UserPreferenceResult<T = unknown> {
+    preference_key: string;
+    preference_value: T;
+}
+
 /**
  * User login
  */
@@ -77,4 +82,14 @@ export function updateMyProfile(data: UpdateMePayload) {
 
 export function changeMyPassword(data: ChangeMyPasswordPayload) {
     return put<void>("/auth/me/password", data);
+}
+
+export function getMyPreference<T = unknown>(preferenceKey: string) {
+    return get<UserPreferenceResult<T> | null>(`/auth/me/preferences/${preferenceKey}`);
+}
+
+export function updateMyPreference<T = unknown>(preferenceKey: string, preferenceValue: T) {
+    return put<UserPreferenceResult<T>>(`/auth/me/preferences/${preferenceKey}`, {
+        preference_value: preferenceValue,
+    });
 }

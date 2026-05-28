@@ -123,3 +123,80 @@ class SummaryReportOut(BaseModel):
     insurance_fee: float = 0
     shipping_insurance: float = 0
     bic: float = 0
+
+
+class SummaryDongzhangDetailOut(BaseModel):
+    id: int
+    summary_id: int | None = None
+    org_id: int
+    org_name: str | None = None
+    shop_id: int
+    shop_name: str
+    shop_color: str | None = None
+    source_year: int
+    source_month: int
+    source_period: int | None = None
+    source_date: str
+    summary_year: int
+    summary_month: int
+    summary_date: str
+    platform_name: str
+    platform: str
+    source_platform_code: str
+    report_platform_code: str
+    report_platform: str
+    period_source: str
+    source_row_number: int
+
+    matched_compensation: str = ""
+    refund_to_compensation: float = 0
+    cashback: float = 0
+    order_paid: float = 0
+    refund_amount: float = 0
+    gmv: float = 0
+    platform_income: float = 0
+    platform_fee_positive: float = 0
+    return_cost: float = 0
+    commission_derived: float = 0
+    bic: float = 0
+    insurance_fee: float = 0
+
+    transaction_time: str = ""
+    transaction_flow_no: str = ""
+    transaction_direction: str = ""
+    transaction_amount: float = 0
+    transaction_account: str = ""
+    transaction_scene: str = ""
+    billing_type: str = ""
+    sub_order_no: str = ""
+    order_no: str = ""
+    after_sale_no: str = ""
+    order_time: str = ""
+    product_id: str = ""
+    product_name: str = ""
+    author_id: str = ""
+    author_name: str = ""
+    order_type: str = ""
+    order_paid_amount_raw: float = 0
+    shipping_fee: float = 0
+    platform_subsidy_shipping: float = 0
+    platform_subsidy: float = 0
+    other_platform_subsidy: float = 0
+    trade_in_deduction: float = 0
+    gov_subsidy_platform: float = 0
+    author_subsidy: float = 0
+    douyin_pay_subsidy: float = 0
+    douyin_monthly_subsidy: float = 0
+    bank_subsidy: float = 0
+    order_refund_raw: float = 0
+    platform_fee_raw: float = 0
+    commission_raw: float = 0
+    provider_commission_raw: float = 0
+    channel_share: float = 0
+    merchant_fee_raw: float = 0
+    promotion_fee_raw: float = 0
+    other_share: float = 0
+    is_commission_free: str = ""
+    commission_free_amount: float = 0
+    merchant_name: str = ""
+    remark: str = ""

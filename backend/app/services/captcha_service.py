@@ -13,20 +13,9 @@ import redis.asyncio as redis
 from app.core.config import settings
 
 
-CAPTCHA_ALPHABET = "23456789"
 CAPTCHA_KEY_PREFIX = "finengine:captcha:"
-SEGMENTS: dict[str, tuple[str, ...]] = {
-    "0": ("a", "b", "c", "d", "e", "f"),
-    "1": ("b", "c"),
-    "2": ("a", "b", "g", "e", "d"),
-    "3": ("a", "b", "g", "c", "d"),
-    "4": ("f", "g", "b", "c"),
-    "5": ("a", "f", "g", "c", "d"),
-    "6": ("a", "f", "e", "d", "c", "g"),
-    "7": ("a", "b", "c"),
-    "8": ("a", "b", "c", "d", "e", "f", "g"),
-    "9": ("a", "b", "c", "d", "f", "g"),
-}
+CAPTCHA_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+CAPTCHA_LENGTH = 4
 
 
 @dataclass(frozen=True)
@@ -55,7 +44,7 @@ class CaptchaService:
             self._store = dict(sorted_items[:self.max_memory_store // 2])
 
         captcha_id = uuid.uuid4().hex
-        code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(4))
+        code = "".join(secrets.choice(CAPTCHA_CHARS) for _ in range(CAPTCHA_LENGTH))
         if not await self._save_to_redis(captcha_id, code):
             self._store[captcha_id] = (code, time.time() + self.ttl_seconds)
         return CaptchaChallenge(
@@ -152,18 +141,21 @@ def _svg_data_url(code: str) -> str:
         for _ in range(70)
     )
     masks = "\n".join(
-        f'<rect x="{16 + index * 24 + secrets.randbelow(8)}" y="{8 + secrets.randbelow(18)}" '
+        f'<rect x="{14 + index * 24 + secrets.randbelow(10)}" y="{8 + secrets.randbelow(18)}" '
         f'width="{8 + secrets.randbelow(8)}" height="{3 + secrets.randbelow(4)}" '
         'fill="rgba(244,248,251,0.58)"/>'
         for index in range(len(code))
     )
-    digits = "\n".join(_digit_svg(char, 20 + index * 24, 9) for index, char in enumerate(code))
+    glyphs = "\n".join(
+        _glyph_svg(char, 18 + index * 24, 29)
+        for index, char in enumerate(code)
+    )
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="130" height="44" viewBox="0 0 130 44">
   <rect width="130" height="44" rx="6" fill="#f4f8fb"/>
   {grid}
   {lines}
   {dots}
-  {digits}
+  {glyphs}
   {curves}
   {masks}
 </svg>"""
@@ -171,26 +163,16 @@ def _svg_data_url(code: str) -> str:
     return f"data:image/svg+xml;base64,{encoded}"
 
 
-def _digit_svg(char: str, x: int, y: int) -> str:
-    x += secrets.choice((-2, -1, 0, 1, 2))
-    y += secrets.choice((-2, -1, 0, 1, 2))
-    points = {
-        "a": (x + 3, y, x + 15, y),
-        "b": (x + 18, y + 3, x + 18, y + 13),
-        "c": (x + 18, y + 17, x + 18, y + 27),
-        "d": (x + 3, y + 30, x + 15, y + 30),
-        "e": (x, y + 17, x, y + 27),
-        "f": (x, y + 3, x, y + 13),
-        "g": (x + 3, y + 15, x + 15, y + 15),
-    }
+def _glyph_svg(char: str, x: int, y: int) -> str:
     rotate = secrets.choice((-9, -6, -3, 0, 3, 6, 9))
-    lines = [
-        f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
-        f'stroke="#173b68" stroke-width="{3 + secrets.randbelow(2)}" stroke-linecap="round"/>'
-        for segment, (x1, y1, x2, y2) in points.items()
-        if segment in SEGMENTS[char]
-    ]
-    return f'<g opacity="0.88" transform="rotate({rotate} {x + 9} {y + 15})">{"".join(lines)}</g>'
+    dx = secrets.choice((-2, -1, 0, 1, 2))
+    dy = secrets.choice((-2, -1, 0, 1, 2))
+    return (
+        f'<text x="{x + dx}" y="{y + dy}" '
+        f'fill="#173b68" font-family="Menlo, Consolas, monospace" '
+        f'font-size="24" font-weight="700" letter-spacing="1" '
+        f'transform="rotate({rotate} {x + 6} {y - 8})" opacity="0.88">{char}</text>'
+    )
 
 
 captcha_service = CaptchaService()

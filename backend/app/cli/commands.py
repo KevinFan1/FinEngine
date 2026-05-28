@@ -34,21 +34,23 @@ def worker() -> None:
 
 
 def recover_queued_tasks() -> None:
-    parser = argparse.ArgumentParser(description="Re-dispatch queued tasks to Celery.")
+    parser = argparse.ArgumentParser(description="Re-dispatch queued tasks to Celery and reconcile terminal running tasks.")
     parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
 
-    from app.tasks.celery_app import recover_queued_processing_tasks
+    from app.tasks.celery_app import recover_queued_processing_tasks, reconcile_terminal_running_processing_tasks
     from app.tasks.bic_accounting import recover_queued_bic_tasks
     from app.tasks.transaction_accounting import recover_queued_transaction_tasks
 
+    reconciled_count = reconcile_terminal_running_processing_tasks(limit=args.limit)
     processing_count = recover_queued_processing_tasks(limit=args.limit)
     bic_count = recover_queued_bic_tasks(limit=args.limit)
     transaction_count = recover_queued_transaction_tasks(limit=args.limit)
     total = processing_count + bic_count + transaction_count
     print(
-        "已重新投递排队任务 "
-        f"{total} 个（通用 {processing_count}，BIC {bic_count}，动账 {transaction_count}）"
+        "已处理任务恢复："
+        f"修正卡住运行中任务 {reconciled_count} 个；"
+        f"重新投递排队任务 {total} 个（通用 {processing_count}，BIC {bic_count}，动账 {transaction_count}）"
     )
 
 
@@ -145,3 +147,9 @@ async def _seed_all() -> None:
 
 def seed_all() -> None:
     asyncio.run(_seed_all())
+
+
+def ensure_source_partitions() -> None:
+    from scripts.ensure_source_partitions import main
+
+    asyncio.run(main())

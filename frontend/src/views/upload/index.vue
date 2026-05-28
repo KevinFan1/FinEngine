@@ -2049,6 +2049,14 @@ function ossErrorMessage(err: any): string {
     return err?.message || err?.name || err?.code || "上传失败";
 }
 
+function isApiMessageShown(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+    );
+}
+
 function isFileReadyForUpload(item: FileItem): boolean {
     return (
         item.status !== "success" &&
@@ -2236,7 +2244,9 @@ async function runUploadQueue(itemsToUpload: FileItem[]) {
             );
         }
     } catch (err: any) {
-        ElMessage.error("创建上传批次失败：" + (err.message || "未知错误"));
+        if (!isApiMessageShown(err)) {
+            ElMessage.error("创建上传批次失败：" + (err.message || "未知错误"));
+        }
     } finally {
         isUploading.value = false;
         uploadingFileName.value = "";
@@ -2274,9 +2284,11 @@ async function confirmStartUpload() {
                 return;
             }
         } catch (error: any) {
-            ElMessage.error(
-                "检查本月上传额度失败：" + (error.message || "未知错误"),
-            );
+            if (!isApiMessageShown(error)) {
+                ElMessage.error(
+                    "检查本月上传额度失败：" + (error.message || "未知错误"),
+                );
+            }
             return;
         }
     }

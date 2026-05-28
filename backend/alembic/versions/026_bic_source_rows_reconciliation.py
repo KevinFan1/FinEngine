@@ -22,6 +22,38 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute(
         """
+        CREATE OR REPLACE FUNCTION _fin_parse_bic_source_timestamp(raw_value TEXT)
+        RETURNS TIMESTAMP AS $$
+        DECLARE
+            cleaned TEXT := btrim(COALESCE(raw_value, ''));
+        BEGIN
+            IF cleaned = '' THEN
+                RETURN NULL;
+            END IF;
+
+            BEGIN
+                RETURN cleaned::timestamp;
+            EXCEPTION WHEN others THEN
+                BEGIN
+                    RETURN to_timestamp(cleaned, 'YYYY"年"MM"月"DD"日" HH24:MI:SS')::timestamp;
+                EXCEPTION WHEN others THEN
+                    BEGIN
+                        RETURN to_timestamp(cleaned, 'YYYY"年"MM"月"DD"日" HH24:MI')::timestamp;
+                    EXCEPTION WHEN others THEN
+                        BEGIN
+                            RETURN to_timestamp(cleaned, 'YYYY"年"MM"月"DD"日"')::timestamp;
+                        EXCEPTION WHEN others THEN
+                            RETURN NULL;
+                        END;
+                    END;
+                END;
+            END;
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    )
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS fin_bic_source_rows (
             id BIGSERIAL PRIMARY KEY,
             task_id BIGINT NOT NULL REFERENCES fin_bic_tasks(id),
@@ -30,29 +62,29 @@ def upgrade() -> None:
             org_id BIGINT NOT NULL REFERENCES fin_organizations(id),
             shop_id BIGINT REFERENCES fin_shops(id),
             platform_code VARCHAR(50) NOT NULL,
-            shop_name VARCHAR(200) NOT NULL,
+            shop_name VARCHAR(500) NOT NULL,
             accounting_year SMALLINT NOT NULL,
             accounting_month SMALLINT NOT NULL,
-            service_provider VARCHAR(200) NOT NULL DEFAULT '-',
-            qic_warehouse VARCHAR(200) NOT NULL DEFAULT '-',
+            service_provider VARCHAR(500) NOT NULL DEFAULT '-',
+            qic_warehouse VARCHAR(500) NOT NULL DEFAULT '-',
             source_row_number INTEGER DEFAULT 0,
-            settlement_no VARCHAR(300) NOT NULL DEFAULT '',
-            order_code VARCHAR(100) NOT NULL DEFAULT '',
-            related_order_no VARCHAR(100) NOT NULL DEFAULT '',
-            related_waybill_no VARCHAR(100) NOT NULL DEFAULT '',
-            fee_item VARCHAR(100) NOT NULL DEFAULT '',
+            settlement_no VARCHAR(500) NOT NULL DEFAULT '',
+            order_code VARCHAR(500) NOT NULL DEFAULT '',
+            related_order_no VARCHAR(500) NOT NULL DEFAULT '',
+            related_waybill_no VARCHAR(500) NOT NULL DEFAULT '',
+            fee_item VARCHAR(500) NOT NULL DEFAULT '',
             settlement_amount NUMERIC(14, 2) NOT NULL DEFAULT 0,
             billing_params TEXT NOT NULL DEFAULT '',
-            billing_completed_time VARCHAR(100) NOT NULL DEFAULT '',
-            business_node VARCHAR(100) NOT NULL DEFAULT '',
-            business_occurred_time VARCHAR(100) NOT NULL DEFAULT '',
-            settled_at VARCHAR(100) NOT NULL DEFAULT '',
-            status VARCHAR(100) NOT NULL DEFAULT '',
-            transaction_account VARCHAR(100) NOT NULL DEFAULT '',
-            transaction_flow_no VARCHAR(200) NOT NULL DEFAULT '',
+            billing_completed_time TIMESTAMP,
+            business_node VARCHAR(500) NOT NULL DEFAULT '',
+            business_occurred_time TIMESTAMP,
+            settled_at TIMESTAMP,
+            status VARCHAR(500) NOT NULL DEFAULT '',
+            transaction_account VARCHAR(500) NOT NULL DEFAULT '',
+            transaction_flow_no VARCHAR(500) NOT NULL DEFAULT '',
             remark TEXT NOT NULL DEFAULT '',
-            is_mudaibao VARCHAR(20) NOT NULL DEFAULT '',
-            is_child_order VARCHAR(20) NOT NULL DEFAULT '',
+            is_mudaibao VARCHAR(50) NOT NULL DEFAULT '',
+            is_child_order VARCHAR(50) NOT NULL DEFAULT '',
             created_at TIMESTAMPTZ DEFAULT now(),
             is_deleted BOOLEAN NOT NULL DEFAULT false,
             deleted_at TIMESTAMPTZ
@@ -62,87 +94,100 @@ def upgrade() -> None:
 
     op.execute(
         """
-        INSERT INTO fin_bic_source_rows (
-            task_id,
-            file_id,
-            detail_id,
-            org_id,
-            shop_id,
-            platform_code,
-            shop_name,
-            accounting_year,
-            accounting_month,
-            service_provider,
-            qic_warehouse,
-            source_row_number,
-            settlement_no,
-            order_code,
-            related_order_no,
-            related_waybill_no,
-            fee_item,
-            settlement_amount,
-            billing_params,
-            billing_completed_time,
-            business_node,
-            business_occurred_time,
-            settled_at,
-            status,
-            transaction_account,
-            transaction_flow_no,
-            remark,
-            is_mudaibao,
-            is_child_order,
-            created_at,
-            is_deleted,
-            deleted_at
-        )
-        SELECT
-            d.task_id,
-            d.file_id,
-            d.id,
-            d.org_id,
-            d.shop_id,
-            d.platform_code,
-            d.shop_name,
-            d.accounting_year,
-            d.accounting_month,
-            COALESCE(NULLIF(raw_row->>'服务商', ''), d.service_provider, '-'),
-            COALESCE(NULLIF(raw_row->>'QIC仓', ''), d.qic_warehouse, '-'),
-            raw_item.ordinality::INTEGER,
-            COALESCE(raw_row->>'结算单号', ''),
-            COALESCE(raw_row->>'订单码', ''),
-            COALESCE(raw_row->>'关联订单号', ''),
-            COALESCE(raw_row->>'关联运单号', ''),
-            COALESCE(raw_row->>'费用项', ''),
-            CASE
-                WHEN replace(COALESCE(raw_row->>'结算金额', '0'), ',', '') ~ '^-?[0-9]+(\\.[0-9]+)?$'
-                THEN replace(COALESCE(raw_row->>'结算金额', '0'), ',', '')::NUMERIC(14, 2)
-                ELSE 0
-            END,
-            COALESCE(raw_row->>'计费参数', ''),
-            COALESCE(raw_row->>'计费完成时间', ''),
-            COALESCE(raw_row->>'业务节点', ''),
-            COALESCE(raw_row->>'业务发生时间', ''),
-            COALESCE(raw_row->>'结算时间', ''),
-            COALESCE(raw_row->>'状态', ''),
-            COALESCE(raw_row->>'动账账户', ''),
-            COALESCE(raw_row->>'动账流水号', ''),
-            COALESCE(raw_row->>'备注', ''),
-            COALESCE(raw_row->>'是否木带宝', ''),
-            COALESCE(raw_row->>'是否子单', ''),
-            d.created_at,
-            d.is_deleted,
-            d.deleted_at
-        FROM fin_bic_details AS d
-        CROSS JOIN LATERAL jsonb_array_elements(
-            CASE
-                WHEN d.raw_rows IS NOT NULL AND jsonb_typeof(d.raw_rows) = 'array'
-                THEN d.raw_rows
-                ELSE '[]'::jsonb
-            END
-        ) WITH ORDINALITY AS raw_item(raw_row, ordinality)
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'fin_bic_details'
+                  AND column_name = 'raw_rows'
+            ) THEN
+                EXECUTE $copy_raw_rows$
+                    INSERT INTO fin_bic_source_rows (
+                        task_id,
+                        file_id,
+                        detail_id,
+                        org_id,
+                        shop_id,
+                        platform_code,
+                        shop_name,
+                        accounting_year,
+                        accounting_month,
+                        service_provider,
+                        qic_warehouse,
+                        source_row_number,
+                        settlement_no,
+                        order_code,
+                        related_order_no,
+                        related_waybill_no,
+                        fee_item,
+                        settlement_amount,
+                        billing_params,
+                        billing_completed_time,
+                        business_node,
+                        business_occurred_time,
+                        settled_at,
+                        status,
+                        transaction_account,
+                        transaction_flow_no,
+                        remark,
+                        is_mudaibao,
+                        is_child_order,
+                        created_at,
+                        is_deleted,
+                        deleted_at
+                    )
+                    SELECT
+                        d.task_id,
+                        d.file_id,
+                        d.id,
+                        d.org_id,
+                        d.shop_id,
+                        d.platform_code,
+                        d.shop_name,
+                        d.accounting_year,
+                        d.accounting_month,
+                        COALESCE(NULLIF(raw_row->>'服务商', ''), d.service_provider, '-'),
+                        COALESCE(NULLIF(raw_row->>'QIC仓', ''), d.qic_warehouse, '-'),
+                        raw_item.ordinality::INTEGER,
+                        COALESCE(raw_row->>'结算单号', ''),
+                        COALESCE(raw_row->>'订单码', ''),
+                        COALESCE(raw_row->>'关联订单号', ''),
+                        COALESCE(raw_row->>'关联运单号', ''),
+                        COALESCE(raw_row->>'费用项', ''),
+                        CASE
+                            WHEN replace(COALESCE(raw_row->>'结算金额', '0'), ',', '') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+                            THEN replace(COALESCE(raw_row->>'结算金额', '0'), ',', '')::NUMERIC(14, 2)
+                            ELSE 0
+                        END,
+                        COALESCE(raw_row->>'计费参数', ''),
+                        _fin_parse_bic_source_timestamp(raw_row->>'计费完成时间'),
+                        COALESCE(raw_row->>'业务节点', ''),
+                        _fin_parse_bic_source_timestamp(raw_row->>'业务发生时间'),
+                        _fin_parse_bic_source_timestamp(raw_row->>'结算时间'),
+                        COALESCE(raw_row->>'状态', ''),
+                        COALESCE(raw_row->>'动账账户', ''),
+                        COALESCE(raw_row->>'动账流水号', ''),
+                        COALESCE(raw_row->>'备注', ''),
+                        COALESCE(raw_row->>'是否木带宝', ''),
+                        COALESCE(raw_row->>'是否子单', ''),
+                        d.created_at,
+                        d.is_deleted,
+                        d.deleted_at
+                    FROM fin_bic_details AS d
+                    CROSS JOIN LATERAL jsonb_array_elements(
+                        CASE
+                            WHEN d.raw_rows IS NOT NULL AND jsonb_typeof(d.raw_rows) = 'array'
+                            THEN d.raw_rows
+                            ELSE '[]'::jsonb
+                        END
+                    ) WITH ORDINALITY AS raw_item(raw_row, ordinality)
+                $copy_raw_rows$;
+            END IF;
+        END $$;
         """
     )
+    op.execute("DROP FUNCTION IF EXISTS _fin_parse_bic_source_timestamp(TEXT)")
 
     op.execute(
         """
@@ -220,7 +265,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE fin_bic_details ADD COLUMN IF NOT EXISTS raw_rows JSONB")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS fin_bic_report_rows (

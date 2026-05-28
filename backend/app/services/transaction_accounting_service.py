@@ -875,7 +875,7 @@ class TransactionAccountingService:
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionTask.file_id)
             .outerjoin(Organization, Organization.id == TransactionTask.org_id)
             .where(*filters)
-            .order_by(TransactionTask.id.desc())
+            .order_by(TransactionTask.updated_at.desc(), TransactionTask.id.desc())
         )
         count_stmt = select(func.count()).select_from(TransactionTask).join(TransactionUploadFile, TransactionUploadFile.id == TransactionTask.file_id).where(*filters)
         total = (await db.execute(count_stmt)).scalar() or 0
@@ -1027,16 +1027,8 @@ class TransactionAccountingService:
             .outerjoin(Organization, Organization.id == TransactionDetail.org_id)
             .where(*filters)
             .order_by(
-                TransactionUploadFile.accounting_year.desc().nullslast(),
-                TransactionUploadFile.accounting_month.desc().nullslast(),
-                TransactionDetail.accounting_year.desc().nullslast(),
-                TransactionDetail.accounting_month.desc().nullslast(),
-                TransactionDetail.platform_code,
-                TransactionDetail.shop_id,
-                TransactionDetail.shop_name,
-                resolved_major_category_name,
-                TransactionSubject.name,
-                TransactionCategory.name,
+                TransactionTask.updated_at.desc(),
+                TransactionDetail.id.desc(),
             )
         )
         count_stmt = (
@@ -1215,22 +1207,17 @@ class TransactionAccountingService:
                 TransactionSummaryRow.accounting_month.label("accounting_month"),
                 func.sum(TransactionSummaryRow.row_count).label("row_count"),
                 func.sum(TransactionSummaryRow.total_amount).label("total_amount"),
+                func.max(TransactionTask.updated_at).label("updated_at"),
                 func.min(TransactionSummaryRow.created_at).label("created_at"),
             )
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionSummaryRow.file_id)
+            .join(TransactionTask, TransactionTask.id == TransactionSummaryRow.task_id)
             .outerjoin(Organization, Organization.id == TransactionSummaryRow.org_id)
             .where(*filters)
             .group_by(*grouped_fields)
             .order_by(
-                TransactionUploadFile.accounting_year.desc().nullslast(),
-                TransactionUploadFile.accounting_month.desc().nullslast(),
-                TransactionSummaryRow.accounting_year.desc().nullslast(),
-                TransactionSummaryRow.accounting_month.desc().nullslast(),
-                TransactionSummaryRow.platform_code,
-                TransactionSummaryRow.shop_id,
-                TransactionSummaryRow.shop_name,
-                TransactionSummaryRow.major_category_name,
-                TransactionSummaryRow.subject_name,
+                func.max(TransactionTask.updated_at).desc(),
+                id_expr.desc(),
             )
         )
         if ids is not None:
@@ -1239,6 +1226,7 @@ class TransactionAccountingService:
             select(*grouped_fields)
             .select_from(TransactionSummaryRow)
             .join(TransactionUploadFile, TransactionUploadFile.id == TransactionSummaryRow.file_id)
+            .join(TransactionTask, TransactionTask.id == TransactionSummaryRow.task_id)
             .where(*filters)
             .group_by(*grouped_fields)
         )

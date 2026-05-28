@@ -2,6 +2,13 @@ from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
 
+import pytest
+
+from app.models.platform import Platform
+from app.models.task import ProcessingTask
+from app.models.upload import UploadFile
+import app.core.database as database_module
+import app.services.oss_service as oss_service_module
 from app.tasks.celery_app import (
     _build_order_or_fallback_time_summary,
     _group_return_cost_by_order_created_time,
@@ -197,12 +204,13 @@ def test_result_task_status_uses_partial_success_when_failed_rows_exist() -> Non
 
 
 def test_mark_task_failed_sets_task_and_upload_file_state() -> None:
-    task = SimpleNamespace(status="running", error_message=None, finished_at=None)
+    task = SimpleNamespace(status="running", progress=60, error_message=None, finished_at=None)
     upload_file = SimpleNamespace(status="processing", error_message=None)
 
     celery_module._mark_task_failed(task, upload_file, "OSS文件不存在")
 
     assert task.status == "failed"
+    assert task.progress == 100
     assert task.error_message == "OSS文件不存在"
     assert task.finished_at is not None
     assert upload_file.status == "failed"
@@ -223,6 +231,7 @@ def test_mark_task_failed_sets_expired_for_unavailable_source_file() -> None:
         success_rows=2,
         failed_rows=0,
         result_summary=None,
+        progress=60,
         error_message=None,
         finished_at=None,
     )
@@ -236,6 +245,7 @@ def test_mark_task_failed_sets_expired_for_unavailable_source_file() -> None:
     )
 
     assert task.status == "expired"
+    assert task.progress == 100
     assert task.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
     assert task.processed_rows == 8
     assert task.success_rows == 7
@@ -249,3 +259,219 @@ def test_mark_task_failed_sets_expired_for_unavailable_source_file() -> None:
 def test_celery_imports_include_bic_task_module() -> None:
     assert "app.tasks.transaction_accounting" in celery_module.celery_app.conf.imports
     assert "app.tasks.bic_accounting" in celery_module.celery_app.conf.imports
+
+
+class _ExpiredTaskIdAccessError(RuntimeError):
+    pass
+
+
+class _RollbackSensitiveTask:
+    def __init__(self) -> None:
+        self._id = 123
+        self.file_id = 456
+        self.org_id = 1
+        self.user_id = 2
+        self.status = "queued"
+        self.progress = 0
+        self.celery_task_id = None
+        self.started_at = None
+        self.finished_at = None
+        self.error_message = None
+        self.processed_rows = 9
+        self.success_rows = 8
+        self.failed_rows = 1
+        self.result_summary = {"old": True}
+        self.expired = False
+
+    @property
+    def id(self) -> int:
+        if self.expired:
+            raise _ExpiredTaskIdAccessError("task.id was accessed after rollback")
+        return self._id
+
+
+class _ScalarResult:
+    def __init__(self, value) -> None:
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _ProcessFileSession:
+    def __init__(self, task: _RollbackSensitiveTask, upload_file: UploadFile, platform: Platform) -> None:
+        self.task = task
+        self.upload_file = upload_file
+        self.platform = platform
+        self.commit_count = 0
+        self.rollback_count = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, stmt):
+        statement = str(stmt)
+        if "FROM fin_processing_tasks" in statement:
+            return _ScalarResult(self.task)
+        if "FROM fin_upload_files" in statement:
+            return _ScalarResult(self.upload_file)
+        if "FROM fin_platforms" in statement:
+            return _ScalarResult(self.platform)
+        return _ScalarResult(None)
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+        self.task.expired = True
+
+
+class _ProcessFileSessionFactory:
+    def __init__(self, session: _ProcessFileSession) -> None:
+        self.session = session
+
+    def __call__(self):
+        return self.session
+
+
+class _ReconcileSession(_ProcessFileSession):
+    async def execute(self, stmt):
+        statement = str(stmt)
+        if "FROM fin_processing_tasks" in statement:
+            return _RowsResult([(self.task, self.upload_file)])
+        return _RowsResult([])
+
+
+class _RowsResult:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeAsyncResult:
+    def __init__(self, state: str, result) -> None:
+        self.state = state
+        self.result = result
+
+
+@pytest.mark.asyncio
+async def test_process_file_exception_reloads_task_without_accessing_expired_task_id(monkeypatch) -> None:
+    task = _RollbackSensitiveTask()
+    upload_file = UploadFile(
+        id=456,
+        batch_id=1,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        file_size=100,
+        parsed_year=2026,
+        parsed_month=2,
+        parsed_type="动账",
+        parsed_shop="抖音旗舰店",
+        detected_platform="douyin",
+        status="uploaded",
+    )
+    platform = Platform(id=1, code="douyin", name="抖音", status=1)
+    session = _ProcessFileSession(task, upload_file, platform)
+
+    monkeypatch.setattr(database_module, "async_session_factory", _ProcessFileSessionFactory(session))
+
+    def fail_download(_oss_key: str, _target_path: str) -> None:
+        raise OSSObjectUnavailableError("missing")
+
+    monkeypatch.setattr(oss_service_module.oss_service, "download_to_temp", fail_download)
+
+    task_instance = SimpleNamespace(request=SimpleNamespace(id="celery-task-id"))
+
+    with pytest.raises(OSSObjectUnavailableError):
+        await celery_module._process_file_platform_async(
+            task_instance,
+            file_id=456,
+            oss_key="oss-key",
+            org_id=1,
+            platform_code="douyin",
+            shop_name="抖音旗舰店",
+            shop_id=None,
+        )
+
+    assert session.rollback_count == 1
+    assert task.status == "expired"
+    assert task.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
+    assert task.processed_rows == 9
+    assert upload_file.status == "expired"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_terminal_running_processing_tasks_marks_failed(monkeypatch) -> None:
+    task = _RollbackSensitiveTask()
+    task.status = "running"
+    task.progress = 60
+    task.celery_task_id = "failed-celery-task"
+    upload_file = UploadFile(
+        id=456,
+        batch_id=1,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        file_size=100,
+        status="processing",
+    )
+    session = _ReconcileSession(task, upload_file, Platform(id=1, code="douyin", name="抖音", status=1))
+
+    monkeypatch.setattr(database_module, "async_session_factory", _ProcessFileSessionFactory(session))
+    monkeypatch.setattr(
+        celery_module.celery_app,
+        "AsyncResult",
+        lambda _task_id: _FakeAsyncResult("FAILURE", RuntimeError("boom")),
+    )
+
+    reconciled = await celery_module._reconcile_terminal_running_processing_tasks_async(limit=10)
+
+    assert reconciled == 1
+    assert session.commit_count == 1
+    assert task.status == "failed"
+    assert task.progress == 100
+    assert task.error_message == "boom"
+    assert upload_file.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_terminal_running_processing_tasks_keeps_active_task(monkeypatch) -> None:
+    task = _RollbackSensitiveTask()
+    task.status = "running"
+    task.progress = 60
+    task.celery_task_id = "active-celery-task"
+    upload_file = UploadFile(
+        id=456,
+        batch_id=1,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        file_size=100,
+        status="processing",
+    )
+    session = _ReconcileSession(task, upload_file, Platform(id=1, code="douyin", name="抖音", status=1))
+
+    monkeypatch.setattr(database_module, "async_session_factory", _ProcessFileSessionFactory(session))
+    monkeypatch.setattr(
+        celery_module.celery_app,
+        "AsyncResult",
+        lambda _task_id: _FakeAsyncResult("STARTED", None),
+    )
+
+    reconciled = await celery_module._reconcile_terminal_running_processing_tasks_async(limit=10)
+
+    assert reconciled == 0
+    assert session.commit_count == 0
+    assert task.status == "running"
+    assert task.progress == 60
+    assert upload_file.status == "processing"

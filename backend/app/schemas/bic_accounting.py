@@ -72,6 +72,7 @@ class BicDetailOut(BaseModel):
     shop_name: str
     accounting_year: int
     accounting_month: int
+    accounting_period: int | None = None
     qic_warehouse: str
     row_count: int = 0
     merchant: str | None = None

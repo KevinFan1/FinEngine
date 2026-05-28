@@ -1298,6 +1298,14 @@ function ossErrorMessage(err: any): string {
     return err?.message || err?.name || err?.code || "上传失败";
 }
 
+function isApiMessageShown(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+    );
+}
+
 function removeFile(index: number) {
     fileItems.value.splice(index, 1);
 }
@@ -1362,6 +1370,12 @@ async function uploadSingleFile(item: FileItem): Promise<boolean> {
         item.status = "error";
         item.progress = 100;
         item.error = ossErrorMessage(err);
+        if (
+            item.error === (err?.message || err?.name || err?.code || "上传失败") &&
+            isApiMessageShown(err)
+        ) {
+            item.error = "获取上传凭证失败，请稍后重试";
+        }
         return false;
     } finally {
         uploadDialogDone.value += 1;

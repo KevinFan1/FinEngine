@@ -161,6 +161,9 @@
                         >
                     </div>
                     <div class="card-header-actions">
+                        <el-checkbox v-model="includeDongzhangDetailsInExport">
+                            导出附带源明细
+                        </el-checkbox>
                         <el-button
                             :disabled="selectedCount === 0"
                             @click="clearSelectedRows"
@@ -480,6 +483,33 @@
                         }}</span>
                     </template>
                 </el-table-column>
+                <el-table-column
+                    label="操作"
+                    width="156"
+                    fixed="right"
+                    align="center"
+                >
+                    <template #default="{ row }">
+                        <div class="row-actions">
+                            <el-button
+                                type="primary"
+                                link
+                                :disabled="row.platform !== 'douyin'"
+                                @click="openDetailDrawer(row)"
+                            >
+                                查看明细
+                            </el-button>
+                            <el-button
+                                type="primary"
+                                link
+                                :disabled="row.platform !== 'douyin'"
+                                @click="handleSingleDetailExport(row)"
+                            >
+                                导出明细
+                            </el-button>
+                        </div>
+                    </template>
+                </el-table-column>
 
                 <template #empty>
                     <el-empty
@@ -503,6 +533,14 @@
                 />
             </div>
         </el-card>
+
+        <DouyinDongzhangDetailDrawer
+            v-model="detailDrawerVisible"
+            :include-in-summary-export="includeDongzhangDetailsInExport"
+            :context="detailDrawerContext"
+            :selected-org-ids="searchForm.orgIds"
+            @update:includeInSummaryExport="includeDongzhangDetailsInExport = $event"
+        />
     </div>
 </template>
 
@@ -517,6 +555,7 @@ import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getSummaryList,
+    exportSummaryDongzhangDetailExcel,
     exportSummaryExcel,
     type SummaryRecord,
 } from "@/api/summary";
@@ -546,6 +585,9 @@ import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
+import DouyinDongzhangDetailDrawer, {
+    type DouyinDongzhangDetailContext,
+} from "@/components/DouyinDongzhangDetailDrawer.vue";
 
 const route = useRoute();
 const userStore = useUserStore();
@@ -596,6 +638,9 @@ const selectedRowMap = ref(new Map<number, SummaryRecord>());
 const shopLoading = ref(false);
 const shopOptions = ref<Shop[]>([]);
 const summaryTableRef = ref<SummaryTableInstance>();
+const detailDrawerVisible = ref(false);
+const detailDrawerContext = ref<DouyinDongzhangDetailContext | null>(null);
+const includeDongzhangDetailsInExport = ref(false);
 
 const pagination = reactive({
     page: 1,
@@ -971,6 +1016,48 @@ function applyQuickFilter(
     handleSearch();
 }
 
+function openDetailDrawer(row: SummaryRecord) {
+    detailDrawerContext.value = {
+        summaryId: row.id,
+        orgId: row.org_id,
+        sourceDate: row.source_date,
+        summaryDate: row.summary_date,
+        platform: row.platform,
+        shopName: row.shop_name,
+        shopColor: row.shop_color,
+    };
+    detailDrawerVisible.value = true;
+}
+
+async function handleSingleDetailExport(row: SummaryRecord) {
+    if (row.platform !== "douyin") {
+        ElMessage.warning("当前仅支持抖音动账源明细导出");
+        return;
+    }
+    try {
+        const blob = await exportSummaryDongzhangDetailExcel(row.id, {
+            org_id: row.org_id,
+            scope: "all",
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = buildExportFilename([
+            row.source_date,
+            row.summary_date,
+            row.shop_name,
+            "抖音动账源明细",
+        ]);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        ElMessage.success("导出成功");
+    } catch {
+        ElMessage.error("导出失败，请稍后重试");
+    }
+}
+
 async function handleExport(scope: "all" | "current_page" | "selected") {
     if (scope === "current_page" && tableData.value.length === 0) {
         ElMessage.warning("当前页暂无可导出的数据");
@@ -1010,6 +1097,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             page: scope === "current_page" ? pagination.page : undefined,
             page_size:
                 scope === "current_page" ? pagination.pageSize : undefined,
+            include_dongzhang_details: includeDongzhangDetailsInExport.value,
         });
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -1032,6 +1120,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                 ? `关键词${searchForm.keyword.trim()}`
                 : "关键词全部",
             "汇总明细",
+            includeDongzhangDetailsInExport.value ? "附带源明细" : null,
             scopeLabel,
         ]);
         document.body.appendChild(link);
@@ -1139,6 +1228,12 @@ function applyRouteQuery() {
 
 .summary-table-card {
     min-height: 0;
+}
+
+.row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
 :deep(.summary-table .summary-edge-column .cell),

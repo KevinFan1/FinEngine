@@ -15,8 +15,10 @@ from app.schemas.auth import (
     UserInfo,
 )
 from app.schemas.common import ApiResponse
+from app.schemas.user_preference import UserPreferenceOut, UserPreferenceUpdate
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
+from app.services.user_preference_service import UserPreferenceService
 from app.services.user_service import UserService
 from app.services.captcha_service import captcha_service
 
@@ -175,3 +177,45 @@ async def change_my_password(
         return ApiResponse(code=400, message=str(e))
 
     return ApiResponse(message="密码修改成功，请重新登录")
+
+
+@router.get("/me/preferences/{preference_key}", response_model=ApiResponse[UserPreferenceOut | None])
+async def get_my_preference(
+    preference_key: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    preference = await UserPreferenceService.get_preference(
+        db,
+        user_id=current_user.id,
+        preference_key=preference_key,
+    )
+    if preference is None:
+        return ApiResponse(data=None)
+    return ApiResponse(
+        data=UserPreferenceOut(
+            preference_key=preference.preference_key,
+            preference_value=preference.preference_value,
+        )
+    )
+
+
+@router.put("/me/preferences/{preference_key}", response_model=ApiResponse[UserPreferenceOut])
+async def update_my_preference(
+    preference_key: str,
+    body: UserPreferenceUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    preference = await UserPreferenceService.set_preference(
+        db,
+        user_id=current_user.id,
+        preference_key=preference_key,
+        preference_value=body.preference_value,
+    )
+    return ApiResponse(
+        data=UserPreferenceOut(
+            preference_key=preference.preference_key,
+            preference_value=preference.preference_value,
+        )
+    )

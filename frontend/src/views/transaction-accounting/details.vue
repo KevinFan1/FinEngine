@@ -350,6 +350,7 @@ defineOptions({ name: "TransactionSummaries" });
 
 import { ElMessage } from "element-plus";
 import type { TableInstance } from "element-plus";
+import { Download } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";

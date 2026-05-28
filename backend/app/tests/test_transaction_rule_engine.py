@@ -306,15 +306,16 @@ def test_default_transaction_accounting_seed_rules_are_structured_from_spec() ->
     subject_names = list(dict.fromkeys(rule.subject for rule in all_specs))
     category_keys = list(dict.fromkeys((rule.subject, rule.category) for rule in all_specs))
 
-    assert len(TRANSACTION_ACCOUNTING_RULE_SPECS) == 36
-    assert len(TRANSACTION_ACCOUNTING_PENDING_RULES) == 11
-    assert len(all_specs) == 47
+    assert len(TRANSACTION_ACCOUNTING_RULE_SPECS) == 56
+    assert len(TRANSACTION_ACCOUNTING_PENDING_RULES) == 0
+    assert len(all_specs) == 56
     assert len(subject_names) == 8
-    assert len(category_keys) == 17
+    assert len(category_keys) == 18
     assert all(rule.match_type == "none" or rule.remark_pattern for rule in all_specs)
     assert any(rule.match_type == "not_contains" for rule in TRANSACTION_ACCOUNTING_RULE_SPECS)
     assert {rule.result_direction for rule in TRANSACTION_ACCOUNTING_RULE_SPECS} == {"positive", "negative"}
-    assert any(rule.enabled is False for rule in TRANSACTION_ACCOUNTING_PENDING_RULES)
+    if TRANSACTION_ACCOUNTING_PENDING_RULES:
+        assert any(rule.enabled is False for rule in TRANSACTION_ACCOUNTING_PENDING_RULES)
 
 
 class _FakeScalars:
@@ -428,6 +429,10 @@ async def test_list_details_defaults_to_matched_classified_rows() -> None:
     assert "fin_transaction_details.status = 'matched'" in statement_text
     assert "fin_transaction_details.subject_id IS NOT NULL" in statement_text
     assert "fin_transaction_details.category_id IS NOT NULL" in statement_text
+    assert "fin_transaction_details.shop_id IS NULL" in statement_text
+    assert "fin_transaction_upload_files.shop_id IS NULL" in statement_text
+    assert "EXISTS" in statement_text
+    assert "fin_shops" in statement_text
 
 
 @pytest.mark.asyncio
@@ -442,6 +447,9 @@ async def test_list_tasks_filters_queued_status() -> None:
 
     statement_text = "\n".join(db.statements)
     assert "fin_transaction_tasks.status IN ('queued')" in statement_text
+    assert "fin_transaction_upload_files.shop_id IS NULL" in statement_text
+    assert "EXISTS" in statement_text
+    assert "fin_shops" in statement_text
 
 
 @pytest.mark.asyncio

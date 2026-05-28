@@ -20,6 +20,8 @@ def safe_decimal(value: object, default: Decimal = ZERO_MONEY) -> Decimal:
         return Decimal(str(value))
 
     s = str(value).strip()
+    if s.startswith("'"):
+        s = s[1:].strip()
     if not s or s in {"-", "--", "—"}:
         return default
 

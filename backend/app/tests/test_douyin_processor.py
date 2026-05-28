@@ -66,6 +66,10 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
     )
 
     assert result["success_rows"] == 1
+    assert result["detail_rows"][0]["summary_year"] == 2026
+    assert result["detail_rows"][0]["summary_month"] == 4
+    assert result["detail_rows"][0]["period_source"] == "transaction_time_previous_month"
+    assert len(result["detail_rows"][0]["period_source"]) > 30
     agg = result["groups"]["抖音店铺|2026|4"]
     assert agg["gmv"] == Decimal("80")
     assert agg["order_paid_amount"] == Decimal("100")
@@ -152,6 +156,44 @@ def test_douyin_dongzhang_computes_paid_refund_and_positive_fee_totals(tmp_path:
     assert agg["merchant_fee"] == Decimal("6")
     assert agg["promotion_fee"] == Decimal("5")
     assert agg["provider_commission"] == Decimal("3.5")
+
+
+def test_douyin_dongzhang_strips_excel_text_prefix_from_detail_fields(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_text_prefix.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-04-01 01:17:24",
+                动账时间="2026-04-02 10:00:00",
+                动帐流水号="'2026040101172401977718277000",
+                动账方向="入账",
+                动账金额="83.16",
+                动账账户="聚合账户",
+                动账场景="货款结算入账",
+                计费类型="精选联盟",
+                子订单号="'6925040387642719692",
+                订单号="'6925040387642719692",
+                订单实付应结="83.16",
+                订单退款="0",
+                平台服务费="0",
+                佣金="0",
+                招商服务费="0",
+                站外推广费="0",
+                服务商佣金="0",
+            )
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+
+    assert result["success_rows"] == 1
+    detail_row = result["detail_rows"][0]
+    assert detail_row["transaction_flow_no"] == "2026040101172401977718277000"
+    assert detail_row["sub_order_no"] == "6925040387642719692"
+    assert detail_row["order_no"] == "6925040387642719692"
 
 
 def test_douyin_simple_monthly_sum_types(tmp_path: Path) -> None:
