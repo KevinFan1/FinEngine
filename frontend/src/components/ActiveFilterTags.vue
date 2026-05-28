@@ -1,20 +1,5 @@
 <template>
-  <div v-if="tags.length" class="active-filters">
-    <div class="active-filters-summary">
-      <span class="active-filters-label">当前筛选</span>
-      <span class="active-filters-count">{{ tags.length }} 项</span>
-    </div>
-    <el-tag
-      v-for="tag in tags"
-      :key="tagKey(tag)"
-      closable
-      class="filter-tag"
-      @close="$emit('remove', tag)"
-    >
-      {{ tag.label }}：{{ tag.value }}
-    </el-tag>
-    <el-button link class="clear-filters-btn" @click="$emit('clear')">清空全部</el-button>
-  </div>
+  <span v-if="false" />
 </template>
 
 <script setup lang="ts">
@@ -28,8 +13,4 @@ defineEmits<{
   remove: [tag: ActiveFilterTag]
   clear: []
 }>()
-
-function tagKey(tag: ActiveFilterTag) {
-  return `${tag.key}-${tag.value}`
-}
 </script>

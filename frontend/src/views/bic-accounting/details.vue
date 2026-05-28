@@ -172,7 +172,7 @@
                         <div class="reconciliation-dialog-title">导出 BIC 对账表</div>
                         <div class="reconciliation-dialog-subtitle">单次仅支持单个月份和单个服务商，其他条件用于缩小本次导出范围。</div>
                     </div>
-                    <el-button text @click="syncReconciliationFormFromCurrentFilters">带入当前筛选</el-button>
+                    <el-button text @click="syncReconciliationFormFromListFilters">带入列表条件</el-button>
                 </div>
             </template>
 
@@ -628,7 +628,7 @@ function reconciliationCanPreview() {
     return Boolean(reconciliationSelectedMonth.value && reconciliationSelectedProvider.value);
 }
 
-async function syncReconciliationFormFromCurrentFilters() {
+async function syncReconciliationFormFromListFilters() {
     const currentMonth = selectedMonthFromRange(searchForm.monthRange);
     reconciliationForm.accountingMonth = currentMonth ? `${currentMonth.accounting_year}-${String(currentMonth.accounting_month).padStart(2, "0")}` : "";
     reconciliationForm.orgIds = [...searchForm.orgIds];
@@ -646,7 +646,7 @@ async function syncReconciliationFormFromCurrentFilters() {
 }
 
 async function openReconciliationDialog() {
-    await syncReconciliationFormFromCurrentFilters();
+    await syncReconciliationFormFromListFilters();
     reconciliationDialogVisible.value = true;
     scheduleReconciliationPreview();
 }

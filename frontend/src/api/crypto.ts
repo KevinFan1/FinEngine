@@ -1,3 +1,4 @@
+import forge from "node-forge";
 import type {
     AxiosResponse,
     InternalAxiosRequestConfig,
@@ -15,86 +16,64 @@ interface EncryptedEnvelope {
     data: string;
 }
 
+interface SessionKey {
+    raw: Uint8Array;
+    subtle?: CryptoKey;
+}
+
 let cryptoKeyCache: CryptoKey | null = null;
 let cryptoKeyId = "";
-const sessionKeys = new WeakMap<InternalAxiosRequestConfig, CryptoKey>();
+const sessionKeys = new WeakMap<InternalAxiosRequestConfig, SessionKey>();
 
 export async function encryptRequest(config: InternalAxiosRequestConfig) {
     if (!shouldEncrypt(config)) return config;
 
     const publicKey = getPublicKey();
-    if (!publicKey?.enabled) return config;
+    if (!publicKey?.enabled) {
+        throw new Error("请求加密失败：缺少接口加密公钥");
+    }
 
     const timestamp = String(Date.now());
     const nonce = createNonce();
     const aad = new TextEncoder().encode(`${timestamp}:${nonce}`);
-    const aesKey = await crypto.subtle.generateKey(
-        { name: "AES-GCM", length: 256 },
-        true,
-        ["encrypt", "decrypt"],
-    );
-    const rawAesKey = await crypto.subtle.exportKey("raw", aesKey);
-    const rsaKey = await importRsaPublicKey(publicKey);
-    const encryptedKeyPayload = new TextEncoder().encode(JSON.stringify({
-        key: arrayBufferToBase64(rawAesKey),
-        timestamp,
-        nonce,
-    }));
-    const encryptedKey = await crypto.subtle.encrypt(
-        { name: "RSA-OAEP" },
-        rsaKey,
-        encryptedKeyPayload,
-    );
-    if (hasRequestBody(config)) {
-        const plaintext = new TextEncoder().encode(JSON.stringify(config.data ?? {}));
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const ciphertext = await crypto.subtle.encrypt(
-            { name: "AES-GCM", iv, additionalData: aad },
-            aesKey,
-            plaintext,
-        );
+    const rawAesKey = randomBytes(32);
+    const encryptedKey = await encryptAesKey(publicKey, rawAesKey, timestamp, nonce);
+    const sessionKey: SessionKey = { raw: rawAesKey };
 
-        config.data = {
-            encrypted: true,
-            iv: arrayBufferToBase64(iv),
-            data: arrayBufferToBase64(ciphertext),
-        } satisfies EncryptedEnvelope;
+    if (hasRequestBody(config) && !isFormData(config.data)) {
+        const plaintext = new TextEncoder().encode(JSON.stringify(config.data ?? {}));
+        const encryptedBody = await encryptPayload(rawAesKey, plaintext, aad);
+        config.data = encryptedBody;
     }
+
     config.headers.set("X-API-Encrypted", "1");
     config.headers.set("X-API-Crypto-Key", arrayBufferToBase64(encryptedKey));
     config.headers.set("X-API-Crypto-Key-Id", publicKey.key_id);
     config.headers.set("X-API-Timestamp", timestamp);
     config.headers.set("X-API-Nonce", nonce);
-    sessionKeys.set(config, aesKey);
+    sessionKeys.set(config, sessionKey);
     return config;
 }
 
 export async function decryptResponse(response: AxiosResponse) {
     if (response.headers["x-api-encrypted-response"] !== "1") return response;
-    const envelope = response.data as EncryptedEnvelope;
+    const envelope = await responseEnvelope(response.data);
     if (!envelope?.encrypted) return response;
 
-    const aesKey = sessionKeys.get(response.config);
-    if (!aesKey) {
+    const sessionKey = sessionKeys.get(response.config);
+    if (!sessionKey) {
         throw new Error("响应解密失败：缺少会话密钥");
     }
 
-    const plaintext = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: base64ToUint8Array(envelope.iv) },
-        aesKey,
-        base64ToUint8Array(envelope.data),
-    );
+    const plaintext = await decryptPayload(sessionKey, envelope);
     response.data = JSON.parse(new TextDecoder().decode(plaintext));
     return response;
 }
 
 function shouldEncrypt(config: InternalAxiosRequestConfig): boolean {
-    if (!window.crypto?.subtle) return false;
     const method = (config.method || "GET").toUpperCase();
     if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) return false;
-    if (config.responseType === "blob") return false;
-    if (isFormData(config.data)) return false;
-    return Boolean(import.meta.env.VITE_API_CRYPTO_PUBLIC_KEY);
+    return true;
 }
 
 function hasRequestBody(config: InternalAxiosRequestConfig): boolean {
@@ -104,6 +83,13 @@ function hasRequestBody(config: InternalAxiosRequestConfig): boolean {
 
 function isFormData(data: unknown): boolean {
     return typeof FormData !== "undefined" && data instanceof FormData;
+}
+
+async function responseEnvelope(data: unknown): Promise<EncryptedEnvelope | null> {
+    if (data instanceof Blob) {
+        return JSON.parse(await data.text()) as EncryptedEnvelope;
+    }
+    return data as EncryptedEnvelope;
 }
 
 function getPublicKey(): CryptoPublicKey | null {
@@ -117,6 +103,100 @@ function getPublicKey(): CryptoPublicKey | null {
         key_id: import.meta.env.VITE_API_CRYPTO_KEY_ID || "static",
         public_key: normalized,
     };
+}
+
+async function encryptAesKey(
+    publicKey: CryptoPublicKey,
+    rawAesKey: Uint8Array,
+    timestamp: string,
+    nonce: string,
+): Promise<ArrayBuffer | Uint8Array> {
+    const payload = new TextEncoder().encode(JSON.stringify({
+        key: arrayBufferToBase64(rawAesKey),
+        timestamp,
+        nonce,
+    }));
+
+    if (hasSubtleCrypto()) {
+        const rsaKey = await importRsaPublicKey(publicKey);
+        return crypto.subtle.encrypt({ name: "RSA-OAEP" }, rsaKey, payload);
+    }
+
+    const rsaKey = forge.pki.publicKeyFromPem(publicKeyToPem(publicKey.public_key));
+    const encrypted = rsaKey.encrypt(bytesToForgeBinary(payload), "RSA-OAEP", {
+        md: forge.md.sha256.create(),
+        mgf1: {
+            md: forge.md.sha256.create(),
+        },
+    });
+    return forgeBinaryToBytes(encrypted);
+}
+
+async function encryptPayload(
+    rawAesKey: Uint8Array,
+    plaintext: Uint8Array,
+    aad: Uint8Array,
+): Promise<EncryptedEnvelope> {
+    const iv = randomBytes(12);
+    let ciphertext: ArrayBuffer | Uint8Array;
+
+    if (hasSubtleCrypto()) {
+        const aesKey = await crypto.subtle.importKey("raw", rawAesKey, "AES-GCM", false, ["encrypt"]);
+        ciphertext = await crypto.subtle.encrypt(
+            { name: "AES-GCM", iv, additionalData: aad },
+            aesKey,
+            plaintext,
+        );
+    } else {
+        const cipher = forge.cipher.createCipher("AES-GCM", bytesToForgeBinary(rawAesKey));
+        cipher.start({
+            iv: bytesToForgeBinary(iv),
+            additionalData: bytesToForgeBinary(aad),
+            tagLength: 128,
+        });
+        cipher.update(forge.util.createBuffer(bytesToForgeBinary(plaintext), "raw"));
+        cipher.finish();
+        ciphertext = forgeBinaryToBytes(cipher.output.getBytes() + cipher.mode.tag.getBytes());
+    }
+
+    return {
+        encrypted: true,
+        iv: arrayBufferToBase64(iv),
+        data: arrayBufferToBase64(ciphertext),
+    };
+}
+
+async function decryptPayload(sessionKey: SessionKey, envelope: EncryptedEnvelope): Promise<ArrayBuffer | Uint8Array> {
+    const iv = base64ToUint8Array(envelope.iv);
+    const encrypted = base64ToUint8Array(envelope.data);
+
+    if (hasSubtleCrypto()) {
+        const subtleKey = sessionKey.subtle || await crypto.subtle.importKey(
+            "raw",
+            sessionKey.raw,
+            "AES-GCM",
+            false,
+            ["decrypt"],
+        );
+        sessionKey.subtle = subtleKey;
+        return crypto.subtle.decrypt({ name: "AES-GCM", iv }, subtleKey, encrypted);
+    }
+
+    const tagLength = 16;
+    const ciphertext = encrypted.slice(0, encrypted.length - tagLength);
+    const tag = encrypted.slice(encrypted.length - tagLength);
+    const decipher = forge.cipher.createDecipher("AES-GCM", bytesToForgeBinary(sessionKey.raw));
+    decipher.start({
+        iv: bytesToForgeBinary(iv),
+        tag: forge.util.createBuffer(bytesToForgeBinary(tag), "raw"),
+        tagLength: 128,
+    });
+    decipher.update(forge.util.createBuffer(bytesToForgeBinary(ciphertext), "raw"));
+
+    if (!decipher.finish()) {
+        throw new Error("响应解密失败：密文校验失败");
+    }
+    return forgeBinaryToBytes(decipher.output.getBytes());
 }
 
 async function importRsaPublicKey(publicKey: CryptoPublicKey): Promise<CryptoKey> {
@@ -133,6 +213,16 @@ async function importRsaPublicKey(publicKey: CryptoPublicKey): Promise<CryptoKey
     );
     cryptoKeyId = publicKey.key_id;
     return cryptoKeyCache;
+}
+
+function hasSubtleCrypto(): boolean {
+    return Boolean(window.crypto?.subtle);
+}
+
+function publicKeyToPem(publicKey: string): string {
+    if (publicKey.includes("BEGIN PUBLIC KEY")) return publicKey;
+    const lines = publicKey.match(/.{1,64}/g)?.join("\n") || publicKey;
+    return `-----BEGIN PUBLIC KEY-----\n${lines}\n-----END PUBLIC KEY-----`;
 }
 
 function pemToArrayBuffer(pem: string): ArrayBuffer {
@@ -153,12 +243,30 @@ function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
 }
 
 function createNonce(): string {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    return arrayBufferToBase64(bytes);
+    return arrayBufferToBase64(randomBytes(16));
+}
+
+function randomBytes(length: number): Uint8Array {
+    if (window.crypto?.getRandomValues) {
+        return window.crypto.getRandomValues(new Uint8Array(length));
+    }
+    return forgeBinaryToBytes(forge.random.getBytesSync(length));
 }
 
 function base64ToUint8Array(base64: string): Uint8Array {
     const binary = atob(base64);
+    return forgeBinaryToBytes(binary);
+}
+
+function bytesToForgeBinary(bytes: Uint8Array): string {
+    let binary = "";
+    bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+    });
+    return binary;
+}
+
+function forgeBinaryToBytes(binary: string): Uint8Array {
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
         bytes[index] = binary.charCodeAt(index);

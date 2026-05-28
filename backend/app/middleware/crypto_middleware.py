@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from fastapi import status
 from starlette.responses import JSONResponse
@@ -19,6 +18,8 @@ ENCRYPTED_KEY_HEADER = b"x-api-crypto-key"
 ENCRYPTED_RESPONSE_HEADER = b"x-api-encrypted-response"
 NONCE_HEADER = b"x-api-nonce"
 TIMESTAMP_HEADER = b"x-api-timestamp"
+API_PREFIX = "/api/v1"
+CRYPTO_OPTIONAL_PATHS = ("/api/v1/health",)
 
 
 class ApiCryptoMiddleware:
@@ -26,7 +27,7 @@ class ApiCryptoMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not settings.API_CRYPTO_ENABLED:
+        if scope["type"] != "http" or not settings.API_CRYPTO_ENABLED or not _requires_crypto(scope):
             await self.app(scope, receive, send)
             return
 
@@ -36,14 +37,11 @@ class ApiCryptoMiddleware:
         nonce = _header_value(headers, NONCE_HEADER)
         timestamp = _header_value(headers, TIMESTAMP_HEADER)
         if not encrypted:
-            await self.app(scope, receive, send)
+            await _api_error("接口必须使用加密请求", status.HTTP_400_BAD_REQUEST)(scope, receive, send)
             return
 
         try:
             aes_key = api_crypto_service.decrypt_aes_key(encrypted_key, timestamp=timestamp, nonce=nonce)
-            body = await _read_body(receive)
-            aad = replay_aad(timestamp, nonce)
-            decrypted_body = _decrypt_body(aes_key, body, aad=aad) if body.strip() else body
         except Exception:
             await _api_error("请求加密数据解密失败", status.HTTP_400_BAD_REQUEST)(scope, receive, send)
             return
@@ -54,8 +52,18 @@ class ApiCryptoMiddleware:
             return
 
         request_scope = dict(scope)
-        request_scope["headers"] = _replace_content_headers(headers, len(decrypted_body))
-        receive_decrypted = _receive_once(decrypted_body)
+        receive_for_app = receive
+
+        if _should_decrypt_body(scope, headers):
+            try:
+                body = await _read_body(receive)
+                aad = replay_aad(timestamp, nonce)
+                decrypted_body = _decrypt_body(aes_key, body, aad=aad) if body.strip() else body
+            except Exception:
+                await _api_error("请求加密数据解密失败", status.HTTP_400_BAD_REQUEST)(scope, receive, send)
+                return
+            request_scope["headers"] = _replace_content_headers(headers, len(decrypted_body))
+            receive_for_app = _receive_once(decrypted_body)
 
         response_status = 500
         response_headers: list[tuple[bytes, bytes]] = []
@@ -75,7 +83,25 @@ class ApiCryptoMiddleware:
                 return
             await send(message)
 
-        await self.app(request_scope, receive_decrypted, send_wrapper)
+        await self.app(request_scope, receive_for_app, send_wrapper)
+
+
+def _requires_crypto(scope: Scope) -> bool:
+    if str(scope.get("method") or "").upper() == "OPTIONS":
+        return False
+
+    path = str(scope.get("path") or "")
+    if not path.startswith(API_PREFIX):
+        return False
+    return not any(path == optional or path.startswith(f"{optional}/") for optional in CRYPTO_OPTIONAL_PATHS)
+
+
+def _should_decrypt_body(scope: Scope, headers: list[tuple[bytes, bytes]]) -> bool:
+    method = str(scope.get("method") or "").upper()
+    if method in {"GET", "HEAD"}:
+        return False
+    content_type = _header_value(headers, b"content-type").lower()
+    return "multipart/form-data" not in content_type
 
 
 def _decrypt_body(aes_key: bytes, body: bytes, *, aad: bytes) -> bytes:
