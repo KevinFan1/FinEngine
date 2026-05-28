@@ -526,7 +526,7 @@ interface SummaryTableInstance {
 }
 
 const searchForm = reactive({
-    accountingMonthRange: [] as string[],
+    accountingMonthRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -558,28 +558,28 @@ const pagination = reactive({
 });
 
 const selectedAccountingStartYear = computed(() => {
-    const [start] = searchForm.accountingMonthRange;
+    const [start] = searchForm.accountingMonthRange || [];
     if (!start) return undefined;
     const [year] = start.split("-");
     return Number(year) || undefined;
 });
 
 const selectedAccountingStartMonth = computed(() => {
-    const [start] = searchForm.accountingMonthRange;
+    const [start] = searchForm.accountingMonthRange || [];
     if (!start) return undefined;
     const [, month] = start.split("-");
     return Number(month) || undefined;
 });
 
 const selectedAccountingEndYear = computed(() => {
-    const [, end] = searchForm.accountingMonthRange;
+    const [, end] = searchForm.accountingMonthRange || [];
     if (!end) return undefined;
     const [year] = end.split("-");
     return Number(year) || undefined;
 });
 
 const selectedAccountingEndMonth = computed(() => {
-    const [, end] = searchForm.accountingMonthRange;
+    const [, end] = searchForm.accountingMonthRange || [];
     if (!end) return undefined;
     const [, month] = end.split("-");
     return Number(month) || undefined;
@@ -606,7 +606,7 @@ const selectedShopIdsParam = computed(
 const keywordParam = computed(() => searchForm.keyword.trim() || undefined);
 const selectedCount = computed(() => selectedRows.value.length);
 const accountingMonthRangeLabel = computed(() => {
-    const [start, end] = searchForm.accountingMonthRange;
+    const [start, end] = searchForm.accountingMonthRange || [];
     if (!start && !end) return "";
     if (start && end) return start === end ? start : `${start} 至 ${end}`;
     if (start) return `${start} 起`;
@@ -782,7 +782,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.accountingMonthRange = [];
+    searchForm.accountingMonthRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -813,7 +813,7 @@ function handleSelectionChange(rows: SummaryReportRecord[]) {
 
 function removeFilterTag(tag: FilterTag) {
     if (tag.key === "accountingMonthRange") {
-        searchForm.accountingMonthRange = [];
+        searchForm.accountingMonthRange = null;
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

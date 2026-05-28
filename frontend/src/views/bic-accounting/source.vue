@@ -123,7 +123,7 @@ const exportCurrentPageLoading = ref(false);
 const exportSelectedLoading = ref(false);
 const exportAllLoading = ref(false);
 const searchForm = reactive({
-    monthRange: [] as string[],
+    monthRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -157,7 +157,7 @@ interface SourceFilterTag extends ActiveFilterTag {
 
 const activeFilterTags = computed<SourceFilterTag[]>(() => {
     const tags: SourceFilterTag[] = [];
-    if (searchForm.monthRange.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    if (searchForm.monthRange?.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -244,7 +244,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.monthRange = [];
+    searchForm.monthRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -255,7 +255,7 @@ function handleReset() {
 }
 
 async function removeFilterTag(tag: SourceFilterTag) {
-    if (tag.key === "monthRange") searchForm.monthRange = [];
+    if (tag.key === "monthRange") searchForm.monthRange = null;
     if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

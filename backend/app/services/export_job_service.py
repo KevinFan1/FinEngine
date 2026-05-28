@@ -506,7 +506,7 @@ class ExportJobService:
             **creds,
             "region": settings.ALIYUN_OSS_REGION,
             "bucket": settings.ALIYUN_OSS_BUCKET,
-            "endpoint": oss_service.normalized_endpoint(internal=settings.INTERNAL_DOWNLOAD),
+            "endpoint": oss_service.normalized_endpoint(),
             "oss_key": job.oss_key,
             "filename": job.filename,
         }

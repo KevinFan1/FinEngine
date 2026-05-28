@@ -665,7 +665,7 @@ const orgOptions = ref<Organization[]>([]);
 // Search
 const searchForm = reactive({
     sourceMonth: "",
-    createdTimeRange: [] as string[],
+    createdTimeRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -787,7 +787,7 @@ interface TaskFilterTag extends ActiveFilterTag {
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
     if (searchForm.sourceMonth) tags.push({ key: "sourceMonth", label: "年月", value: searchForm.sourceMonth });
-    if (searchForm.createdTimeRange.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
+    if (searchForm.createdTimeRange?.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -885,8 +885,8 @@ async function fetchData() {
             parsed_type: selectedParsedTypesParam.value,
             status: selectedStatusesParam.value,
             keyword: searchForm.keyword || undefined,
-            created_start_time: searchForm.createdTimeRange[0] || undefined,
-            created_end_time: searchForm.createdTimeRange[1] || undefined,
+            created_start_time: searchForm.createdTimeRange?.[0] || undefined,
+            created_end_time: searchForm.createdTimeRange?.[1] || undefined,
         });
         tableData.value = res.items || [];
         pagination.total = res.total || 0;
@@ -963,7 +963,7 @@ function handleSearch() {
 
 function handleReset() {
     searchForm.sourceMonth = "";
-    searchForm.createdTimeRange = [];
+    searchForm.createdTimeRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -979,7 +979,7 @@ async function removeFilterTag(tag: TaskFilterTag) {
     if (tag.key === "sourceMonth") {
         searchForm.sourceMonth = "";
     } else if (tag.key === "createdTimeRange") {
-        searchForm.createdTimeRange = [];
+        searchForm.createdTimeRange = null;
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

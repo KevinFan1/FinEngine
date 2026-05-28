@@ -417,7 +417,7 @@ const exportCurrentPageLoading = ref(false);
 const exportSelectedLoading = ref(false);
 const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
 const searchForm = reactive({
-    businessMonthRange: [] as string[],
+    businessMonthRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -487,7 +487,7 @@ interface DetailFilterTag extends ActiveFilterTag {
 
 const activeFilterTags = computed<DetailFilterTag[]>(() => {
     const tags: DetailFilterTag[] = [];
-    if (searchForm.businessMonthRange.length) {
+    if (searchForm.businessMonthRange?.length) {
         tags.push({
             key: "businessMonthRange",
             label: "业务年月",
@@ -590,7 +590,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.businessMonthRange = [];
+    searchForm.businessMonthRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -603,7 +603,7 @@ function handleReset() {
 
 async function removeFilterTag(tag: DetailFilterTag) {
     if (tag.key === "businessMonthRange") {
-        searchForm.businessMonthRange = [];
+        searchForm.businessMonthRange = null;
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

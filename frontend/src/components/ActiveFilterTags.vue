@@ -1,5 +1,5 @@
 <template>
-  <div v-if="false && tags.length" class="active-filters">
+  <div v-if="tags.length" class="active-filters">
     <div class="active-filters-summary">
       <span class="active-filters-label">当前筛选</span>
       <span class="active-filters-count">{{ tags.length }} 项</span>

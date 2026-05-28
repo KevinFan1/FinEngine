@@ -80,8 +80,8 @@ export function parseTransactionFilename(filename: string) {
     return { year, month, shop };
 }
 
-export function splitMonthRange(range: string[]) {
-    const [start, end] = range;
+export function splitMonthRange(range: string[] | null | undefined) {
+    const [start, end] = range || [];
     const [startYear, startMonth] = start ? start.split("-").map(Number) : [undefined, undefined];
     const [endYear, endMonth] = end ? end.split("-").map(Number) : [undefined, undefined];
     return {
@@ -92,7 +92,7 @@ export function splitMonthRange(range: string[]) {
     };
 }
 
-export function splitUploadMonthRange(range: string[]) {
+export function splitUploadMonthRange(range: string[] | null | undefined) {
     const filters = splitMonthRange(range);
     return {
         upload_accounting_start_year: filters.accounting_start_year,
@@ -102,8 +102,8 @@ export function splitUploadMonthRange(range: string[]) {
     };
 }
 
-export function monthRangeLabel(range: string[]) {
-    if (!range.length) return "";
+export function monthRangeLabel(range: string[] | null | undefined) {
+    if (!range?.length) return "";
     if (range.length === 1 || range[0] === range[1]) return range[0];
     return `${range[0]} 至 ${range[1]}`;
 }

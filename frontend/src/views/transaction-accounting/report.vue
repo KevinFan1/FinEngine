@@ -347,7 +347,7 @@ const shopLoading = ref(false);
 const exportLoading = ref(false);
 const searchForm = reactive({
     year: currentYear,
-    uploadMonthRange: [] as string[],
+    uploadMonthRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -403,7 +403,7 @@ const activeFilterTags = computed<ReportFilterTag[]>(() => {
     const tags: ReportFilterTag[] = [
         { key: "year", label: "业务年份", value: `${searchForm.year}` },
     ];
-    if (searchForm.uploadMonthRange.length) {
+    if (searchForm.uploadMonthRange?.length) {
         tags.push({
             key: "uploadMonthRange",
             label: "核算年月",
@@ -516,7 +516,7 @@ function handleSearch() {
 function handleReset() {
     searchForm.year = currentYear;
     yearPickerValue.value = String(currentYear);
-    searchForm.uploadMonthRange = [];
+    searchForm.uploadMonthRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];

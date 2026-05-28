@@ -415,8 +415,8 @@ const selectedRows = ref<BicTask[]>([]);
 const taskDetailDrawerVisible = ref(false);
 const taskDetail = ref<BicTask | null>(null);
 const searchForm = reactive({
-    monthRange: [] as string[],
-    createdTimeRange: [] as string[],
+    monthRange: null as string[] | null,
+    createdTimeRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     statuses: [] as string[],
@@ -490,8 +490,8 @@ interface TaskFilterTag extends ActiveFilterTag {
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
-    if (searchForm.monthRange.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
-    if (searchForm.createdTimeRange.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
+    if (searchForm.monthRange?.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    if (searchForm.createdTimeRange?.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -589,8 +589,8 @@ function queryParams() {
         platform_code: selectedPlatformsParam.value,
         shop_ids: selectedShopIdsParam.value,
         keyword: searchForm.keyword || undefined,
-        created_start_time: searchForm.createdTimeRange[0] || undefined,
-        created_end_time: searchForm.createdTimeRange[1] || undefined,
+        created_start_time: searchForm.createdTimeRange?.[0] || undefined,
+        created_end_time: searchForm.createdTimeRange?.[1] || undefined,
         ...splitMonthRange(searchForm.monthRange),
     };
 }
@@ -670,8 +670,8 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.monthRange = [];
-    searchForm.createdTimeRange = [];
+    searchForm.monthRange = null;
+    searchForm.createdTimeRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.statuses = [];
@@ -682,8 +682,8 @@ function handleReset() {
 }
 
 async function removeFilterTag(tag: TaskFilterTag) {
-    if (tag.key === "monthRange") searchForm.monthRange = [];
-    if (tag.key === "createdTimeRange") searchForm.createdTimeRange = [];
+    if (tag.key === "monthRange") searchForm.monthRange = null;
+    if (tag.key === "createdTimeRange") searchForm.createdTimeRange = null;
     if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);

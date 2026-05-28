@@ -97,8 +97,8 @@ export const taskCreatedTimeShortcuts = [
     },
 ];
 
-export function dateRangeLabel(range: string[]) {
-    if (!range.length) return "";
+export function dateRangeLabel(range: string[] | null | undefined) {
+    if (!range?.length) return "";
     if (range.length === 1 || range[0] === range[1]) return range[0];
     return `${range[0]} 至 ${range[1]}`;
 }

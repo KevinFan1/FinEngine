@@ -611,8 +611,8 @@ interface SummaryTableInstance {
 
 // Search
 const searchForm = reactive({
-    summaryMonthRange: [] as string[],
-    sourceMonthRange: [] as string[],
+    summaryMonthRange: null as string[] | null,
+    sourceMonthRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     reportPlatforms: [] as string[],
@@ -664,19 +664,21 @@ function formatMonthRangeLabel(range: string[]) {
 }
 
 const selectedSummaryStart = computed(() =>
-    parseMonthValue(searchForm.summaryMonthRange[0]),
+    parseMonthValue(searchForm.summaryMonthRange?.[0]),
 );
 const selectedSummaryEnd = computed(() =>
     parseMonthValue(
-        searchForm.summaryMonthRange[1] || searchForm.summaryMonthRange[0],
+        searchForm.summaryMonthRange?.[1] ||
+            searchForm.summaryMonthRange?.[0],
     ),
 );
 const selectedSourceStart = computed(() =>
-    parseMonthValue(searchForm.sourceMonthRange[0]),
+    parseMonthValue(searchForm.sourceMonthRange?.[0]),
 );
 const selectedSourceEnd = computed(() =>
     parseMonthValue(
-        searchForm.sourceMonthRange[1] || searchForm.sourceMonthRange[0],
+        searchForm.sourceMonthRange?.[1] ||
+            searchForm.sourceMonthRange?.[0],
     ),
 );
 
@@ -719,14 +721,14 @@ const selectedCount = computed(() => selectedRowMap.value.size);
 const activeFilterTags = computed<FilterTag[]>(() => {
     const tags: FilterTag[] = [];
 
-    if (searchForm.summaryMonthRange.length) {
+    if (searchForm.summaryMonthRange?.length) {
         tags.push({
             key: "summaryMonthRange",
             label: "业务年月",
             value: formatMonthRangeLabel(searchForm.summaryMonthRange),
         });
     }
-    if (searchForm.sourceMonthRange.length) {
+    if (searchForm.sourceMonthRange?.length) {
         tags.push({
             key: "sourceMonthRange",
             label: "核算年月",
@@ -921,8 +923,8 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.summaryMonthRange = [];
-    searchForm.sourceMonthRange = [];
+    searchForm.summaryMonthRange = null;
+    searchForm.sourceMonthRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.reportPlatforms = [];
@@ -967,9 +969,9 @@ function clearSelectedRows(clearTable = true) {
 
 function removeFilterTag(tag: FilterTag) {
     if (tag.key === "summaryMonthRange") {
-        searchForm.summaryMonthRange = [];
+        searchForm.summaryMonthRange = null;
     } else if (tag.key === "sourceMonthRange") {
-        searchForm.sourceMonthRange = [];
+        searchForm.sourceMonthRange = null;
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
