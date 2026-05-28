@@ -347,86 +347,86 @@ async def test_bic_persist_deletes_stale_source_rows_without_expanding_synced_id
 
 
 @pytest.mark.asyncio
-async def test_bic_summary_export_rejects_over_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bic_summary_export_allows_large_result(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_list_details(_db, **_kwargs):
         return [{"id": 1}], 2
 
     monkeypatch.setattr(BicAccountingService, "list_details", staticmethod(fake_list_details))
-    monkeypatch.setattr("app.services.bic_accounting_service.BIC_EXCEL_EXPORT_ROW_LIMIT", 1)
 
-    with pytest.raises(ValueError, match="BIC汇总导出数据量 2 行"):
-        await BicAccountingService.export_details(
-            None,  # type: ignore[arg-type]
-            scope="all",
-            user=SimpleNamespace(role="member", org_id=3),
-        )
+    buffer = await BicAccountingService.export_details(
+        None,  # type: ignore[arg-type]
+        scope="all",
+        user=SimpleNamespace(role="member", org_id=3),
+    )
+
+    assert buffer.getbuffer().nbytes > 0
 
 
 @pytest.mark.asyncio
-async def test_bic_summary_current_page_export_rejects_over_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bic_summary_current_page_export_allows_large_result(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_list_details(_db, **_kwargs):
         return [{"id": 1}, {"id": 2}], 2
 
     monkeypatch.setattr(BicAccountingService, "list_details", staticmethod(fake_list_details))
-    monkeypatch.setattr("app.services.bic_accounting_service.BIC_EXCEL_EXPORT_ROW_LIMIT", 1)
 
-    with pytest.raises(ValueError, match="BIC汇总导出数据量 2 行"):
-        await BicAccountingService.export_details(
-            None,  # type: ignore[arg-type]
-            scope="current_page",
-            user=SimpleNamespace(role="member", org_id=3),
-        )
+    buffer = await BicAccountingService.export_details(
+        None,  # type: ignore[arg-type]
+        scope="current_page",
+        user=SimpleNamespace(role="member", org_id=3),
+    )
+
+    assert buffer.getbuffer().nbytes > 0
 
 
 @pytest.mark.asyncio
-async def test_bic_source_export_rejects_over_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bic_source_export_allows_large_result(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_list_source_rows(_db, **_kwargs):
         return [{"id": 1}], 2
 
     monkeypatch.setattr(BicAccountingService, "list_source_rows", staticmethod(fake_list_source_rows))
-    monkeypatch.setattr("app.services.bic_accounting_service.BIC_EXCEL_EXPORT_ROW_LIMIT", 1)
 
-    with pytest.raises(ValueError, match="BIC明细导出数据量 2 行"):
-        await BicAccountingService.export_source_rows(
-            None,  # type: ignore[arg-type]
-            scope="selected",
-            user=SimpleNamespace(role="member", org_id=3),
-            ids=[1, 2],
-        )
+    buffer = await BicAccountingService.export_source_rows(
+        None,  # type: ignore[arg-type]
+        scope="selected",
+        user=SimpleNamespace(role="member", org_id=3),
+        ids=[1, 2],
+    )
+
+    assert buffer.getbuffer().nbytes > 0
 
 
 @pytest.mark.asyncio
-async def test_bic_source_current_page_export_rejects_over_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bic_source_current_page_export_allows_large_result(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_list_source_rows(_db, **_kwargs):
         return [{"id": 1}, {"id": 2}], 2
 
     monkeypatch.setattr(BicAccountingService, "list_source_rows", staticmethod(fake_list_source_rows))
-    monkeypatch.setattr("app.services.bic_accounting_service.BIC_EXCEL_EXPORT_ROW_LIMIT", 1)
 
-    with pytest.raises(ValueError, match="BIC明细导出数据量 2 行"):
-        await BicAccountingService.export_source_rows(
-            None,  # type: ignore[arg-type]
-            scope="current_page",
-            user=SimpleNamespace(role="member", org_id=3),
-        )
+    buffer = await BicAccountingService.export_source_rows(
+        None,  # type: ignore[arg-type]
+        scope="current_page",
+        user=SimpleNamespace(role="member", org_id=3),
+    )
+
+    assert buffer.getbuffer().nbytes > 0
 
 
 @pytest.mark.asyncio
-async def test_bic_reconciliation_export_rejects_over_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bic_reconciliation_export_allows_large_result(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_list_source_rows(_db, **_kwargs):
         return [{"id": 1}], 2
 
     monkeypatch.setattr(BicAccountingService, "list_source_rows", staticmethod(fake_list_source_rows))
-    monkeypatch.setattr("app.services.bic_accounting_service.BIC_EXCEL_EXPORT_ROW_LIMIT", 1)
 
-    with pytest.raises(ValueError, match="BIC对账表导出数据量 2 行"):
-        await BicAccountingService.export_reconciliation(
-            None,  # type: ignore[arg-type]
-            user=SimpleNamespace(role="member", org_id=3),
-            accounting_year=2026,
-            accounting_month=5,
-            service_provider="服务商A",
-        )
+    buffer = await BicAccountingService.export_reconciliation(
+        None,  # type: ignore[arg-type]
+        user=SimpleNamespace(role="member", org_id=3),
+        accounting_year=2026,
+        accounting_month=5,
+        service_provider="服务商A",
+    )
+
+    assert buffer.getbuffer().nbytes > 0
 
 
 @pytest.mark.asyncio

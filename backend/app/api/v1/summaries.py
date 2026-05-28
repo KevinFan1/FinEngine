@@ -368,10 +368,7 @@ async def list_summary_dongzhang_details(
 
     return ApiResponse(
         data=PageResponse(
-            items=[
-                SummaryDongzhangDetailOut(**DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name, shop_color=shop_color))
-                for row in rows
-            ],
+            items=[SummaryDongzhangDetailOut(**DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name, shop_color=shop_color)) for row in rows],
             total=total,
             page=page,
             page_size=page_size,
@@ -410,7 +407,7 @@ async def export_summary_dongzhang_details(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     filename = quote(
-        f"Douyin动账源明细_{summary.source_year or 0}{summary.source_month or 0:02d}_{summary.shop_name}_{'选中' if scope == 'selected' else f'第{page}页' if scope == 'current_page' else '全部'}.xlsx"
+        f"抖音动账源明细_{summary.source_year or 0}{summary.source_month or 0:02d}_{summary.shop_name}_{'选中' if scope == 'selected' else f'第{page}页' if scope == 'current_page' else '全部'}.xlsx"
     )
 
     ip = request.client.host if request.client else None

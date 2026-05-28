@@ -185,6 +185,7 @@ async def classify_single(
             category=result.category,
             matched_keyword=result.matched_keyword,
             match_type=result.match_type,
+            match_score=result.match_score,
         )
     )
 
@@ -213,6 +214,7 @@ async def classify_batch_endpoint(
                 category=r.category,
                 matched_keyword=r.matched_keyword,
                 match_type=r.match_type,
+                match_score=r.match_score,
             )
             for r in results
         ]

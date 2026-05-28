@@ -7,7 +7,7 @@
                 :tip="
                     route.query.from === 'summary-report'
                         ? '已承接汇总报表筛选条件'
-                        : '支持跨页保留选中结果'
+                        : '业务年月看实际归属，核算年月看文件账期'
                 "
             />
 
@@ -555,8 +555,6 @@ import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getSummaryList,
-    exportSummaryDongzhangDetailExcel,
-    exportSummaryExcel,
     type SummaryRecord,
 } from "@/api/summary";
 import { getPlatformList, type Platform } from "@/api/platform";
@@ -567,6 +565,7 @@ import {
     getPlatformLabel,
     summarizeFilenameValues,
 } from "@/utils/format";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 import {
     getFallbackPlatforms,
     getReportPlatformCode,
@@ -1035,24 +1034,21 @@ async function handleSingleDetailExport(row: SummaryRecord) {
         return;
     }
     try {
-        const blob = await exportSummaryDongzhangDetailExcel(row.id, {
-            org_id: row.org_id,
-            scope: "all",
+        await submitExportJob({
+            export_type: "summary.dongzhang_details",
+            title: "抖音动账源明细导出",
+            filename: normalizeExportFilename(buildExportFilename([
+                row.source_date,
+                row.summary_date,
+                row.shop_name,
+                "抖音动账源明细",
+            ])),
+            params: {
+                summary_id: row.id,
+                org_id: row.org_id,
+                scope: "all",
+            },
         });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = buildExportFilename([
-            row.source_date,
-            row.summary_date,
-            row.shop_name,
-            "抖音动账源明细",
-        ]);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        ElMessage.success("导出成功");
     } catch {
         ElMessage.error("导出失败，请稍后重试");
     }
@@ -1076,7 +1072,8 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
               : exportSelectedLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportSummaryExcel({
+        const params = {
+            org_id: selectedOrgIdsParam.value,
             summary_start_year: selectedSummaryStart.value.year,
             summary_start_month: selectedSummaryStart.value.month,
             summary_end_year: selectedSummaryEnd.value.year,
@@ -1098,17 +1095,14 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             page_size:
                 scope === "current_page" ? pagination.pageSize : undefined,
             include_dongzhang_details: includeDongzhangDetailsInExport.value,
-        });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
+        };
         const scopeLabel =
             scope === "all"
                 ? "全部"
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        link.download = buildExportFilename([
+        const filename = normalizeExportFilename(buildExportFilename([
             formatMonthRangeLabel(searchForm.summaryMonthRange) ||
                 "全部业务年月",
             formatMonthRangeLabel(searchForm.sourceMonthRange) ||
@@ -1122,12 +1116,13 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             "汇总明细",
             includeDongzhangDetailsInExport.value ? "附带源明细" : null,
             scopeLabel,
-        ]);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        ElMessage.success("导出成功");
+        ]));
+        await submitExportJob({
+            export_type: "summary.detail",
+            title: "汇总明细导出",
+            filename,
+            params,
+        });
     } catch {
         ElMessage.error("导出失败，请稍后重试");
     } finally {
@@ -1234,6 +1229,10 @@ function applyRouteQuery() {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+
+    .el-button.is-link:hover {
+        border-bottom: none;
+    }
 }
 
 :deep(.summary-table .summary-edge-column .cell),

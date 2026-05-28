@@ -54,4 +54,5 @@ class ClassifyResult(BaseModel):
     chinese_text: str = Field(description="提取后的中文文本")
     category: str | None = Field(None, description="匹配到的分类")
     matched_keyword: str | None = Field(None, description="命中的关键词")
-    match_type: str = Field("none", description="匹配方式: exact=精确 / contains=包含 / none=未匹配")
+    match_type: str = Field("none", description="匹配方式: exact=精确 / none=未匹配")
+    match_score: float = Field(0.0, description="匹配分数，0~100")

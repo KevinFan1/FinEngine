@@ -274,7 +274,7 @@ import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
-import { BIC_EXCEL_EXPORT_ROW_LIMIT, exportBicDetailsExcel, exportBicReconciliationExcel, listBicDetails, listBicSourceRows, type BicDetail, type BicExportScope, type BicSourceRow } from "@/api/bicAccounting";
+import { listBicDetails, listBicSourceRows, type BicDetail, type BicExportScope, type BicSourceRow } from "@/api/bicAccounting";
 import BicSourceRowsTable from "./BicSourceRowsTable.vue";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
@@ -286,7 +286,8 @@ import {
     summarizeFilenameValues,
 } from "@/utils/format";
 import { getFallbackPlatforms, getReportPlatformCode, toSourcePlatformOptions, type PlatformOption } from "@/utils/platform";
-import { downloadBlob, formatAmount, formatMonth, monthRangeLabel, splitMonthRange } from "./common";
+import { formatAmount, formatMonth, monthRangeLabel, splitMonthRange } from "./common";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 
 const loading = ref(false);
 const tableRef = ref<TableInstance>();
@@ -423,23 +424,18 @@ const reconciliationPreviewCountLabel = computed(() => {
 });
 const reconciliationPreviewAlertType = computed(() => {
     if (!reconciliationCanPreview()) return "warning";
-    if ((reconciliationPreviewTotal.value || 0) > BIC_EXCEL_EXPORT_ROW_LIMIT) return "error";
     if (reconciliationPreviewTotal.value === 0) return "info";
     return "success";
 });
 const reconciliationPreviewHint = computed(() => {
     if (!reconciliationCanPreview()) return "先选择单个月份和单个服务商，再预估本次导出范围。";
     if (reconciliationPreviewLoading.value) return "正在根据当前条件计算可导出的源数据范围。";
-    if ((reconciliationPreviewTotal.value || 0) > BIC_EXCEL_EXPORT_ROW_LIMIT) {
-        return `当前条件预计命中 ${reconciliationPreviewTotal.value?.toLocaleString("zh-CN")} 行，超过系统上限 ${BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请继续缩小范围。`;
-    }
     if (reconciliationPreviewTotal.value === 0) return "当前条件会导出一个仅含表头的空白工作簿。";
-    if (reconciliationPreviewTotal.value !== null) return `当前条件预计命中 ${reconciliationPreviewTotal.value.toLocaleString("zh-CN")} 行源数据，将汇总到同一个明细 sheet 导出。`;
+    if (reconciliationPreviewTotal.value !== null) return `当前条件预计命中 ${reconciliationPreviewTotal.value.toLocaleString("zh-CN")} 行源数据，将提交到下载中心生成。`;
     return "";
 });
 const reconciliationExportDisabled = computed(() => {
     if (!reconciliationSelectedMonth.value || !reconciliationSelectedProvider.value) return true;
-    if ((reconciliationPreviewTotal.value || 0) > BIC_EXCEL_EXPORT_ROW_LIMIT) return true;
     return false;
 });
 
@@ -695,14 +691,6 @@ function handleDrawerReset() {
 }
 
 async function handleExport(scope: BicExportScope) {
-    if (scope === "all" && pagination.total > BIC_EXCEL_EXPORT_ROW_LIMIT) {
-        ElMessage.warning(`导出数据量超过 ${BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出`);
-        return;
-    }
-    if (scope === "selected" && selectedRows.value.length > BIC_EXCEL_EXPORT_ROW_LIMIT) {
-        ElMessage.warning(`已选数据量超过 ${BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请缩小选择范围后再导出`);
-        return;
-    }
     const params: any = { ...queryParams(), scope };
     if (scope === "selected") params.ids = selectedRows.value.map((row) => row.id).join(",");
     if (scope === "current_page") {
@@ -716,8 +704,7 @@ async function handleExport(scope: BicExportScope) {
     const loadingRef = scope === "selected" ? exportSelectedLoading : scope === "current_page" ? exportCurrentPageLoading : exportAllLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportBicDetailsExcel(params);
-        const filename = buildExportFilename([
+        const filename = normalizeExportFilename(buildExportFilename([
             monthRangeLabel(searchForm.monthRange) || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || String(id)), "全部")}`,
@@ -729,8 +716,13 @@ async function handleExport(scope: BicExportScope) {
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中",
-        ]);
-        downloadBlob(blob, filename);
+        ]));
+        await submitExportJob({
+            export_type: "bic.details",
+            title: "BIC汇总导出",
+            filename,
+            params,
+        });
     } finally {
         loadingRef.value = false;
     }
@@ -750,20 +742,25 @@ async function handleReconciliationExport() {
 
     exportReconciliationLoading.value = true;
     try {
-        const blob = await exportBicReconciliationExcel({
+        const params = {
             ...selectedMonth,
             org_id: reconciliationSelectedOrgIdsParam.value,
             platform_code: reconciliationSelectedReportPlatformsParam.value,
             shop_ids: reconciliationForm.shopIds.join(",") || undefined,
             service_provider: provider,
             qic_warehouse: reconciliationForm.qicWarehouse || undefined,
-        });
-        const filename = buildExportFilename([
+        };
+        const filename = normalizeExportFilename(buildExportFilename([
             formatMonth(selectedMonth.accounting_year, selectedMonth.accounting_month),
             provider,
             "BIC对账表",
-        ]);
-        downloadBlob(blob, filename);
+        ]));
+        await submitExportJob({
+            export_type: "bic.reconciliation",
+            title: "BIC对账表导出",
+            filename,
+            params,
+        });
         reconciliationDialogVisible.value = false;
     } finally {
         exportReconciliationLoading.value = false;

@@ -14,11 +14,13 @@ from app.models.shop import Shop
 from app.models.summary import FinancialSummary
 from app.services.douyin_dongzhang_detail_service import (
     DONGZHANG_DETAIL_EXPORT_COLUMNS,
-    MONEY_FIELDS as DONGZHANG_DETAIL_MONEY_FIELDS,
     DouyinDongzhangDetailService,
 )
-from app.services.summary_adjustment_service import SummaryAdjustmentService
+from app.services.douyin_dongzhang_detail_service import (
+    MONEY_FIELDS as DONGZHANG_DETAIL_MONEY_FIELDS,
+)
 from app.services.shop_visibility import active_shop_filter
+from app.services.summary_adjustment_service import SummaryAdjustmentService
 
 # Export header aligned with actual business Excel.
 EXPORT_HEADERS = [
@@ -150,12 +152,9 @@ PLATFORM_LABELS = {
     "小程序": "小程序",
 }
 
-EXCEL_EXPORT_ROW_LIMIT = 20000
-
 
 def _ensure_export_row_limit(label: str, row_count: int) -> None:
-    if row_count > EXCEL_EXPORT_ROW_LIMIT:
-        raise ValueError(f"{label}导出数据量 {row_count} 行，超过系统上限 {EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出")
+    return None
 
 
 def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
@@ -347,7 +346,7 @@ class SummaryService:
         if ids is not None:
             if not ids:
                 rows = []
-                return SummaryService._build_summary_workbook(rows)
+                return SummaryService._save_workbook_to_buffer(SummaryService._build_summary_workbook(rows))
             stmt = stmt.where(FinancialSummary.id.in_(ids))
 
         if summary_year is not None:
@@ -412,15 +411,14 @@ class SummaryService:
 
         result = await db.execute(stmt)
         rows = list(result.scalars().all())
-
-        detail_rows = []
+        workbook = SummaryService._build_summary_workbook(rows)
         if include_dongzhang_details:
-            detail_rows = await DouyinDongzhangDetailService.load_export_rows_for_summary_ids(
+            await DouyinDongzhangDetailService.append_export_rows_for_summary_ids(
                 db,
+                workbook,
                 summary_ids=[row.id for row in rows],
             )
-
-        return SummaryService._build_summary_workbook(rows, detail_rows=detail_rows)
+        return SummaryService._save_workbook_to_buffer(workbook)
 
     @staticmethod
     async def list_report_summaries(
@@ -615,20 +613,19 @@ class SummaryService:
         if ids is not None:
             selected_ids = set(ids)
             rows = [row for row in rows if SummaryService.report_row_id(row) in selected_ids]
-        detail_rows = []
+        workbook = SummaryService._build_report_workbook(rows)
         if include_dongzhang_details:
-            detail_rows = await DouyinDongzhangDetailService.load_export_rows_for_report_rows(
+            await DouyinDongzhangDetailService.append_export_rows_for_report_rows(
                 db,
+                workbook,
                 rows=rows,
             )
-        return SummaryService._build_report_workbook(rows, detail_rows=detail_rows)
+        return SummaryService._save_workbook_to_buffer(workbook)
 
     @staticmethod
     def _build_summary_workbook(
         rows: list[FinancialSummary],
-        *,
-        detail_rows: list[dict[str, object]] | None = None,
-    ) -> io.BytesIO:
+    ) -> Workbook:
         wb = Workbook(write_only=True)
         ws = wb.create_sheet(title="财务汇总")
         ws.append(_write_only_header_row(ws, EXPORT_HEADERS))
@@ -654,8 +651,10 @@ class SummaryService:
                     float(s.bic or 0),
                 ]
             )
-        if detail_rows is not None:
-            SummaryService._append_dongzhang_detail_sheet(wb, detail_rows)
+        return wb
+
+    @staticmethod
+    def _save_workbook_to_buffer(wb: Workbook) -> io.BytesIO:
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
@@ -664,9 +663,7 @@ class SummaryService:
     @staticmethod
     def _build_report_workbook(
         rows: list[dict],
-        *,
-        detail_rows: list[dict[str, object]] | None = None,
-    ) -> io.BytesIO:
+    ) -> Workbook:
         wb = Workbook(write_only=True)
         ws = wb.create_sheet(title="汇总报表")
         ws.append(_write_only_header_row(ws, REPORT_EXPORT_HEADERS))
@@ -691,16 +688,11 @@ class SummaryService:
                     float(row.get("bic") or 0),
                 ]
             )
-        if detail_rows is not None:
-            SummaryService._append_dongzhang_detail_sheet(wb, detail_rows)
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        return buffer
+        return wb
 
     @staticmethod
     def _append_dongzhang_detail_sheet(wb: Workbook, detail_rows: list[dict[str, object]]) -> None:
-        ws = wb.create_sheet(title="Douyin动账源明细")
+        ws = wb.create_sheet(title="抖音动账源明细")
         ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
         for row in detail_rows:
             ws.append(
@@ -719,7 +711,9 @@ class SummaryService:
 
     @staticmethod
     def report_row_id(row: dict) -> str:
-        return f"{int(row.get('org_id') or 0)}-{int(row.get('source_year') or 0)}-{int(row.get('source_month') or 0)}-{row.get('platform_name') or ''}-{int(row.get('shop_id') or 0)}"
+        return (
+            f"{int(row.get('org_id') or 0)}-{int(row.get('source_year') or 0)}-{int(row.get('source_month') or 0)}-{row.get('platform_name') or ''}-{int(row.get('shop_id') or 0)}"
+        )
 
     @staticmethod
     def _month_label(year: int | None, month: int | None) -> str:

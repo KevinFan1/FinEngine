@@ -1019,13 +1019,13 @@ async def export_annual_summary(
         org_id=current_user.org_id,
         module="transaction_accounting",
         action="export",
-        description=f"导出{year}年动账资金报表",
+        description=f"导出{year}年年度报表",
         ip=ip,
         user_agent=ua,
         extra_data={"year": year, "task_id": task_id},
     )
 
-    parts = [f"{year}年资金报表"]
+    parts = [f"{year}年年度报表"]
     if shop_name:
         parts.append(shop_name)
     return _export_response(buffer, "_".join(parts) + ".xlsx")

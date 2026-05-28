@@ -1,5 +1,5 @@
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 
 from openpyxl import load_workbook
 
@@ -98,7 +98,7 @@ def test_build_export_workbook_writes_header_only() -> None:
 def test_build_export_workbook_header_order_matches_frontend() -> None:
     buffer = DouyinDongzhangDetailService.build_export_workbook([], include_header_only=True)
     workbook = load_workbook(buffer, read_only=True)
-    worksheet = workbook["Douyin动账源明细"]
+    worksheet = workbook["抖音动账源明细"]
     headers = [cell for cell in next(worksheet.iter_rows(values_only=True))]
 
     assert headers[:6] == [

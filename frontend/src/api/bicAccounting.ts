@@ -41,8 +41,7 @@ export interface BicTaskBatchActionResult {
 }
 
 export type BicExportScope = "all" | "current_page" | "selected";
-export type BicSourceExportScope = "current_page" | "selected";
-export const BIC_EXCEL_EXPORT_ROW_LIMIT = 20000;
+export type BicSourceExportScope = "all" | "current_page" | "selected";
 
 export interface BicDetail {
     id: number;

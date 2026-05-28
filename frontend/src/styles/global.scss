@@ -733,8 +733,12 @@ html.dark .el-tag.platform-tag--miniprogram {
     }
 
     &__close-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
         width: 34px;
         height: 34px;
+        padding: 0;
         border-radius: 6px;
         color: var(--text-tertiary) !important;
         transition:
@@ -745,6 +749,11 @@ html.dark .el-tag.platform-tag--miniprogram {
         &:focus-visible {
             background: var(--bg-hover);
             color: var(--primary) !important;
+        }
+
+        .el-icon {
+            margin: 0;
+            font-size: 18px;
         }
     }
 
@@ -765,6 +774,23 @@ html.dark .el-tag.platform-tag--miniprogram {
 .el-dialog__footer .el-button,
 .el-drawer__footer .el-button {
     min-width: 80px;
+}
+
+.export-job-message-box {
+    .el-message-box__title {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .el-message-box__message {
+        color: var(--text-secondary);
+        line-height: 1.7;
+    }
+
+    .el-message-box__status {
+        color: var(--el-color-success);
+    }
 }
 
 .upload-quota-limit-message-box {

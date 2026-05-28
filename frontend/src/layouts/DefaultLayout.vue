@@ -300,7 +300,7 @@
                 <h3>先上传，再按模块看任务和结果</h3>
                 <p class="guide-hero-desc">
                     当前账号角色：{{ currentRoleLabel }}。系统主流程以 “上传中心
-                    -> 核算任务 / 资金任务 / BIC任务 -> 汇总 / 明细 / 报表”
+                    -> 核算任务 / 资金任务 / BIC任务 -> 汇总明细 / 汇总报表 / 下载中心”
                     为主，基础资料只需先配置一次，后续按月重复上传即可。
                 </p>
             </section>
@@ -376,6 +376,7 @@ import {
     CollectionTag,
     DataAnalysis,
     Document,
+    Download,
     House,
     List,
     Money,
@@ -459,6 +460,7 @@ const menuItems: MenuItem[] = [
         children: [
             { path: "/dashboard", title: "首页", icon: House },
             { path: "/upload", title: "上传中心", icon: Upload },
+            { path: "/downloads", title: "下载中心", icon: Download },
         ],
     },
     {
@@ -473,8 +475,8 @@ const menuItems: MenuItem[] = [
         icon: Money,
         children: [
             { path: "/tasks", title: "核算任务", icon: List },
-            { path: "/summaries", title: "核算明细", icon: Document },
-            { path: "/summary-report", title: "核算报表", icon: DataAnalysis },
+            { path: "/summaries", title: "汇总明细", icon: Document },
+            { path: "/summary-report", title: "汇总报表", icon: DataAnalysis },
         ],
     },
     {
@@ -485,12 +487,12 @@ const menuItems: MenuItem[] = [
             { path: "/transaction-tasks", title: "资金任务", icon: List },
             {
                 path: "/transaction-summaries",
-                title: "资金明细",
+                title: "科目明细",
                 icon: Document,
             },
             {
                 path: "/transaction-summary-report",
-                title: "资金报表",
+                title: "年度报表",
                 icon: DataAnalysis,
             },
         ],
@@ -507,7 +509,7 @@ const menuItems: MenuItem[] = [
             },
             {
                 path: "/bic-details",
-                title: "BIC明细",
+                title: "BIC源明细",
                 icon: Document,
             },
             {
@@ -648,8 +650,8 @@ const quickStartSteps = [
     },
     {
         index: "04",
-        title: "在汇总、明细和报表里核对数据",
-        desc: "汇总看聚合结果，明细看源数据，报表看调整后的金额，用于最终导出。",
+        title: "在汇总明细、报表和下载中心里核对数据",
+        desc: "汇总明细看业务归属后的处理结果，汇总报表看核算年月聚合结果，大文件导出到下载中心获取。",
     },
 ];
 
@@ -666,17 +668,17 @@ const guideSections = [
     },
     {
         title: "动账核算",
-        desc: "核算任务负责处理共享核算文件；核算明细看原始结果；核算报表看聚合结果。",
+        desc: "核算任务负责处理共享核算文件；汇总明细看业务年月结果；汇总报表看核算年月聚合结果。",
         tip: "通用链路",
     },
     {
         title: "动账资金核算",
-        desc: "重点看资金任务、明细和报表，适合处理抖音动账延伸出的资金链路。",
+        desc: "重点看资金任务、科目明细和年度报表，适合处理抖音动账延伸出的资金链路。",
         tip: "资金链路",
     },
     {
         title: "BIC核算",
-        desc: "BIC 文件走独立任务链路，汇总看店铺聚合结果，明细看质检费源数据。",
+        desc: "BIC 文件走独立任务链路，BIC汇总看店铺聚合结果，BIC源明细看质检费源数据。",
         tip: "独立模块",
     },
     {
@@ -712,7 +714,7 @@ const usageNotes = [
     },
     {
         title: "注意文档名称",
-        desc: "上传前请重点检查文档名称，尤其是年月、性质、店铺名。文件名不规范会直接影响识别和后续汇总结果。",
+        desc: "文件名里的年月统一叫核算年月；业务年月是订单、动账或费用实际归属月份；上传年月只表示文件传入系统的时间，用于审计和排查。",
     },
     {
         title: "失败任务先看原因",

@@ -2,9 +2,9 @@
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
             <SearchCardIntro
-                kicker="资金报表"
-                :title="`${searchForm.year} 年资金报表`"
-                tip="科目全年展示，父级行由子科目合计"
+                kicker="年度报表"
+                :title="`${searchForm.year} 年年度报表`"
+                tip="业务年份看归属年度，核算年月用于限定来源账期"
             />
 
             <el-form :model="searchForm" inline class="filter-form">
@@ -298,7 +298,6 @@ import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import {
-    exportTransactionAnnualSummaryExcel,
     getTransactionAnnualSummary,
     listTransactionCategories,
     listTransactionMajorCategories,
@@ -310,7 +309,6 @@ import {
     type TransactionSubject,
 } from "@/api/transactionAccounting";
 import {
-    downloadBlob,
     formatAmount,
     monthRangeLabel,
     splitUploadMonthRange,
@@ -320,6 +318,7 @@ import {
     getPlatformLabel,
     summarizeFilenameValues,
 } from "@/utils/format";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { usePageRefresh } from "@/composables/pageRefresh";
@@ -670,8 +669,8 @@ async function handleExport() {
     }
     exportLoading.value = true;
     try {
-        const blob = await exportTransactionAnnualSummaryExcel(queryParams());
-        const filename = buildExportFilename([
+        const params = queryParams();
+        const filename = normalizeExportFilename(buildExportFilename([
             `${searchForm.year}年`,
             monthRangeLabel(searchForm.uploadMonthRange) || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
@@ -679,10 +678,14 @@ async function handleExport() {
             `大分类${summarizeFilenameValues(searchForm.majorCategoryIds.map(majorCategoryName), "全部")}`,
             `科目${summarizeFilenameValues(searchForm.subjectIds.map(subjectName), "全部")}`,
             `重分类${summarizeFilenameValues(searchForm.categoryIds.map(categoryName), "全部")}`,
-            "资金报表",
-        ]);
-        downloadBlob(blob, filename);
-        ElMessage.success("导出成功");
+            "年度报表",
+        ]));
+        await submitExportJob({
+            export_type: "transaction.annual",
+            title: "年度报表导出",
+            filename,
+            params,
+        });
     } finally {
         exportLoading.value = false;
     }

@@ -391,7 +391,7 @@ GET /api/v1/summaries/report/export?include_dongzhang_details=true
 
 ```text
 Sheet 1: 财务汇总 / 汇总报表
-Sheet 2: Douyin动账源明细
+Sheet 2: 抖音动账源明细
 ```
 
 Sheet 2 字段顺序：
@@ -432,7 +432,7 @@ Sheet 2 字段顺序：
 4. 新增明细持久化服务：软删除旧明细、插入本次明细、关联 `summary_id`。
 5. 修改通用 Celery 上传任务：Douyin 动账成功汇总后保存源明细。
 6. 新增 summary 下钻 API 与导出 API。
-7. 汇总导出支持追加 `Douyin动账源明细` Sheet。
+7. 汇总导出支持追加 `抖音动账源明细` Sheet。
 8. 前端汇总表增加“查看明细”和“导出明细”入口。
 9. 后续接入 BIC / 运费险新逻辑，回填明细字段并重算汇总。
 

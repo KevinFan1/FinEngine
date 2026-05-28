@@ -41,6 +41,7 @@ celery_app.conf.imports = (
     "app.tasks.transaction_accounting",
     "app.tasks.bic_accounting",
     "app.tasks.partition_maintenance",
+    "app.tasks.export_jobs",
 )
 
 logger = logging.getLogger("finengine.worker")

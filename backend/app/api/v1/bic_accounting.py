@@ -376,7 +376,7 @@ async def list_source_rows(
 
 @router.get("/source-rows/export")
 async def export_source_rows(
-    scope: str = Query("current_page", pattern="^(current_page|selected)$"),
+    scope: str = Query("current_page", pattern="^(all|current_page|selected)$"),
     ids: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
@@ -423,7 +423,7 @@ async def export_source_rows(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _export_response(buffer, "BIC明细.xlsx")
+    return _export_response(buffer, "BIC源明细.xlsx")
 
 
 @router.get("/details/{detail_id}/source-rows", response_model=ApiResponse[PageResponse[BicSourceRowOut]])

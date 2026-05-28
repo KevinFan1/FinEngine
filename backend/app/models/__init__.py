@@ -3,6 +3,7 @@ from app.models.bic_accounting import BicDetail, BicSourceRow, BicTask, BicUploa
 from app.models.cash_flow import CashFlowItem
 from app.models.category_dict import CategoryDict
 from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
+from app.models.export_job import ExportJob
 from app.models.file_spec import FileSpec
 from app.models.operation_log import OperationLog
 from app.models.order_index import OrderIndex
@@ -35,6 +36,7 @@ __all__ = [
     "CashFlowItem",
     "CategoryDict",
     "DouyinDongzhangDetail",
+    "ExportJob",
     "FileSpec",
     "Organization",
     "User",

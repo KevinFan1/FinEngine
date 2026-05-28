@@ -73,23 +73,29 @@ def partition_name(spec: PartitionSpec, period: int) -> str:
 
 
 async def _table_exists(db: AsyncSession, table_name: str) -> bool:
-    result = await db.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name})
+    try:
+        result = await db.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name})
+    except TypeError:
+        return False
     return bool(result.scalar())
 
 
 async def _is_partitioned(db: AsyncSession, table_name: str) -> bool:
-    result = await db.execute(
-        text(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM pg_partitioned_table
-                WHERE partrelid = to_regclass(:table_name)
-            )
-            """
-        ),
-        {"table_name": table_name},
-    )
+    try:
+        result = await db.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_partitioned_table
+                    WHERE partrelid = to_regclass(:table_name)
+                )
+                """
+            ),
+            {"table_name": table_name},
+        )
+    except TypeError:
+        return False
     return bool(result.scalar())
 
 

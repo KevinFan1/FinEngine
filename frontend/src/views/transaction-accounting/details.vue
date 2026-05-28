@@ -2,9 +2,9 @@
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
             <SearchCardIntro
-                kicker="资金明细"
-                title="按科目和重分类查看汇总明细"
-                tip="明细在任务处理时完成聚合"
+                kicker="科目明细"
+                title="按科目和重分类查看明细"
+                tip="业务年月表示资金实际归属月份"
             />
 
             <el-form :model="searchForm" inline class="filter-form">
@@ -358,7 +358,6 @@ import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import {
-    exportTransactionDetailsExcel,
     listTransactionCategories,
     listTransactionMajorCategories,
     listTransactionDetails,
@@ -377,7 +376,6 @@ import {
 import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import {
     detailSummaryMethod,
-    downloadBlob,
     formatAmount,
     formatMonth,
     monthRangeLabel,
@@ -388,6 +386,7 @@ import {
     getPlatformLabel,
     summarizeFilenameValues,
 } from "@/utils/format";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import {
@@ -760,7 +759,7 @@ async function handleExport(scope: TransactionExportScope) {
               : exportSelectedLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportTransactionDetailsExcel({
+        const params = {
             ...queryParams(),
             scope,
             ids:
@@ -770,25 +769,29 @@ async function handleExport(scope: TransactionExportScope) {
             page: scope === "current_page" ? pagination.page : undefined,
             page_size:
                 scope === "current_page" ? pagination.pageSize : undefined,
-        });
+        };
         const scopeLabel =
             scope === "all"
                 ? "全部"
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        const filename = buildExportFilename([
+        const filename = normalizeExportFilename(buildExportFilename([
             monthRangeLabel(searchForm.businessMonthRange) || "全部业务年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || String(id)), "全部")}`,
             `大分类${summarizeFilenameValues(searchForm.majorCategoryIds.map(majorCategoryName), "全部")}`,
             `科目${summarizeFilenameValues(searchForm.subjectIds.map(subjectName), "全部")}`,
             `重分类${summarizeFilenameValues(searchForm.categoryIds.map(categoryName), "全部")}`,
-            "资金明细",
+            "科目明细",
             scopeLabel,
-        ]);
-        downloadBlob(blob, filename);
-        ElMessage.success("导出成功");
+        ]));
+        await submitExportJob({
+            export_type: "transaction.details",
+            title: "科目明细导出",
+            filename,
+            params,
+        });
     } finally {
         loadingRef.value = false;
     }

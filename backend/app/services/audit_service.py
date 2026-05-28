@@ -468,7 +468,7 @@ class AuditService:
         if action == "export":
             if module == "transaction_accounting":
                 if extra.get("year"):
-                    base = f"导出了 {extra['year']} 年动账资金报表"
+                    base = f"导出了 {extra['year']} 年年度报表"
                 elif "明细" in (description or ""):
                     base = "导出了动账汇总明细"
                 else:

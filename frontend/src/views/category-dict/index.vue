@@ -513,6 +513,7 @@ import {
     type FormInstance,
     type FormRules,
 } from "element-plus";
+import { Close, Plus, Refresh, Search } from "@element-plus/icons-vue";
 import {
     classifyCategoryText,
     createCategoryDict,
@@ -811,7 +812,6 @@ function keywordPreview(categories: Record<string, string[]>) {
 
 function matchTypeLabel(type: string) {
     if (type === "exact") return "精确匹配";
-    if (type === "contains") return "包含匹配";
     return "未匹配";
 }
 

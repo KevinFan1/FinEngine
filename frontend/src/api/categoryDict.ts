@@ -37,7 +37,8 @@ export interface ClassifyResult {
     chinese_text: string;
     category: string | null;
     matched_keyword: string | null;
-    match_type: "exact" | "contains" | "none" | string;
+    match_type: "exact" | "none" | string;
+    match_score: number;
 }
 
 export function getCategoryDictList(params: CategoryDictListParams) {

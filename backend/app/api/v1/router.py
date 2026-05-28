@@ -5,6 +5,7 @@ from app.api.v1 import (
     auth,
     bic_accounting,
     category_dicts,
+    export_jobs,
     file_specs,
     health,
     organizations,
@@ -29,6 +30,7 @@ api_router.include_router(users.router, prefix="/users", tags=["用户管理"])
 api_router.include_router(quota.router, tags=["配额管理"])
 api_router.include_router(uploads.router, prefix="/uploads", tags=["上传中心"])
 api_router.include_router(oss.router, prefix="/oss", tags=["OSS 存储"])
+api_router.include_router(export_jobs.router, prefix="/export-jobs", tags=["下载中心"])
 api_router.include_router(file_specs.router, prefix="/file-specs", tags=["文件规格"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["任务管理"])
 api_router.include_router(summaries.router, prefix="/summaries", tags=["汇总报表"])

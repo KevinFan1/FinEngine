@@ -4,7 +4,7 @@
             <SearchCardIntro
                 kicker="动账报表工作台"
                 title="先汇总查看，再进入明细核对"
-                tip="保留与动账明细一致的筛选和导出节奏"
+                tip="汇总报表按核算年月聚合，导出文件在下载中心生成"
             />
 
             <el-form :model="searchForm" inline class="summary-filter-form">
@@ -481,7 +481,6 @@ import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getSummaryReportList,
-    exportSummaryReportExcel,
     type SummaryReportRecord,
 } from "@/api/summary";
 import { getPlatformList, type Platform } from "@/api/platform";
@@ -492,6 +491,7 @@ import {
     getPlatformLabel,
     summarizeFilenameValues,
 } from "@/utils/format";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 import {
     getFallbackPlatforms,
     toReportPlatformOptions,
@@ -870,7 +870,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
               : exportSelectedLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportSummaryReportExcel({
+        const params = {
             org_id: selectedOrgIdsParam.value,
             accounting_start_year: selectedAccountingStartYear.value,
             accounting_start_month: selectedAccountingStartMonth.value,
@@ -888,17 +888,14 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             page_size:
                 scope === "current_page" ? pagination.pageSize : undefined,
             include_dongzhang_details: includeDongzhangDetailsInExport.value,
-        });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
+        };
         const scopeLabel =
             scope === "all"
                 ? "全部"
                 : scope === "current_page"
                   ? `第${pagination.page}页`
                   : "选中";
-        link.download = buildExportFilename([
+        const filename = normalizeExportFilename(buildExportFilename([
             accountingMonthRangeLabel.value || "全部核算年月",
             `归集平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map(id => shopOptions.value.find(s => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
@@ -908,17 +905,26 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             "汇总报表",
             includeDongzhangDetailsInExport.value ? "附带源明细" : null,
             scopeLabel,
-        ]);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        ElMessage.success("导出成功");
-    } catch {
-        ElMessage.error("导出失败，请稍后重试");
+        ]));
+        await submitExportJob({
+            export_type: "summary.report",
+            title: "汇总报表导出",
+            filename,
+            params,
+        });
+    } catch (e) {
+        if (!isApiMessageShown(e)) ElMessage.error("导出失败，请稍后重试");
     } finally {
         loadingRef.value = false;
     }
+}
+
+function isApiMessageShown(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+    );
 }
 
 async function fetchOrgOptions() {

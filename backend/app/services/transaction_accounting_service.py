@@ -79,12 +79,8 @@ SUMMARY_EXPORT_HEADERS = [
     "汇总金额",
 ]
 
-EXCEL_EXPORT_ROW_LIMIT = 20000
-
-
 def _ensure_export_row_limit(label: str, row_count: int) -> None:
-    if row_count > EXCEL_EXPORT_ROW_LIMIT:
-        raise ValueError(f"{label}导出数据量 {row_count} 行，超过系统上限 {EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出")
+    return None
 
 
 TRANSACTION_PLATFORM_LABELS = {
@@ -2323,7 +2319,7 @@ class TransactionAccountingService:
     @staticmethod
     def _build_annual_summary_workbook(*, year: int, rows: list[TransactionAnnualSummaryReportRow]) -> io.BytesIO:
         workbook = Workbook(write_only=True)
-        worksheet = workbook.create_sheet(title=f"{year}资金报表")
+        worksheet = workbook.create_sheet(title=f"{year}年度报表")
         month_keys = TransactionAccountingService._annual_month_keys(year)
         worksheet.append(TransactionAccountingService._write_only_header_row(worksheet, ["序号", f"{year}年", *month_keys, "合计"]))
         for row in rows:

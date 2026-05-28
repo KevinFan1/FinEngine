@@ -7,6 +7,7 @@ import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import BinaryIO
 
 import httpx
 import oss2
@@ -123,6 +124,28 @@ class AliyunOSSService:
                 Path(local_path).unlink(missing_ok=True)
                 raise OSSObjectUnavailableError(SOURCE_FILE_UNAVAILABLE_MESSAGE) from exc
             raise
+
+    def upload_file(
+        self,
+        oss_key: str,
+        local_path: str | Path,
+        *,
+        internal: bool = True,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Upload a local file to OSS, using the selected endpoint."""
+        self._bucket(internal=internal).put_object_from_file(oss_key, str(local_path), headers=headers)
+
+    def upload_bytes(
+        self,
+        oss_key: str,
+        content: bytes | BinaryIO,
+        *,
+        internal: bool = True,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Upload bytes or a file-like object to OSS, using the selected endpoint."""
+        self._bucket(internal=internal).put_object(oss_key, content, headers=headers)
 
 
 # ── Alibaba Cloud OSS STS ────────────────────────────────────────────────────

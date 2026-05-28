@@ -84,5 +84,9 @@ class Settings(BaseSettings):
     ALIYUN_STS_EXPIRE_SECONDS: int = 3600
     ALIYUN_STS_POLICY: str = ""  # JSON string; empty = use default role policy
 
+    # Export center
+    EXPORT_OSS_PREFIX: str = "system-export"
+    EXPORT_FILE_EXPIRE_DAYS: int = 7
+
 
 settings = Settings()

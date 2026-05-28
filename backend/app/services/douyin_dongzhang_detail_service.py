@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Iterable
 
 from openpyxl import Workbook
@@ -22,7 +23,8 @@ from app.services.shop_visibility import active_shop_filter
 from app.tasks.processors.base import parse_datetime
 from app.utils.money import safe_decimal
 
-DONGZHANG_DETAIL_EXPORT_ROW_LIMIT = 20000
+DONGZHANG_DETAIL_EXPORT_ROW_LIMIT = 1_000_000_000
+DONGZHANG_DETAIL_EXPORT_BATCH_SIZE = 5000
 PLATFORM_LABELS = {
     "douyin": "抖音",
     "抖音": "抖音",
@@ -294,6 +296,70 @@ class DouyinDongzhangDetailService:
         return summary, DouyinDongzhangDetailService.build_export_workbook(detail_dicts)
 
     @staticmethod
+    async def export_summary_details_to_file(
+        db: AsyncSession,
+        *,
+        summary_id: int,
+        org_ids: list[int] | None,
+        output_path: Path,
+        ids: list[int] | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> tuple[FinancialSummary, int]:
+        summary, org_name, _shop_color = await DouyinDongzhangDetailService._get_summary_context(
+            db,
+            summary_id=summary_id,
+            org_ids=org_ids,
+        )
+        stmt = (
+            select(DouyinDongzhangDetail)
+            .where(
+                DouyinDongzhangDetail.summary_id == summary_id,
+                DouyinDongzhangDetail.is_deleted.is_(False),
+            )
+            .order_by(DouyinDongzhangDetail.source_row_number.asc(), DouyinDongzhangDetail.id.asc())
+        )
+        if ids is not None:
+            if not ids:
+                return summary, DouyinDongzhangDetailService.save_export_workbook([], output_path=output_path)
+            stmt = stmt.where(DouyinDongzhangDetail.id.in_(ids))
+
+        if page is not None and page_size is not None:
+            rows = list((await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).scalars().all())
+            detail_dicts = [DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name) for row in rows]
+            return summary, DouyinDongzhangDetailService.save_export_workbook(detail_dicts, output_path=output_path)
+
+        total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
+        DouyinDongzhangDetailService._ensure_row_limit("动账源明细", total)
+
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet(title="抖音动账源明细")
+        ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
+        row_count = 0
+        offset = 0
+        while True:
+            batch = list(
+                (
+                    await db.execute(
+                        stmt.offset(offset).limit(DONGZHANG_DETAIL_EXPORT_BATCH_SIZE)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not batch:
+                break
+            for row in batch:
+                DouyinDongzhangDetailService._append_export_row(
+                    ws,
+                    DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name),
+                )
+                row_count += 1
+            offset += DONGZHANG_DETAIL_EXPORT_BATCH_SIZE
+        wb.save(output_path)
+        return summary, row_count
+
+    @staticmethod
     async def load_export_rows_for_summary_ids(
         db: AsyncSession,
         *,
@@ -344,6 +410,70 @@ class DouyinDongzhangDetailService:
         return rows
 
     @staticmethod
+    async def append_export_rows_for_summary_ids(
+        db: AsyncSession,
+        wb: Workbook,
+        *,
+        summary_ids: Iterable[int],
+    ) -> int:
+        summary_id_list = sorted({int(summary_id) for summary_id in summary_ids if int(summary_id) > 0})
+        ws = wb.create_sheet(title="抖音动账源明细")
+        ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
+        if not summary_id_list:
+            return 0
+
+        total = (
+            (
+                await db.execute(
+                    select(func.count())
+                    .select_from(DouyinDongzhangDetail)
+                    .where(
+                        DouyinDongzhangDetail.summary_id.in_(summary_id_list),
+                        DouyinDongzhangDetail.is_deleted.is_(False),
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+        DouyinDongzhangDetailService._ensure_row_limit("动账源明细", int(total))
+
+        stmt = (
+            select(
+                DouyinDongzhangDetail,
+                Organization.name.label("org_name"),
+            )
+            .outerjoin(Organization, Organization.id == DouyinDongzhangDetail.org_id)
+            .where(
+                DouyinDongzhangDetail.summary_id.in_(summary_id_list),
+                DouyinDongzhangDetail.is_deleted.is_(False),
+            )
+            .order_by(
+                DouyinDongzhangDetail.source_year.desc(),
+                DouyinDongzhangDetail.source_month.desc(),
+                DouyinDongzhangDetail.shop_name.asc(),
+                DouyinDongzhangDetail.summary_year.desc(),
+                DouyinDongzhangDetail.summary_month.desc(),
+                DouyinDongzhangDetail.source_row_number.asc(),
+                DouyinDongzhangDetail.id.asc(),
+            )
+        )
+
+        row_count = 0
+        offset = 0
+        while True:
+            batch = (await db.execute(stmt.offset(offset).limit(DONGZHANG_DETAIL_EXPORT_BATCH_SIZE))).all()
+            if not batch:
+                break
+            for detail, org_name in batch:
+                DouyinDongzhangDetailService._append_export_row(
+                    ws,
+                    DouyinDongzhangDetailService.serialize_detail_row(detail, org_name=org_name),
+                )
+                row_count += 1
+            offset += DONGZHANG_DETAIL_EXPORT_BATCH_SIZE
+        return row_count
+
+    @staticmethod
     async def load_export_rows_for_report_rows(
         db: AsyncSession,
         *,
@@ -379,6 +509,49 @@ class DouyinDongzhangDetailService:
         summary_ids = list((await db.execute(summary_stmt)).scalars().all())
         return await DouyinDongzhangDetailService.load_export_rows_for_summary_ids(
             db,
+            summary_ids=summary_ids,
+        )
+
+    @staticmethod
+    async def append_export_rows_for_report_rows(
+        db: AsyncSession,
+        wb: Workbook,
+        *,
+        rows: list[dict],
+    ) -> int:
+        if not rows:
+            ws = wb.create_sheet(title="抖音动账源明细")
+            ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
+            return 0
+        keys = sorted(
+            {
+                (
+                    int(row.get("org_id") or 0),
+                    int(row.get("source_year") or 0),
+                    int(row.get("source_month") or 0),
+                    str(row.get("report_platform_code") or row.get("platform_name") or ""),
+                    int(row.get("shop_id") or 0),
+                )
+                for row in rows
+            }
+        )
+        if not keys:
+            return await DouyinDongzhangDetailService.append_export_rows_for_summary_ids(db, wb, summary_ids=[])
+        summary_stmt = select(FinancialSummary.id).where(
+            FinancialSummary.is_deleted.is_(False),
+            active_shop_filter(FinancialSummary.shop_id),
+            tuple_(
+                FinancialSummary.org_id,
+                FinancialSummary.source_year,
+                FinancialSummary.source_month,
+                FinancialSummary.report_platform_code,
+                FinancialSummary.shop_id,
+            ).in_(keys),
+        )
+        summary_ids = list((await db.execute(summary_stmt)).scalars().all())
+        return await DouyinDongzhangDetailService.append_export_rows_for_summary_ids(
+            db,
+            wb,
             summary_ids=summary_ids,
         )
 
@@ -432,20 +605,31 @@ class DouyinDongzhangDetailService:
         include_header_only: bool = False,
     ) -> io.BytesIO:
         wb = Workbook(write_only=True)
-        ws = wb.create_sheet(title="Douyin动账源明细")
+        ws = wb.create_sheet(title="抖音动账源明细")
         ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
         if not include_header_only:
             for row in rows:
-                ws.append(
-                    [
-                        DouyinDongzhangDetailService._format_export_value(row.get(field), money=(field in MONEY_FIELDS))
-                        for field, _label in DONGZHANG_DETAIL_EXPORT_COLUMNS
-                    ]
-                )
+                DouyinDongzhangDetailService._append_export_row(ws, row)
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
         return buffer
+
+    @staticmethod
+    def save_export_workbook(rows: Iterable[dict[str, object]], *, output_path: Path) -> int:
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet(title="抖音动账源明细")
+        ws.append(_write_only_header_row(ws, [label for _field, label in DONGZHANG_DETAIL_EXPORT_COLUMNS]))
+        row_count = 0
+        for row in rows:
+            DouyinDongzhangDetailService._append_export_row(ws, row)
+            row_count += 1
+        wb.save(output_path)
+        return row_count
+
+    @staticmethod
+    def _append_export_row(ws, row: dict[str, object]) -> None:
+        ws.append([DouyinDongzhangDetailService._format_export_value(row.get(field), money=(field in MONEY_FIELDS)) for field, _label in DONGZHANG_DETAIL_EXPORT_COLUMNS])
 
     @staticmethod
     async def _get_summary_context(
@@ -520,7 +704,4 @@ class DouyinDongzhangDetailService:
 
     @staticmethod
     def _ensure_row_limit(label: str, row_count: int) -> None:
-        if row_count > DONGZHANG_DETAIL_EXPORT_ROW_LIMIT:
-            raise ValueError(
-                f"{label}导出数据量 {row_count} 行，超过系统上限 {DONGZHANG_DETAIL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出"
-            )
+        return None

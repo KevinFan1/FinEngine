@@ -266,7 +266,9 @@ export async function downloadBlob(
         if (parsed.code !== 200) {
             const message = userFacingApiMessage(parsed.code, parsed.message || "导出失败");
             ElMessage.error(message);
-            throw new ApiBusinessError(message, parsed.code, parsed.data);
+            const apiError = new ApiBusinessError(message, parsed.code, parsed.data);
+            markRequestErrorShown(apiError, message);
+            throw apiError;
         }
     }
     return blob;

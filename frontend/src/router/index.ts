@@ -73,6 +73,12 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "上传中心", icon: "Upload" },
             },
             {
+                path: "downloads",
+                name: "DownloadCenter",
+                component: () => import("@/views/download/index.vue"),
+                meta: { title: "下载中心", icon: "Download" },
+            },
+            {
                 path: "tasks",
                 name: "Tasks",
                 component: () => import("@/views/task/index.vue"),
@@ -82,13 +88,13 @@ const routes: RouteRecordRaw[] = [
                 path: "summaries",
                 name: "Summaries",
                 component: () => import("@/views/summary/index.vue"),
-                meta: { title: "核算明细", icon: "Document" },
+                meta: { title: "汇总明细", icon: "Document" },
             },
             {
                 path: "summary-report",
                 name: "SummaryReport",
                 component: () => import("@/views/summary-report/index.vue"),
-                meta: { title: "核算报表", icon: "DataAnalysis" },
+                meta: { title: "汇总报表", icon: "DataAnalysis" },
             },
             {
                 path: "transaction-upload",
@@ -130,14 +136,14 @@ const routes: RouteRecordRaw[] = [
                 name: "TransactionSummaries",
                 component: () =>
                     import("@/views/transaction-accounting/details.vue"),
-                meta: { title: "资金明细", icon: "Document" },
+                meta: { title: "科目明细", icon: "Document" },
             },
             {
                 path: "transaction-summary-report",
                 name: "TransactionSummaryReport",
                 component: () =>
                     import("@/views/transaction-accounting/report.vue"),
-                meta: { title: "资金报表", icon: "DataAnalysis" },
+                meta: { title: "年度报表", icon: "DataAnalysis" },
             },
             {
                 path: "bic-tasks",
@@ -155,7 +161,7 @@ const routes: RouteRecordRaw[] = [
                 path: "bic-details",
                 name: "BicDetails",
                 component: () => import("@/views/bic-accounting/source.vue"),
-                meta: { title: "BIC明细", icon: "Document" },
+                meta: { title: "BIC源明细", icon: "Document" },
             },
             {
                 path: "audit-logs",

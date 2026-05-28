@@ -182,16 +182,13 @@ import { computed, nextTick, reactive, ref, watch } from "vue";
 import { Download, Setting } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { getMyPreference, updateMyPreference } from "@/api/auth";
-import {
-    exportSummaryDongzhangDetailExcel,
-    type SummaryDongzhangDetailRecord,
-    getSummaryDongzhangDetailList,
-} from "@/api/summary";
+import { type SummaryDongzhangDetailRecord, getSummaryDongzhangDetailList } from "@/api/summary";
 import { useUserStore } from "@/stores/user";
 import { formatMoney } from "@/utils/format";
 import { PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 
 type DetailColumnKind = "text" | "money" | "platform" | "shop";
 
@@ -471,7 +468,8 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
               : exportSelectedLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportSummaryDongzhangDetailExcel(props.context.summaryId, {
+        const params = {
+            summary_id: props.context.summaryId,
             org_id:
                 props.context.orgId ||
                 (props.selectedOrgIds?.length ? props.selectedOrgIds.join(",") : undefined),
@@ -479,21 +477,27 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
             ids: scope === "selected" ? selectedRows.value.map((row) => row.id).join(",") : undefined,
             page: scope === "current_page" ? pagination.page : undefined,
             page_size: scope === "current_page" ? pagination.pageSize : undefined,
+        };
+        const scopeLabel = scope === "all" ? "全部" : scope === "current_page" ? `第${pagination.page}页` : "选中";
+        await submitExportJob({
+            export_type: "summary.dongzhang_details",
+            title: "抖音动账源明细导出",
+            filename: normalizeExportFilename(`抖音动账源明细_${props.context.sourceDate || "全部核算年月"}_${props.context.shopName || "全部店铺"}_${scopeLabel}.xlsx`),
+            params,
         });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-                        link.download = `抖音动账源明细_${props.context.sourceDate || "全部"}_${props.context.shopName || "全部店铺"}_${scope === "all" ? "全部" : scope === "current_page" ? `第${pagination.page}页` : "选中"}.xlsx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        ElMessage.success("导出成功");
-    } catch {
-        ElMessage.error("导出失败，请稍后重试");
+    } catch (e) {
+        if (!isApiMessageShown(e)) ElMessage.error("导出失败，请稍后重试");
     } finally {
         loadingRef.value = false;
     }
+}
+
+function isApiMessageShown(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+    );
 }
 </script>
 
@@ -607,23 +611,6 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
     min-height: 58px;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
-}
-
-:global(.douyin-detail-drawer .el-drawer__close-btn) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 34px;
-    width: 34px;
-    height: 34px;
-    margin: 0 0 0 16px;
-    padding: 0;
-    line-height: 1;
-}
-
-:global(.douyin-detail-drawer .el-drawer__close-btn .el-icon) {
-    margin: 0;
-    font-size: 20px;
 }
 
 .fill-table {

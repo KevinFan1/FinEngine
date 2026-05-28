@@ -2,8 +2,8 @@
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
             <SearchCardIntro
-                kicker="BIC明细"
-                title="按源数据查看 BIC 明细"
+                kicker="BIC源明细"
+                title="按源数据查看 BIC 源明细"
                 tip="仅展示费用项为 质检费(通过) 的源数据"
             />
 
@@ -54,7 +54,8 @@
                     <div class="card-header-actions">
                         <el-button :disabled="selectedRows.length === 0" @click="clearSelectedRows">清空选中</el-button>
                         <el-button :loading="exportSelectedLoading" :disabled="selectedRows.length === 0" @click="handleExport('selected')"><el-icon><Download /></el-icon> 导出选中</el-button>
-                        <el-button type="primary" :loading="exportCurrentPageLoading" @click="handleExport('current_page')"><el-icon><Download /></el-icon> 导出当前页</el-button>
+                        <el-button :loading="exportCurrentPageLoading" @click="handleExport('current_page')"><el-icon><Download /></el-icon> 导出当前页</el-button>
+                        <el-button type="primary" :loading="exportAllLoading" @click="handleExport('all')"><el-icon><Download /></el-icon> 导出全部</el-button>
                     </div>
                 </div>
             </template>
@@ -88,7 +89,7 @@ import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
-import { BIC_EXCEL_EXPORT_ROW_LIMIT, exportBicSourceRowsExcel, listBicSourceRows, type BicSourceExportScope, type BicSourceRow } from "@/api/bicAccounting";
+import { listBicSourceRows, type BicSourceExportScope, type BicSourceRow } from "@/api/bicAccounting";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
@@ -100,7 +101,8 @@ import {
 } from "@/utils/format";
 import { getFallbackPlatforms, getReportPlatformCode, toSourcePlatformOptions, type PlatformOption } from "@/utils/platform";
 import BicSourceRowsTable from "./BicSourceRowsTable.vue";
-import { downloadBlob, monthRangeLabel, splitMonthRange } from "./common";
+import { monthRangeLabel, splitMonthRange } from "./common";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 
 type SourceRowsTableRef = InstanceType<typeof BicSourceRowsTable> & {
     clearSelection: () => void;
@@ -119,6 +121,7 @@ const platformOptions = ref<PlatformOption[]>(toSourcePlatformOptions(platforms.
 const shopLoading = ref(false);
 const exportCurrentPageLoading = ref(false);
 const exportSelectedLoading = ref(false);
+const exportAllLoading = ref(false);
 const searchForm = reactive({
     monthRange: [] as string[],
     orgIds: [] as number[],
@@ -289,31 +292,35 @@ async function handleExport(scope: BicSourceExportScope) {
         ElMessage.warning("请先选择要导出的明细");
         return;
     }
-    if (scope === "selected" && selectedRows.value.length > BIC_EXCEL_EXPORT_ROW_LIMIT) {
-        ElMessage.warning(`已选数据量超过 ${BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请缩小选择范围后再导出`);
-        return;
-    }
     const params: any = { ...queryParams(), scope };
     if (scope === "selected") {
         params.ids = selectedRows.value.map((row) => row.id).join(",");
         delete params.page;
         delete params.page_size;
     }
+    if (scope === "all") {
+        delete params.page;
+        delete params.page_size;
+    }
 
-    const loadingRef = scope === "selected" ? exportSelectedLoading : exportCurrentPageLoading;
+    const loadingRef = scope === "selected" ? exportSelectedLoading : scope === "all" ? exportAllLoading : exportCurrentPageLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportBicSourceRowsExcel(params);
-        const filename = buildExportFilename([
+        const filename = normalizeExportFilename(buildExportFilename([
             monthRangeLabel(searchForm.monthRange) || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
             `服务商${searchForm.serviceProvider || "全部"}`,
             `QIC仓${searchForm.qicWarehouse || "全部"}`,
-            "BIC明细",
-            scope === "current_page" ? `第${pagination.page}页` : "选中",
-        ]);
-        downloadBlob(blob, filename);
+            "BIC源明细",
+            scope === "all" ? "全部" : scope === "current_page" ? `第${pagination.page}页` : "选中",
+        ]));
+        await submitExportJob({
+            export_type: "bic.source_rows",
+            title: "BIC源明细导出",
+            filename,
+            params,
+        });
     } finally {
         loadingRef.value = false;
     }

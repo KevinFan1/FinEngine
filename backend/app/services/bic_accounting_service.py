@@ -35,7 +35,7 @@ BIC_SOURCE_EXPORT_HEADERS = DOUYIN_BIC_HEADERS
 BIC_RECONCILIATION_SOURCE_EXPORT_HEADERS = ["店铺", *DOUYIN_BIC_HEADERS]
 BIC_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
 BIC_ERROR_SAMPLE_LIMIT = 10
-BIC_EXCEL_EXPORT_ROW_LIMIT = 20000
+BIC_EXPORT_BATCH_SIZE = 5000
 
 
 def _capture_bic_result_state(task: BicTask) -> dict[str, object]:
@@ -258,13 +258,8 @@ def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
     return cells
 
 
-def _export_row_limit_message(label: str, row_count: int) -> str:
-    return f"{label}导出数据量 {row_count} 行，超过系统上限 {BIC_EXCEL_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后再导出"
-
-
 def _ensure_export_row_limit(label: str, row_count: int) -> None:
-    if row_count > BIC_EXCEL_EXPORT_ROW_LIMIT:
-        raise ValueError(_export_row_limit_message(label, row_count))
+    return None
 
 
 class BicAccountingService:
@@ -1009,13 +1004,57 @@ class BicAccountingService:
     ) -> io.BytesIO:
         if scope == "current_page":
             rows, _ = await BicAccountingService.list_source_rows(db, page=page or 1, page_size=page_size or 50, **kwargs)
-            _ensure_export_row_limit("BIC明细", len(rows))
+            _ensure_export_row_limit("BIC源明细", len(rows))
         else:
             _, total = await BicAccountingService.list_source_rows(db, page=1, page_size=1, **kwargs)
-            _ensure_export_row_limit("BIC明细", total)
+            _ensure_export_row_limit("BIC源明细", total)
             rows, _ = await BicAccountingService.list_source_rows(db, page=None, page_size=None, **kwargs)
-            _ensure_export_row_limit("BIC明细", len(rows))
-        return BicAccountingService._build_source_workbook(rows, title="BIC明细")
+            _ensure_export_row_limit("BIC源明细", len(rows))
+        return BicAccountingService._build_source_workbook(rows, title="BIC源明细")
+
+    @staticmethod
+    async def export_source_rows_to_file(
+        db: AsyncSession,
+        *,
+        output_path: Path,
+        scope: str = "current_page",
+        page: int | None = None,
+        page_size: int | None = None,
+        **kwargs,
+    ) -> int:
+        workbook = Workbook(write_only=True)
+        worksheet = workbook.create_sheet(title="BIC源明细")
+        worksheet.append(_write_only_header_row(worksheet, BIC_SOURCE_EXPORT_HEADERS))
+        row_count = 0
+
+        if scope == "current_page":
+            rows, _ = await BicAccountingService.list_source_rows(db, page=page or 1, page_size=page_size or 50, **kwargs)
+            _ensure_export_row_limit("BIC源明细", len(rows))
+            for row in rows:
+                BicAccountingService._append_source_row(worksheet, row)
+                row_count += 1
+            workbook.save(output_path)
+            return row_count
+
+        _, total = await BicAccountingService.list_source_rows(db, page=1, page_size=1, **kwargs)
+        _ensure_export_row_limit("BIC源明细", total)
+        current_page = 1
+        while True:
+            rows, _ = await BicAccountingService.list_source_rows(
+                db,
+                page=current_page,
+                page_size=BIC_EXPORT_BATCH_SIZE,
+                **kwargs,
+            )
+            if not rows:
+                break
+            for row in rows:
+                BicAccountingService._append_source_row(worksheet, row)
+                row_count += 1
+            current_page += 1
+        _ensure_export_row_limit("BIC源明细", row_count)
+        workbook.save(output_path)
+        return row_count
 
     @staticmethod
     async def list_source_rows(

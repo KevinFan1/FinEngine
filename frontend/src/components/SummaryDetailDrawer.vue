@@ -14,7 +14,7 @@
                     <p class="detail-toolbar-kicker">动账明细抽屉</p>
                     <div class="detail-context">
                         <span class="context-item"
-                            >数据年月：{{ context?.sourceDate || "-" }}</span
+                            >核算年月：{{ context?.sourceDate || "-" }}</span
                         >
                         <span class="context-item">
                             归集平台：
@@ -348,11 +348,7 @@ import { reactive, ref, watch, nextTick } from "vue";
 import { Download } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import type { TableColumnCtx } from "element-plus/es/components/table/index.mjs";
-import {
-    exportSummaryExcel,
-    getSummaryList,
-    type SummaryRecord,
-} from "@/api/summary";
+import { getSummaryList, type SummaryRecord } from "@/api/summary";
 import { formatMoney } from "@/utils/format";
 import {
     DEFAULT_PAGE_SIZE,
@@ -361,6 +357,7 @@ import {
 } from "@/utils/pagination";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
+import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 
 export interface SummaryDetailContext {
     sourceYear?: number;
@@ -501,7 +498,7 @@ async function handleExport(scope: "all" | "current_page") {
         scope === "all" ? exportAllLoading : exportCurrentPageLoading;
     loadingRef.value = true;
     try {
-        const blob = await exportSummaryExcel({
+        const params = {
             org_id:
                 props.context.orgId ||
                 (props.selectedOrgIds?.length
@@ -516,22 +513,27 @@ async function handleExport(scope: "all" | "current_page") {
             page: scope === "current_page" ? pagination.page : undefined,
             page_size:
                 scope === "current_page" ? pagination.pageSize : undefined,
-        });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
+        };
         const scopeLabel = scope === "all" ? "全部" : `第${pagination.page}页`;
-        link.download = `动账明细_${props.context.sourceDate || "全部数据年月"}_${props.context.shopName || "全部店铺"}_${scopeLabel}.xlsx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        ElMessage.success("导出成功");
-    } catch {
-        ElMessage.error("导出失败，请稍后重试");
+        await submitExportJob({
+            export_type: "summary.detail",
+            title: "汇总明细导出",
+            filename: normalizeExportFilename(`汇总明细_${props.context.sourceDate || "全部核算年月"}_${props.context.shopName || "全部店铺"}_${scopeLabel}.xlsx`),
+            params,
+        });
+    } catch (e) {
+        if (!isApiMessageShown(e)) ElMessage.error("导出失败，请稍后重试");
     } finally {
         loadingRef.value = false;
     }
+}
+
+function isApiMessageShown(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === "object" &&
+        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
+    );
 }
 </script>
 

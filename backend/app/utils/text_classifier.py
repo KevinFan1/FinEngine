@@ -4,7 +4,7 @@
 使用流程（等价于 Excel 公式 TEXTJOIN + REGEXP "[一-龟]+"）:
   1. extract_chinese(text) → 去除数字/标点/英文，只留中文
   2. 用提取后的纯中文文本，精确匹配数据库中的分类字典
-  3. 若精确匹配失败，回退到「包含匹配」（长关键词优先）
+  3. 不做模糊匹配，不做阈值匹配，其他情况一律返回 none
 
 典型用法:
     from app.utils.text_classifier import classify_text, extract_chinese
@@ -24,14 +24,15 @@
     #       chinese_text="因商家责任导致消费者申请售后扣除商家相应金额进行运费赔付订单售后单运单",
     #       category="商家责任赔付",
     #       matched_keyword="因商家责任导致消费者申请售后扣除商家相应金额进行运费赔付",
-    #       match_type="contains",
+    #       match_type="exact",
+    #       match_score=100.0,
     #   )
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # ============================================================
 # 数据结构
@@ -46,7 +47,8 @@ class ClassifyResult:
     chinese_text: str = ""  # 提取后的中文文本
     category: str | None = None  # 匹配到的分类
     matched_keyword: str | None = None  # 命中的关键词
-    match_type: str = "none"  # exact / contains / none
+    match_type: str = "none"  # exact / none
+    match_score: float = 0.0  # 匹配分数（0~100）
 
 
 # ============================================================
@@ -78,24 +80,11 @@ def _build_sorted_index(
     return entries
 
 
-def classify_text(
+def _classify_exact(
+    *,
     text: str,
     category_dict: dict[str, list[str]],
 ) -> ClassifyResult:
-    """
-    对单条文本进行分类。
-
-    匹配策略（两轮）：
-      1. 精确匹配：提取中文后与字典关键词做 == 比较
-      2. 包含匹配：关键词是提取后中文文本的子串（长关键词优先）
-
-    Args:
-        text:          原始文本（如动账备注，可含标点/数字/英文）
-        category_dict: 分类字典 {"分类名": ["关键词1", "关键词2"]}
-
-    Returns:
-        ClassifyResult
-    """
     result = ClassifyResult(text=text)
     result.chinese_text = extract_chinese(text)
 
@@ -110,59 +99,36 @@ def classify_text(
                 result.category = category
                 result.matched_keyword = normalized_keyword
                 result.match_type = "exact"
+                result.match_score = 100.0
                 return result
 
-    # ── 第二轮：包含匹配（长关键词优先） ──
-    sorted_index = _build_sorted_index(category_dict)
-    for kw, category in sorted_index:
-        if kw in result.chinese_text:
-            result.category = category
-            result.matched_keyword = kw
-            result.match_type = "contains"
-            return result
-
     return result
+
+
+def classify_text(
+    text: str,
+    category_dict: dict[str, list[str]],
+) -> ClassifyResult:
+    """
+    对单条文本进行分类。
+
+    匹配策略：
+      1. 精确匹配：提取中文后与字典关键词做 == 比较
+      2. 其他情况一律返回 none
+
+    Args:
+        text:          原始文本（如动账备注，可含标点/数字/英文）
+        category_dict: 分类字典 {"分类名": ["关键词1", "关键词2"]}
+
+    Returns:
+        ClassifyResult
+    """
+    return _classify_exact(text=text, category_dict=category_dict)
 
 
 def classify_batch(
     texts: list[str],
     category_dict: dict[str, list[str]],
 ) -> list[ClassifyResult]:
-    """批量分类。内部只构建一次索引，提升性能。"""
-    sorted_index = _build_sorted_index(category_dict)
-    results: list[ClassifyResult] = []
-
-    for text in texts:
-        r = ClassifyResult(text=text)
-        r.chinese_text = extract_chinese(text)
-
-        if not r.chinese_text:
-            results.append(r)
-            continue
-
-        # 精确匹配
-        matched = False
-        for category, keywords in category_dict.items():
-            for kw in keywords:
-                normalized_keyword = extract_chinese(kw)
-                if r.chinese_text == normalized_keyword:
-                    r.category = category
-                    r.matched_keyword = normalized_keyword
-                    r.match_type = "exact"
-                    matched = True
-                    break
-            if matched:
-                break
-
-        # 包含匹配
-        if not matched:
-            for kw, category in sorted_index:
-                if kw in r.chinese_text:
-                    r.category = category
-                    r.matched_keyword = kw
-                    r.match_type = "contains"
-                    break
-
-        results.append(r)
-
-    return results
+    """批量分类。"""
+    return [_classify_exact(text=text, category_dict=category_dict) for text in texts]
