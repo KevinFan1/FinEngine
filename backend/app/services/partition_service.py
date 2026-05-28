@@ -108,10 +108,9 @@ async def ensure_month_partition(db: AsyncSession, *, spec: PartitionSpec, perio
             f"""
             CREATE TABLE IF NOT EXISTS {partition}
             PARTITION OF {spec.table_name}
-            FOR VALUES FROM (:start_period) TO (:end_period)
+            FOR VALUES FROM ({period}) TO ({next_period})
             """
-        ),
-        {"start_period": period, "end_period": next_period},
+        )
     )
 
 
@@ -126,4 +125,3 @@ async def ensure_month_window(
         return
     for period in iter_yyyymm_range(start_period, end_period):
         await ensure_month_partition(db, spec=spec, period=period)
-
