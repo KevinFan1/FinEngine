@@ -129,6 +129,7 @@ def _normalize_transaction_summary(result_summary: dict | None) -> dict | None:
         return result_summary
     labels = {
         "total_rows": "总行数",
+        "success_rows": "成功行数",
         "matched_rows": "匹配明细数",
         "unmatched_rows": "未匹配行数",
         "failed_rows": "失败行数",

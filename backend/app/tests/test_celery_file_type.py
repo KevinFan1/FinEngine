@@ -5,12 +5,13 @@ from decimal import Decimal
 import pytest
 
 from app.models.platform import Platform
-from app.models.task import ProcessingTask
 from app.models.upload import UploadFile
 import app.core.database as database_module
 import app.services.oss_service as oss_service_module
 from app.tasks.celery_app import (
+    _build_order_dependency_summary,
     _build_order_or_fallback_time_summary,
+    _group_money_by_order_created_time,
     _group_return_cost_by_order_created_time,
     _group_money_by_order_or_fallback_time,
     _infer_file_type,
@@ -181,6 +182,36 @@ def test_group_money_by_order_or_fallback_time_falls_back_to_effective_time() ->
     assert fallback_order_nos == ["fallback-order"]
 
 
+def test_group_money_by_order_created_time_preserves_missing_row_count() -> None:
+    grouped, missing_order_nos = _group_money_by_order_created_time(
+        [
+            {"order_no": "missing-order", "return_cost": Decimal("1")},
+            {"order_no": "missing-order", "return_cost": Decimal("2")},
+        ],
+        order_created_times={},
+        amount_key="return_cost",
+    )
+
+    assert grouped == {}
+    assert missing_order_nos == ["missing-order", "missing-order"]
+
+
+def test_order_dependency_summary_counts_missing_rows_not_unique_orders() -> None:
+    summary = _build_order_dependency_summary(
+        type_code="动账",
+        proc_result={"total_rows": 3, "success_rows": 3, "failed_rows": 0, "errors": []},
+        summary_ids=[],
+        groups=0,
+        missing_order_nos=["same-order", "same-order"],
+    )
+
+    assert summary["total_rows"] == 3
+    assert summary["success_rows"] == 1
+    assert summary["failed_rows"] == 2
+    assert summary["missing_order_count"] == 2
+    assert summary["missing_order_samples"] == ["same-order"]
+
+
 def test_order_or_fallback_time_summary_reports_fallback_time() -> None:
     summary = _build_order_or_fallback_time_summary(
         type_code="运费险",
@@ -215,6 +246,22 @@ def test_order_or_fallback_time_summary_reports_entry_time_compatibility() -> No
     assert summary["fallback_time_count"] == 1
     assert summary["fallback_time_samples"] == ["fallback-order"]
     assert summary["errors"] == ["订单索引未命中 1 条，已使用入账时间归属年月；订单号: fallback-order"]
+
+
+def test_order_or_fallback_time_summary_counts_fallback_rows_with_unique_samples() -> None:
+    summary = _build_order_or_fallback_time_summary(
+        type_code="动账",
+        proc_result={"success_rows": 3, "failed_rows": 0, "errors": []},
+        summary_ids=[1],
+        groups=1,
+        missing_order_nos=[],
+        fallback_order_nos=["same-order", "same-order"],
+        fallback_label="入账时间",
+    )
+
+    assert summary["fallback_time_count"] == 2
+    assert summary["fallback_time_samples"] == ["same-order"]
+    assert summary["errors"] == ["订单索引未命中 2 条，已使用入账时间归属年月；订单号: same-order"]
 
 
 def test_result_task_status_uses_partial_success_when_failed_rows_exist() -> None:

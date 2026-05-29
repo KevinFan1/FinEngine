@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -176,6 +177,35 @@ def _user_facing_http_message(code: int, message: str) -> str:
     return message
 
 
+def _integrity_error_message(exc: BaseException) -> str:
+    text = str(exc)
+    constraint_match = re.search(r'constraint "([^"]+)"', text)
+    constraint_name = constraint_match.group(1) if constraint_match else ""
+    constraint_messages = {
+        "uq_fin_org_name": "组织名称已存在，请更换后再试",
+        "uq_fin_org_code": "组织编码已存在，请更换后再试",
+        "uq_fin_user_username": "用户名已存在，请更换后再试",
+        "uq_fin_user_phone": "手机号已被注册",
+        "uq_fin_platform_code": "平台编码已存在，请更换后再试",
+        "uq_fin_file_spec_platform_type": "同平台同业务类型的文件规格已存在",
+        "uq_fin_shop_org_platform_name": "该平台下已存在同名店铺，请勿重复创建",
+        "uq_fin_category_dict_platform_type": "同平台同业务类型的分类字典已存在",
+        "uq_fin_order_index_platform_order": "订单索引已存在",
+        "uq_fin_transaction_major_category_name": "资金大分类名称已存在，请更换后再试",
+        "uq_fin_transaction_subject_scope_name": "同分类同账户类型下科目名称已存在，请更换后再试",
+        "uq_fin_transaction_category_subject_name": "同科目下分类名称已存在，请更换后再试",
+        "uq_fin_transaction_rule_business_key": "同条件的动账核算规则已存在，请勿重复创建",
+        "uq_fin_transaction_upload_source_file": "该上传文件已派生动账核算任务，请勿重复提交",
+        "uq_fin_bic_upload_source_file": "该上传文件已派生 BIC 任务，请勿重复提交",
+        "uq_fin_summary_lookup": "同一组织、店铺、平台和年月的汇总记录已存在",
+        "uq_fin_cash_flow_item_code": "现金流项目编号已存在，请更换后再试",
+        "uq_fin_user_preference_user_key": "用户偏好已存在",
+        "uq_fin_bic_source_platform_flow": "BIC 源明细流水号已存在",
+        "uq_douyin_dongzhang_detail_flow": "抖音动账源明细流水号已存在",
+    }
+    return constraint_messages.get(constraint_name, "数据已存在或不符合唯一性要求，请检查后重试")
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
@@ -218,10 +248,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(IntegrityError)
     async def integrity_error_exception_handler(request: Request, exc: IntegrityError) -> JSONResponse:
         logger.warning("api.integrity_error path={} message={}", request.url.path, exc)
-
-        print(exc)
-
-        return api_json_response(code=status.HTTP_400_BAD_REQUEST, message="数据已存在或不符合唯一性要求，请检查后重试")
+        return api_json_response(code=status.HTTP_400_BAD_REQUEST, message=_integrity_error_message(exc))
 
     @app.exception_handler(DataError)
     async def data_error_exception_handler(request: Request, exc: DataError) -> JSONResponse:

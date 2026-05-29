@@ -1545,6 +1545,7 @@ class TransactionAccountingService:
             rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]] = {}
             error_messages: list[str] = []
             counts = defaultdict(int)
+            source_success_rows = 0
             rule_map = {rule.id: rule for rule in rules}
             for offset, row in enumerate(data_rows, start=2):
                 direction_field = TransactionAccountingService._first_existing_field(row, [rule.direction_field for rule in rules], default="动账方向")
@@ -1559,11 +1560,13 @@ class TransactionAccountingService:
                     scene_field=scene_field,
                     remark_field=remark_field,
                 )
+                row_has_match = False
                 for evaluation in evaluations:
                     detail_evaluation = TransactionAccountingService._period_failed_result(evaluation=evaluation, message=period_error) if period_error else evaluation
                     counts[detail_evaluation.status] += 1
                     matched_rule = rule_map.get(detail_evaluation.rule_id) if detail_evaluation.rule_id else None
                     if detail_evaluation.status == "matched" and matched_rule is not None:
+                        row_has_match = True
                         key = (
                             matched_rule.subject_id,
                             matched_rule.category_id,
@@ -1592,6 +1595,8 @@ class TransactionAccountingService:
                         )
                         if len(error_messages) < TRANSACTION_ERROR_SAMPLE_LIMIT:
                             error_messages.append(error_message)
+                if row_has_match:
+                    source_success_rows += 1
 
             TransactionAccountingService._log_rule_result_summaries(
                 task=task,
@@ -1616,6 +1621,7 @@ class TransactionAccountingService:
             task.status = "success" if task.unmatched_rows == 0 and task.failed_rows == 0 else "partial_success"
             task.result_summary = {
                 "总行数": task.total_rows,
+                "成功行数": source_success_rows,
                 "匹配明细数": task.matched_rows,
                 "未匹配行数": task.unmatched_rows,
                 "失败行数": task.failed_rows,

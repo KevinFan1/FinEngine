@@ -217,7 +217,7 @@
                         <template v-if="hasTaskResult(row)">
                             <div class="result-stack">
                                 <span class="result-line result-line--success">
-                                    <em>成功</em>
+                                    <em>明细</em>
                                     <strong>{{ taskSuccessCount(row) }}</strong>
                                 </span>
                                 <span class="result-line result-line--failed">
@@ -295,7 +295,7 @@
                         <span>处理结果</span>
                         <div class="result-stack result-stack--detail">
                             <span class="result-line result-line--success">
-                                <em>成功</em>
+                                <em>明细</em>
                                 <strong>{{ taskSuccessCount(taskDetail) }}</strong>
                             </span>
                             <span class="result-line result-line--failed">
@@ -518,6 +518,7 @@ function canRecalculate(row: TransactionTask) {
 
 const resultSummaryLabels: Record<string, string> = {
     total_rows: "总行数",
+    success_rows: "成功行数",
     matched_rows: "匹配明细数",
     unmatched_rows: "未匹配行数",
     failed_rows: "失败行数",

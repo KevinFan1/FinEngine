@@ -125,7 +125,6 @@ DEFAULT_CASH_FLOW_ITEMS: tuple[DefaultCashFlowItem, ...] = (
     _net("C", "经营性现金净额", "operating", 50),
     _net_line("C1", "经营性现金净额", "C", "operating", 51),
     _net_line("C2", "经营性现金净额", "C", "operating", 52),
-    _check("C_CHECK", "校验", "C", "operating", 53),
     _group("D", "投资性现金流入", "investing", "inflow", 60),
     _detail("D1", "收到变卖固定资产收入", "D", "investing", "inflow", 61),
     _detail("D2", "收到变卖投资标的的收入", "D", "investing", "inflow", 62),

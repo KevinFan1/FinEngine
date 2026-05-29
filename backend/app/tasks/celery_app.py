@@ -133,6 +133,18 @@ def _result_task_status_from_summary(summary: dict) -> str:
     return _result_task_status_from_failed_rows(summary.get("failed_rows"))
 
 
+def _set_task_result_from_processor(task, proc_result: dict) -> None:
+    task.processed_rows = int(proc_result.get("total_rows") or 0)
+    task.success_rows = int(proc_result.get("success_rows") or 0)
+    task.failed_rows = int(proc_result.get("failed_rows") or 0)
+
+
+def _set_task_result_from_summary(task, summary: dict) -> None:
+    task.processed_rows = int(summary.get("total_rows") or 0)
+    task.success_rows = int(summary.get("success_rows") or 0)
+    task.failed_rows = int(summary.get("failed_rows") or 0)
+
+
 def _group_return_cost_by_order_created_time(
     return_cost_rows: list[dict],
     order_created_times: dict[str, datetime],
@@ -150,7 +162,7 @@ def _group_return_cost_by_order_created_time(
 
         key = (order_created_at.year, order_created_at.month)
         grouped_return_cost[key] = grouped_return_cost.get(key, Decimal("0")) + Decimal(str(row.get("return_cost") or "0"))
-    return grouped_return_cost, list(dict.fromkeys(missing_order_nos))
+    return grouped_return_cost, missing_order_nos
 
 
 def _group_money_by_order_or_fallback_time(
@@ -185,7 +197,7 @@ def _group_money_by_order_or_fallback_time(
         key = (group_time.year, group_time.month)
         grouped[key] = grouped.get(key, Decimal("0")) + Decimal(str(row.get(amount_key) or "0"))
 
-    return grouped, list(dict.fromkeys(missing_order_nos)), list(dict.fromkeys(fallback_order_nos))
+    return grouped, missing_order_nos, fallback_order_nos
 
 
 def _group_money_by_order_created_time(
@@ -206,7 +218,7 @@ def _group_money_by_order_created_time(
 
         key = (order_created_at.year, order_created_at.month)
         grouped[key] = grouped.get(key, Decimal("0")) + Decimal(str(row.get(amount_key) or "0"))
-    return grouped, list(dict.fromkeys(missing_order_nos))
+    return grouped, missing_order_nos
 
 
 def _build_order_dependency_summary(
@@ -219,11 +231,12 @@ def _build_order_dependency_summary(
 ) -> dict:
     """Build a successful task summary when missing orders are counted as zero."""
     missing_order_count = len(missing_order_nos)
+    missing_order_samples = list(dict.fromkeys(missing_order_nos))[:20]
     effective_success_rows = max(int(proc_result.get("success_rows") or 0) - missing_order_count, 0)
     effective_failed_rows = int(proc_result.get("failed_rows") or 0) + missing_order_count
     errors = list(proc_result.get("errors") or [])[:10]
     if missing_order_nos:
-        sample_text = "、".join(missing_order_nos)
+        sample_text = "、".join(missing_order_samples)
         errors.append(f"缺少订单创建时间 {missing_order_count} 条，已按 0 统计；订单号: {sample_text}")
 
     return {
@@ -236,7 +249,7 @@ def _build_order_dependency_summary(
         "parse_success_rows": proc_result.get("success_rows", 0),
         "parse_failed_rows": proc_result.get("failed_rows", 0),
         "missing_order_count": missing_order_count,
-        "missing_order_samples": missing_order_nos[:20],
+        "missing_order_samples": missing_order_samples,
         "groups": groups,
         "errors": _json_safe(errors),
     }
@@ -260,11 +273,12 @@ def _build_order_or_fallback_time_summary(
         missing_order_nos=missing_order_nos,
     )
     fallback_count = len(fallback_order_nos)
+    fallback_samples = list(dict.fromkeys(fallback_order_nos))[:20]
     summary["fallback_time_label"] = fallback_label
     summary["fallback_time_count"] = fallback_count
-    summary["fallback_time_samples"] = fallback_order_nos[:20]
+    summary["fallback_time_samples"] = fallback_samples
     if fallback_order_nos:
-        sample_text = "、".join(fallback_order_nos[:20])
+        sample_text = "、".join(fallback_samples)
         errors = list(summary.get("errors") or [])
         errors.append(f"订单索引未命中 {fallback_count} 条，已使用{fallback_label}归属年月；订单号: {sample_text}")
         summary["errors"] = _json_safe(errors)
@@ -293,7 +307,7 @@ def _group_summary_rows_by_order_created_time(
             agg[field] = agg.get(field, Decimal("0")) + Decimal(str(row.get(field) or "0"))
     for agg in grouped.values():
         normalize_positive_summary_fields(agg)
-    return grouped, list(dict.fromkeys(missing_order_nos))
+    return grouped, missing_order_nos
 
 
 def _infer_temp_suffix(upload_file, oss_key: str) -> str:
@@ -719,8 +733,6 @@ async def _process_file_platform_async(
                     else:
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
-                        task.success_rows = proc_result["success_rows"]
-                        task.failed_rows = proc_result["failed_rows"]
                         task.result_summary = {
                             "type": "订单",
                             "order_index_rows": upserted_rows,
@@ -729,6 +741,7 @@ async def _process_file_platform_async(
                             "failed_rows": proc_result["failed_rows"],
                             "errors": _json_safe(proc_result["errors"][:10]),
                         }
+                        _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
 
                         if upload_file:
@@ -753,8 +766,6 @@ async def _process_file_platform_async(
                     if not return_cost_rows:
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
-                        task.success_rows = proc_result["success_rows"]
-                        task.failed_rows = proc_result["failed_rows"]
                         task.result_summary = {
                             "type": "动账",
                             "summary_ids": [],
@@ -765,6 +776,7 @@ async def _process_file_platform_async(
                             "groups": 0,
                             "errors": _json_safe(proc_result["errors"][:10]),
                         }
+                        _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
 
                         if upload_file:
@@ -807,7 +819,6 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_or_fallback_time_summary(
                         type_code="动账",
@@ -818,8 +829,8 @@ async def _process_file_platform_async(
                         fallback_order_nos=fallback_order_nos,
                         fallback_label="入账时间",
                     )
-                    task.success_rows = task.result_summary["success_rows"]
-                    task.failed_rows = task.result_summary["failed_rows"]
+                    task.status = _result_task_status_from_summary(task.result_summary)
+                    _set_task_result_from_summary(task, task.result_summary)
                     task.finished_at = datetime.now(timezone.utc)
 
                     if upload_file:
@@ -842,8 +853,6 @@ async def _process_file_platform_async(
                     if not contribution_rows:
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
-                        task.success_rows = proc_result["success_rows"]
-                        task.failed_rows = proc_result["failed_rows"]
                         task.result_summary = {
                             "type": file_type,
                             "summary_ids": [],
@@ -854,6 +863,7 @@ async def _process_file_platform_async(
                             "groups": 0,
                             "errors": _json_safe(proc_result["errors"][:10]),
                         }
+                        _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
                         if upload_file:
                             upload_file.status = "success"
@@ -893,7 +903,6 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_dependency_summary(
                         type_code=file_type,
@@ -902,8 +911,8 @@ async def _process_file_platform_async(
                         groups=len(grouped_return_cost),
                         missing_order_nos=missing_order_nos,
                     )
-                    task.success_rows = task.result_summary["success_rows"]
-                    task.failed_rows = task.result_summary["failed_rows"]
+                    task.status = _result_task_status_from_summary(task.result_summary)
+                    _set_task_result_from_summary(task, task.result_summary)
                     task.finished_at = datetime.now(timezone.utc)
                     if upload_file:
                         upload_file.status = "success"
@@ -922,8 +931,6 @@ async def _process_file_platform_async(
                     if not insurance_fee_rows:
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
-                        task.success_rows = proc_result["success_rows"]
-                        task.failed_rows = proc_result["failed_rows"]
                         task.result_summary = {
                             "type": "运费险",
                             "summary_ids": [],
@@ -934,6 +941,7 @@ async def _process_file_platform_async(
                             "groups": 0,
                             "errors": _json_safe(proc_result["errors"][:10]),
                         }
+                        _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
                         if upload_file:
                             upload_file.status = "success"
@@ -973,7 +981,6 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_or_fallback_time_summary(
                         type_code="运费险",
@@ -984,8 +991,8 @@ async def _process_file_platform_async(
                         fallback_order_nos=fallback_order_nos,
                         fallback_label="生效时间",
                     )
-                    task.success_rows = task.result_summary["success_rows"]
-                    task.failed_rows = task.result_summary["failed_rows"]
+                    task.status = _result_task_status_from_summary(task.result_summary)
+                    _set_task_result_from_summary(task, task.result_summary)
                     task.finished_at = datetime.now(timezone.utc)
                     if upload_file:
                         upload_file.status = "success"
@@ -1005,8 +1012,6 @@ async def _process_file_platform_async(
                     if not order_summary_rows:
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
-                        task.success_rows = proc_result["success_rows"]
-                        task.failed_rows = proc_result["failed_rows"]
                         task.result_summary = {
                             "type": "动账",
                             "summary_ids": [],
@@ -1017,6 +1022,7 @@ async def _process_file_platform_async(
                             "groups": 0,
                             "errors": _json_safe(proc_result["errors"][:10]),
                         }
+                        _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
                         if upload_file:
                             upload_file.status = "success"
@@ -1055,7 +1061,6 @@ async def _process_file_platform_async(
                         )
                         summary_ids.append(summary.id)
 
-                    task.status = _result_task_status_from_summary(task.result_summary)
                     task.progress = 100
                     task.result_summary = _build_order_dependency_summary(
                         type_code="动账",
@@ -1064,8 +1069,8 @@ async def _process_file_platform_async(
                         groups=len(grouped_values),
                         missing_order_nos=missing_order_nos,
                     )
-                    task.success_rows = task.result_summary["success_rows"]
-                    task.failed_rows = task.result_summary["failed_rows"]
+                    task.status = _result_task_status_from_summary(task.result_summary)
+                    _set_task_result_from_summary(task, task.result_summary)
                     task.finished_at = datetime.now(timezone.utc)
                     if upload_file:
                         upload_file.status = "success"
@@ -1079,8 +1084,6 @@ async def _process_file_platform_async(
 
                     task.status = _result_task_status_from_processor_result(proc_result)
                     task.progress = 100
-                    task.success_rows = proc_result["success_rows"]
-                    task.failed_rows = proc_result["failed_rows"]
                     task.result_summary = {
                         "summary_ids": [],
                         "total_rows": proc_result["total_rows"],
@@ -1089,6 +1092,7 @@ async def _process_file_platform_async(
                         "groups": 0,
                         "errors": [],
                     }
+                    _set_task_result_from_processor(task, proc_result)
                     task.finished_at = datetime.now(timezone.utc)
 
                     if upload_file:
@@ -1157,8 +1161,6 @@ async def _process_file_platform_async(
                 # 8. Update final status
                 task.status = _result_task_status_from_processor_result(proc_result)
                 task.progress = 100
-                task.success_rows = proc_result["success_rows"]
-                task.failed_rows = proc_result["failed_rows"]
                 task.result_summary = {
                     "summary_ids": summary_ids,
                     "total_rows": proc_result["total_rows"],
@@ -1167,6 +1169,7 @@ async def _process_file_platform_async(
                     "groups": len(proc_result["groups"]),
                     "errors": _json_safe(proc_result["errors"][:10]),
                 }
+                _set_task_result_from_processor(task, proc_result)
                 task.finished_at = datetime.now(timezone.utc)
 
                 if upload_file:

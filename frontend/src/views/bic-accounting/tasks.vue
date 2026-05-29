@@ -217,7 +217,7 @@
                         <template v-if="hasTaskResult(row)">
                             <div class="result-stack">
                                 <span class="result-line result-line--success">
-                                    <em>成功</em>
+                                    <em>符合</em>
                                     <strong>{{ taskSuccessCount(row) }}</strong>
                                 </span>
                                 <span class="result-line result-line--failed">
@@ -295,7 +295,7 @@
                         <span>处理结果</span>
                         <div class="result-stack result-stack--detail">
                             <span class="result-line result-line--success">
-                                <em>成功</em>
+                                <em>符合</em>
                                 <strong>{{ taskSuccessCount(taskDetail) }}</strong>
                             </span>
                             <span class="result-line result-line--failed">

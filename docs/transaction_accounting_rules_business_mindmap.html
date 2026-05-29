@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>抖音动账取数逻辑说明</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --ink: #16212b;
+        --muted: #63707d;
+        --panel: #ffffff;
+        --line: #d7dde3;
+        --line-strong: #95a1ad;
+        --green: #0f7a5b;
+        --green-soft: #e5f5ee;
+        --red: #b73a2f;
+        --red-soft: #fae8e5;
+        --blue: #245f9e;
+        --blue-soft: #e7f0fa;
+        --gold: #9a651f;
+        --gold-soft: #fff0d5;
+        --shadow: 0 18px 42px rgba(25, 37, 49, 0.09);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(236, 242, 247, 0.82)),
+          repeating-linear-gradient(90deg, rgba(22, 33, 43, 0.035) 0 1px, transparent 1px 80px),
+          var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif;
+        line-height: 1.56;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      .page {
+        max-width: 1440px;
+        margin: 0 auto;
+        padding: 34px 26px 58px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+        gap: 22px;
+        align-items: stretch;
+        margin-bottom: 26px;
+      }
+
+      .hero-copy {
+        padding: 20px 0;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 780px;
+        margin-bottom: 14px;
+        font-size: clamp(34px, 5.2vw, 66px);
+        line-height: 1.02;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        margin-bottom: 0;
+        font-size: clamp(24px, 2.7vw, 38px);
+        line-height: 1.15;
+      }
+
+      h3 {
+        font-size: 17px;
+        line-height: 1.25;
+      }
+
+      .lead {
+        max-width: 840px;
+        margin-bottom: 16px;
+        color: #42505d;
+        font-size: 18px;
+      }
+
+      .quick-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .quick-nav a,
+      .pill,
+      .chip,
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.2;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .quick-nav a {
+        min-height: 31px;
+        padding: 7px 12px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: #42505d;
+      }
+
+      .hero-panel,
+      .surface,
+      .callout,
+      .table-shell {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-panel {
+        display: grid;
+        align-content: center;
+        gap: 12px;
+        padding: 22px;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .metric {
+        min-height: 100px;
+        padding: 16px;
+        border: 1px solid #dce3ea;
+        border-radius: var(--radius);
+        background: #f9fbfc;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 30px;
+        line-height: 1;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .section {
+        margin-top: 30px;
+      }
+
+      .section-head {
+        display: flex;
+        gap: 18px;
+        align-items: end;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+
+      .section-note {
+        max-width: 660px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .surface {
+        padding: 20px;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(150px, 1fr));
+        gap: 12px;
+      }
+
+      .step {
+        position: relative;
+        min-height: 136px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcfd;
+      }
+
+      .step:not(:last-child)::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: -13px;
+        width: 13px;
+        height: 2px;
+        background: var(--line-strong);
+      }
+
+      .step-number {
+        display: inline-grid;
+        width: 28px;
+        height: 28px;
+        margin-bottom: 10px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--ink);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .step h3 {
+        margin-bottom: 6px;
+      }
+
+      .step p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .callout-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .callout {
+        padding: 16px;
+        box-shadow: none;
+      }
+
+      .callout h3 {
+        margin-bottom: 6px;
+      }
+
+      .callout p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: minmax(240px, 1.15fr) repeat(3, minmax(150px, 0.55fr)) auto;
+        gap: 10px;
+        align-items: end;
+        padding: 14px;
+        border-bottom: 1px solid var(--line);
+        background: #f8fafc;
+      }
+
+      .control {
+        display: grid;
+        gap: 5px;
+      }
+
+      .control label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .control input,
+      .control select {
+        width: 100%;
+        min-height: 38px;
+        border: 1px solid #c9d2db;
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--ink);
+        padding: 8px 10px;
+      }
+
+      .reset-button {
+        min-height: 38px;
+        padding: 0 13px;
+        border: 1px solid #c9d2db;
+        border-radius: var(--radius);
+        background: #fff;
+        color: #344250;
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      .summary-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .pill {
+        min-height: 28px;
+        padding: 6px 10px;
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .table-wrap {
+        overflow: auto;
+        max-height: 72vh;
+      }
+
+      table {
+        width: 100%;
+        min-width: 1080px;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 13px;
+      }
+
+      thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 11px 10px;
+        border-bottom: 1px solid #c6d0d9;
+        background: #edf2f6;
+        color: #33414f;
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      tbody td {
+        padding: 10px;
+        border-bottom: 1px solid #edf1f4;
+        vertical-align: top;
+      }
+
+      tbody tr:nth-child(even) td {
+        background: #fbfcfd;
+      }
+
+      tbody tr:hover td {
+        background: #f3f8fb;
+      }
+
+      .col-no {
+        width: 54px;
+        color: var(--muted);
+        text-align: right;
+      }
+
+      .col-subject {
+        width: 190px;
+        font-weight: 800;
+      }
+
+      .col-category {
+        width: 120px;
+        font-weight: 800;
+      }
+
+      .col-direction {
+        width: 86px;
+      }
+
+      .col-scene {
+        width: 250px;
+      }
+
+      .col-amount {
+        width: 150px;
+        font-weight: 800;
+      }
+
+      .col-result {
+        width: 110px;
+      }
+
+      .badge {
+        min-height: 25px;
+        padding: 5px 9px;
+      }
+
+      .badge.in {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .badge.out {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .badge.positive {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .badge.negative {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .chip {
+        min-height: 25px;
+        padding: 5px 9px;
+        background: var(--gold-soft);
+        color: var(--gold);
+      }
+
+      .empty-state {
+        display: none;
+        padding: 28px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .print-tip {
+        margin: 12px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 1120px) {
+        .hero,
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+
+        .flow,
+        .callout-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .step:not(:last-child)::after {
+          display: none;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .page {
+          padding: 24px 14px 42px;
+        }
+
+        .metric-grid,
+        .flow,
+        .callout-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .section-head {
+          display: block;
+        }
+
+        .section-note {
+          margin-top: 8px;
+        }
+      }
+
+      @media print {
+        body {
+          background: #fff;
+        }
+
+        .page {
+          max-width: none;
+          padding: 12px;
+        }
+
+        .quick-nav,
+        .toolbar,
+        .print-tip {
+          display: none;
+        }
+
+        .table-wrap {
+          max-height: none;
+          overflow: visible;
+        }
+
+        thead th {
+          position: static;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">抖音动账核算</p>
+          <h1 id="page-title">动账取数逻辑说明</h1>
+          <p class="lead">
+            系统逐行读取抖音动账明细，先看动账方向，再看动账场景，再按备注做补充判断；命中规则后，从指定金额列取数，并按科目口径记为正数或负数。
+          </p>
+          <nav class="quick-nav" aria-label="页面导航">
+            <a href="#flow">判断顺序</a>
+            <a href="#explain">口径说明</a>
+            <a href="#rules">规则表</a>
+          </nav>
+        </div>
+        <aside class="hero-panel" aria-label="规则概览">
+          <div class="metric-grid">
+            <div class="metric">
+              <strong>56</strong>
+              <span>条启用规则</span>
+            </div>
+            <div class="metric">
+              <strong>8</strong>
+              <span>个一级现金流科目</span>
+            </div>
+            <div class="metric">
+              <strong>18</strong>
+              <span>个小分类</span>
+            </div>
+            <div class="metric">
+              <strong>36</strong>
+              <span>条规则直接取「动账金额」</span>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="flow" class="section">
+        <div class="section-head">
+          <h2>判断顺序</h2>
+          <p class="section-note">符合条件的规则都可以命中，所以一行货款结算可能同时拆出货款、补贴、佣金、平台服务费等多个金额。</p>
+        </div>
+        <div class="surface flow" aria-label="动账取数判断顺序">
+          <div class="step">
+            <span class="step-number">1</span>
+            <h3>看动账方向</h3>
+            <p>先区分「入账」还是「出账」。方向不一致，后面不再判断。</p>
+          </div>
+          <div class="step">
+            <span class="step-number">2</span>
+            <h3>看动账场景</h3>
+            <p>例如「货款结算入账」「退款-结算后退款-退用户」「消费者赔付」。</p>
+          </div>
+          <div class="step">
+            <span class="step-number">3</span>
+            <h3>看备注</h3>
+            <p>有的规则不看备注；有的要求备注完全等于某句话；有的要求包含或不包含关键词。</p>
+          </div>
+          <div class="step">
+            <span class="step-number">4</span>
+            <h3>取金额列</h3>
+            <p>优先取规则指定列；如果该列没有值，会尝试退回取「动账金额」。</p>
+          </div>
+          <div class="step">
+            <span class="step-number">5</span>
+            <h3>定正负号</h3>
+            <p>「记正数」表示计入该科目；「记负数」表示冲减该科目。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="explain" class="section">
+        <div class="section-head">
+          <h2>口径说明</h2>
+          <p class="section-note">表格里的条件按“方向、场景、备注”三层理解即可。</p>
+        </div>
+        <div class="callout-grid">
+          <div class="callout">
+            <h3>一行可能拆成多笔</h3>
+            <p>例如「货款结算入账」会同时取订单实付应结、订单退款、平台补贴、佣金、平台服务费等字段。</p>
+          </div>
+          <div class="callout">
+            <h3>备注按原文判断</h3>
+            <p>「备注等于」必须和明细里的备注完全一致；「同时包含」要求关键词都出现。</p>
+          </div>
+          <div class="callout">
+            <h3>金额会重新定方向</h3>
+            <p>系统会把取到的金额先转成绝对值，再按规则记正或记负。</p>
+          </div>
+          <div class="callout">
+            <h3>动账时间决定归期</h3>
+            <p>汇总年月取自明细里的「动账时间」；动账时间无法解析时，该行会处理失败。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="rules" class="section">
+        <div class="section-head">
+          <h2>规则表</h2>
+          <p class="section-note">可直接搜索备注、场景、取数字段，也可以按一级科目、动账方向、结果方向筛选。</p>
+        </div>
+        <div class="table-shell">
+          <div class="toolbar" aria-label="筛选规则">
+            <div class="control">
+              <label for="keyword">搜索</label>
+              <input id="keyword" type="search" placeholder="输入科目、场景、备注、取数字段" autocomplete="off" />
+            </div>
+            <div class="control">
+              <label for="subjectFilter">一级科目</label>
+              <select id="subjectFilter"></select>
+            </div>
+            <div class="control">
+              <label for="directionFilter">动账方向</label>
+              <select id="directionFilter">
+                <option value="">全部</option>
+                <option value="入账">入账</option>
+                <option value="出账">出账</option>
+              </select>
+            </div>
+            <div class="control">
+              <label for="resultFilter">结果方向</label>
+              <select id="resultFilter">
+                <option value="">全部</option>
+                <option value="记正数">记正数</option>
+                <option value="记负数">记负数</option>
+              </select>
+            </div>
+            <button id="resetFilters" class="reset-button" type="button">清空筛选</button>
+          </div>
+          <div class="summary-line" aria-live="polite">
+            <span id="matchCount" class="pill">显示 56 条</span>
+            <span class="pill">正数计入科目</span>
+            <span class="pill">负数冲减科目</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-no">序号</th>
+                  <th class="col-subject">一级科目</th>
+                  <th class="col-category">小分类</th>
+                  <th class="col-direction">方向</th>
+                  <th class="col-scene">动账场景</th>
+                  <th>备注判断</th>
+                  <th class="col-amount">取数字段</th>
+                  <th class="col-result">结果</th>
+                </tr>
+              </thead>
+              <tbody id="rulesBody"></tbody>
+            </table>
+            <div id="emptyState" class="empty-state">没有符合筛选条件的规则。</div>
+          </div>
+        </div>
+        <p class="print-tip">提示：浏览器中直接打印或另存为 PDF，即可用于评审。</p>
+      </section>
+    </main>
+
+    <script>
+      const rules = [
+        [1, "收到抖音分账款", "订单结算", "入账", "货款结算入账", "不看备注", "订单实付应结", "记正数"],
+        [2, "收到抖音分账款", "订单结算", "入账", "货款结算入账", "不看备注", "订单退款", "记负数"],
+        [3, "收到抖音分账款", "订单结算", "出账", "退款-结算后退款-退用户", "不看备注", "动账金额", "记负数"],
+        [4, "收到抖音分账款", "订单结算", "出账", "退款-极速退二阶段商家资金回补", "不看备注", "动账金额", "记负数"],
+        [5, "收到抖音分账款", "订单结算", "入账", "退款-订单退款触发-分账", "备注等于「极速退款分账」", "订单实付应结", "记正数"],
+        [6, "收到抖音分账款", "订单结算", "入账", "退款-订单退款触发-分账", "备注等于「退款失败分账」", "动账金额", "记正数"],
+        [7, "收到抖音分账款", "订单结算", "入账", "退款-结算后退款-退用户", "备注等于「退款失败退票」", "动账金额", "记正数"],
+        [8, "收到其他与经营相关的收入", "平台补贴", "出账", "退款-订单退款触发-退补贴", "不看备注", "动账金额", "记负数"],
+        [9, "收到其他与经营相关的收入", "平台补贴", "入账", "平台赔付", "不看备注", "动账金额", "记正数"],
+        [10, "收到其他与经营相关的收入", "平台补贴", "入账", "货款结算入账", "不看备注", "实际平台补贴", "记正数"],
+        [11, "收到其他与经营相关的收入", "平台补贴", "入账", "货款结算入账", "不看备注", "实际抖音支付补贴", "记正数"],
+        [12, "收到其他与经营相关的收入", "平台补贴", "入账", "货款结算入账", "不看备注", "实际抖音月付营销补贴", "记正数"],
+        [13, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-退分账", "备注等于「服务费返还」", "佣金", "记负数"],
+        [14, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-退分账", "备注等于「服务费返还」", "招商服务费", "记负数"],
+        [15, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-退分账", "备注等于「服务费返还」", "站外推广费", "记负数"],
+        [16, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-分账", "备注等于「服务费返还」", "佣金", "记负数"],
+        [17, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-分账", "备注等于「服务费返还」", "招商服务费", "记负数"],
+        [18, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-分账", "备注等于「服务费返还」", "站外推广费", "记负数"],
+        [19, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-分账", "备注等于「极速退款分账」", "佣金", "记负数"],
+        [20, "支付达人分账佣金", "佣金", "入账", "退款-订单退款触发-分账", "备注等于「极速退款分账」", "招商服务费", "记负数"],
+        [21, "支付达人分账佣金", "佣金", "入账", "货款结算入账", "不看备注", "佣金", "记正数"],
+        [22, "支付达人分账佣金", "佣金", "入账", "货款结算入账", "不看备注", "招商服务费", "记正数"],
+        [23, "支付达人分账佣金", "佣金", "入账", "货款结算入账", "不看备注", "站外推广费", "记正数"],
+        [24, "支付抖音平台服务费", "平台服务费", "入账", "退款-订单退款触发-退分账", "备注等于「服务费返还」", "平台服务费", "记负数"],
+        [25, "支付抖音平台服务费", "平台服务费", "入账", "退款-订单退款触发-分账", "备注等于「服务费返还」", "平台服务费", "记负数"],
+        [26, "支付抖音平台服务费", "平台服务费", "入账", "货款结算入账", "不看备注", "平台服务费", "记正数"],
+        [27, "支付抖音平台运费险", "运费险", "出账", "权益保险", "不看备注", "动账金额", "记正数"],
+        [28, "支付抖音提现", "提现", "出账", "提现", "不看备注", "动账金额", "记正数"],
+        [29, "支付抖音提现", "提现", "入账", "提现", "不看备注", "动账金额", "记负数"],
+        [30, "支付其他与经营相关的支出", "拦截费", "出账", "空场景", "备注包含「拦截费」", "动账金额", "记正数"],
+        [31, "支付其他与经营相关的支出", "赔付", "出账", "消费者赔付", "备注不包含「打款」和「订单号」", "动账金额", "记正数"],
+        [32, "支付其他与经营相关的支出", "赔付", "入账", "消费者赔付", "不看备注", "动账金额", "记负数"],
+        [33, "支付其他与经营相关的支出", "赔付", "出账", "上门取件运费", "备注不包含「打款」和「订单号」", "动账金额", "记正数"],
+        [34, "支付其他与经营相关的支出", "赔付", "出账", "发货物流违规扣罚", "不看备注", "动账金额", "记正数"],
+        [35, "支付其他与经营相关的支出", "赔付", "出账", "判罚扣款", "不看备注", "动账金额", "记正数"],
+        [36, "支付其他与经营相关的支出", "退款转赔付", "出账", "退款-退转付扣减商家货款", "不看备注", "动账金额", "记正数"],
+        [37, "支付其他与经营相关的支出", "退款转赔付", "出账", "退款-极速退二次售后-退用户", "不看备注", "动账金额", "记正数"],
+        [38, "支付其他与经营相关的支出", "月付贴息费用", "出账", "抖音月付与商家联合贴息活动", "不看备注", "动账金额", "记正数"],
+        [39, "支付其他与经营相关的支出", "月付贴息费用", "入账", "抖音月付与商家联合贴息活动", "不看备注", "动账金额", "记负数"],
+        [40, "支付其他与经营相关的支出", "小额打款", "出账", "消费者赔付", "备注同时包含「打款」和「订单号」", "动账金额", "记正数"],
+        [41, "支付其他与经营相关的支出", "小额打款", "出账", "小额打款", "不看备注", "动账金额", "记正数"],
+        [42, "支付其他与经营相关的支出", "捐赠", "出账", "不限场景", "备注包含「公益商家佣金捐赠」", "动账金额", "记正数"],
+        [43, "支付其他与经营相关的支出", "可提现充值千川", "出账", "不限场景", "备注等于「划扣电商货款充值巨量千川」", "动账金额", "记正数"],
+        [44, "支付其他与经营相关的支出", "可提现充值千川", "入账", "不限场景", "备注等于「电商货款充值巨量千川，未消耗充值款退回货款」", "动账金额", "记负数"],
+        [45, "支付其他与经营相关的支出", "返现", "入账", "退款-订单退款触发-分账", "备注等于「下单返现金活动追缴用户后商家退回平台返现金额」", "动账金额", "记负数"],
+        [46, "支付其他与经营相关的支出", "返现", "入账", "退款-订单退款触发-分账", "备注等于「全额免单追缴用户后商家退回平台返现金额」", "动账金额", "记负数"],
+        [47, "支付其他与经营相关的支出", "返现", "入账", "退款-订单退款触发-分账", "备注等于「签到领现金追缴用户后商家退回平台返现金额」", "动账金额", "记负数"],
+        [48, "支付其他与经营相关的支出", "返现", "出账", "平台返现/返券活动追缴用户退回平台", "备注等于「下单返现金活动追缴用户后商家退回平台返现金额」", "动账金额", "记正数"],
+        [49, "支付其他与经营相关的支出", "返现", "出账", "平台返现/返券活动追缴用户退回平台", "备注等于「全额免单追缴用户后商家退回平台返现金额」", "动账金额", "记正数"],
+        [50, "支付其他与经营相关的支出", "返现", "出账", "平台返现/返券活动追缴用户退回平台", "备注等于「签到领现金追缴用户后商家退回平台返现金额」", "动账金额", "记正数"],
+        [51, "支付其他与经营相关的支出", "评价有礼", "入账", "评价有礼活动资金回退", "不看备注", "动账金额", "记正数"],
+        [52, "支付其他与经营相关的支出", "评价有礼", "出账", "评价有礼保证金扣款", "不看备注", "动账金额", "记正数"],
+        [53, "支付其他与经营相关的支出", "可提现充值保证金", "出账", "充值保证金", "不看备注", "动账金额", "记正数"],
+        [54, "支付线上BIC费用", "BIC", "入账", "供应链QIC费用", "不看备注", "动账金额", "记负数"],
+        [55, "支付线上BIC费用", "BIC", "出账", "供应链QIC费用", "不看备注", "动账金额", "记正数"],
+        [56, "支付线上BIC费用", "可提现充值BIC", "出账", "空场景", "备注等于「聚合账户充值至QIC账户」", "动账金额", "记正数"],
+      ];
+
+      const columns = ["no", "subject", "category", "direction", "scene", "remark", "amount", "result"];
+      const rows = rules.map((rule) => Object.fromEntries(rule.map((value, index) => [columns[index], value])));
+      const body = document.querySelector("#rulesBody");
+      const emptyState = document.querySelector("#emptyState");
+      const matchCount = document.querySelector("#matchCount");
+      const keyword = document.querySelector("#keyword");
+      const subjectFilter = document.querySelector("#subjectFilter");
+      const directionFilter = document.querySelector("#directionFilter");
+      const resultFilter = document.querySelector("#resultFilter");
+      const resetFilters = document.querySelector("#resetFilters");
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function fillSubjectOptions() {
+        const subjects = [...new Set(rows.map((row) => row.subject))];
+        subjectFilter.innerHTML = '<option value="">全部</option>' + subjects.map((subject) => `<option value="${escapeHtml(subject)}">${escapeHtml(subject)}</option>`).join("");
+      }
+
+      function render() {
+        const query = keyword.value.trim().toLowerCase();
+        const subject = subjectFilter.value;
+        const direction = directionFilter.value;
+        const result = resultFilter.value;
+        const filtered = rows.filter((row) => {
+          const text = Object.values(row).join(" ").toLowerCase();
+          return (!query || text.includes(query)) && (!subject || row.subject === subject) && (!direction || row.direction === direction) && (!result || row.result === result);
+        });
+
+        body.innerHTML = filtered.map((row) => {
+          const directionClass = row.direction === "入账" ? "in" : "out";
+          const resultClass = row.result === "记正数" ? "positive" : "negative";
+          return `
+            <tr>
+              <td class="col-no">${row.no}</td>
+              <td class="col-subject">${escapeHtml(row.subject)}</td>
+              <td class="col-category">${escapeHtml(row.category)}</td>
+              <td class="col-direction"><span class="badge ${directionClass}">${escapeHtml(row.direction)}</span></td>
+              <td class="col-scene">${escapeHtml(row.scene)}</td>
+              <td>${escapeHtml(row.remark)}</td>
+              <td class="col-amount"><span class="chip">${escapeHtml(row.amount)}</span></td>
+              <td class="col-result"><span class="badge ${resultClass}">${escapeHtml(row.result)}</span></td>
+            </tr>
+          `;
+        }).join("");
+
+        emptyState.style.display = filtered.length ? "none" : "block";
+        matchCount.textContent = `显示 ${filtered.length} 条`;
+      }
+
+      fillSubjectOptions();
+      render();
+      [keyword, subjectFilter, directionFilter, resultFilter].forEach((element) => element.addEventListener("input", render));
+      resetFilters.addEventListener("click", () => {
+        keyword.value = "";
+        subjectFilter.value = "";
+        directionFilter.value = "";
+        resultFilter.value = "";
+        render();
+        keyword.focus();
+      });
+    </script>
+  </body>
+</html>

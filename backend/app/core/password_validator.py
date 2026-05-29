@@ -6,7 +6,7 @@ import re
 class PasswordValidator:
     """Validate password strength."""
 
-    MIN_LENGTH = 8
+    MIN_LENGTH = 6
     RECOMMENDED_LENGTH = 12
 
     @staticmethod
@@ -26,33 +26,25 @@ class PasswordValidator:
         if len(password) < min_length:
             return False, f"密码长度至少需要 {min_length} 个字符"
 
-        # Check for at least one lowercase letter
-        if not re.search(r"[a-z]", password):
-            return False, "密码必须包含至少一个小写字母"
-
-        # Check for at least one uppercase letter
-        if not re.search(r"[A-Z]", password):
-            return False, "密码必须包含至少一个大写字母"
-
-        # Check for at least one digit
-        if not re.search(r"\d", password):
-            return False, "密码必须包含至少一个数字"
-
-        # Check for at least one special character (strict mode only)
-        if strict and not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
-            return False, "密码必须包含至少一个特殊字符 (!@#$%^&* 等)"
-
-        # Check for common weak passwords
-        weak_passwords = [
-            "password",
-            "12345678",
-            "admin123",
-            "qwerty123",
-            "password123",
-            "admin1234",
-        ]
-        if password.lower() in weak_passwords:
-            return False, "密码过于简单，请使用更复杂的密码"
+        # Strength rules are temporarily disabled; only length is enforced.
+        # if not re.search(r"[a-z]", password):
+        #     return False, "密码必须包含至少一个小写字母"
+        # if not re.search(r"[A-Z]", password):
+        #     return False, "密码必须包含至少一个大写字母"
+        # if not re.search(r"\d", password):
+        #     return False, "密码必须包含至少一个数字"
+        # if strict and not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        #     return False, "密码必须包含至少一个特殊字符 (!@#$%^&* 等)"
+        # weak_passwords = [
+        #     "password",
+        #     "12345678",
+        #     "admin123",
+        #     "qwerty123",
+        #     "password123",
+        #     "admin1234",
+        # ]
+        # if password.lower() in weak_passwords:
+        #     return False, "密码过于简单，请使用更复杂的密码"
 
         return True, ""
 

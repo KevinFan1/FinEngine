@@ -1,5 +1,6 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.core.password_validator import PasswordValidator
 from app.core.security import hash_password, verify_password
@@ -8,6 +9,15 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.services.audit_service import AuditService
 from app.services.quota_service import QuotaService
+
+
+def _user_integrity_error_message(exc: IntegrityError) -> str:
+    message = str(exc)
+    if 'constraint "uq_fin_user_phone"' in message:
+        return "手机号已被注册"
+    if 'constraint "uq_fin_user_username"' in message:
+        return "用户名已存在，请更换后再试"
+    return "用户信息已存在，请检查后重试"
 
 
 def split_int_filter_values(value: str | int | None) -> list[int]:
@@ -151,7 +161,11 @@ class UserService:
             status=1,
         )
         db.add(user)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ValueError(_user_integrity_error_message(exc)) from exc
         await db.refresh(user)
 
         # Get org name for description
@@ -214,7 +228,11 @@ class UserService:
         for field, value in update_data.items():
             setattr(user, field, value)
 
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ValueError(_user_integrity_error_message(exc)) from exc
         await db.refresh(user)
 
         new_value = {
@@ -347,7 +365,11 @@ class UserService:
 
         current_user.display_name = display_name
         current_user.phone = phone
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ValueError(_user_integrity_error_message(exc)) from exc
         await db.refresh(current_user)
 
         await AuditService.log(
@@ -391,7 +413,11 @@ class UserService:
         current_user.active_session_ip = None
         current_user.active_session_user_agent = None
         current_user.active_session_at = None
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ValueError(_user_integrity_error_message(exc)) from exc
 
         await AuditService.log(
             db,

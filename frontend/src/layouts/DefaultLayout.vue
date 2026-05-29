@@ -81,9 +81,9 @@
                             v-show="!appStore.sidebarCollapsed"
                             class="guide-entry-copy"
                         >
-                            <span class="guide-entry-title">使用说明</span>
+                            <span class="guide-entry-title">系统使用指引</span>
                             <span class="guide-entry-desc"
-                                >上传文件 -> 任务处理 -> 查看报表</span
+                                >流程说明、图片示例、常见问题</span
                             >
                         </div>
                     </transition>
@@ -288,81 +288,171 @@
         </div>
     </div>
 
-    <el-drawer
+    <el-dialog
         v-model="guideDrawerVisible"
-        title="FinEngine 使用说明"
-        size="480px"
-        class="guide-drawer"
+        title="系统使用指引"
+        width="min(1280px, 96vw)"
+        top="5vh"
+        class="guide-dialog"
     >
-        <div class="guide-drawer-body">
+        <div class="guide-dialog-body">
             <section class="guide-hero">
-                <p class="guide-kicker">推荐流程</p>
-                <h3>先上传，再按模块看任务和结果</h3>
+                <p class="guide-kicker">业务使用路径</p>
+                <h3>从文件上传到报表核对，按业务目标选择入口</h3>
                 <p class="guide-hero-desc">
-                    当前账号角色：{{ currentRoleLabel }}。系统主流程以 “上传中心
-                    -> 核算任务 / 资金任务 / BIC任务 -> 汇总明细 / 汇总报表 / 下载中心”
-                    为主，基础资料只需先配置一次，后续按月重复上传即可。
+                    这份指引面向日常核算用户，重点说明每类业务动作应该去哪里操作、
+                    看什么结果、如何判断是否完成。先上传文件，再跟踪任务，
+                    最后在明细、报表和下载中心完成核对与留档。
                 </p>
-            </section>
-
-            <section class="guide-section">
-                <div class="guide-section-head">
-                    <span class="guide-section-title">上手步骤</span>
-                </div>
-                <div class="guide-step-list">
-                    <article
-                        v-for="step in quickStartSteps"
-                        :key="step.title"
-                        class="guide-step-card"
-                    >
-                        <span class="guide-step-index">{{ step.index }}</span>
-                        <div class="guide-step-copy">
-                            <strong>{{ step.title }}</strong>
-                            <p>{{ step.desc }}</p>
-                        </div>
-                    </article>
-                </div>
-            </section>
-
-            <section class="guide-section">
-                <div class="guide-section-head">
-                    <span class="guide-section-title">菜单说明</span>
-                </div>
-                <div class="guide-menu-list">
-                    <article
-                        v-for="item in visibleGuideSections"
+                <div class="guide-flow">
+                    <div
+                        v-for="item in guideFlow"
                         :key="item.title"
-                        class="guide-menu-card"
+                        class="guide-flow-item"
                     >
-                        <div class="guide-menu-main">
+                        <span class="guide-flow-icon">{{ item.index }}</span>
+                        <div>
                             <strong>{{ item.title }}</strong>
                             <p>{{ item.desc }}</p>
-                        </div>
-                        <span class="guide-menu-tip">{{ item.tip }}</span>
-                    </article>
-                </div>
-            </section>
-
-            <section class="guide-section">
-                <div class="guide-section-head">
-                    <span class="guide-section-title">重点注意</span>
-                </div>
-                <div class="guide-note-list">
-                    <div
-                        v-for="note in usageNotes"
-                        :key="note.title"
-                        class="guide-note-item"
-                    >
-                        <span class="guide-note-icon">!</span>
-                        <div class="guide-note-copy">
-                            <strong>{{ note.title }}</strong>
-                            <p>{{ note.desc }}</p>
                         </div>
                     </div>
                 </div>
             </section>
+
+            <div class="guide-content-grid">
+                <section class="guide-section">
+                    <div class="guide-section-head">
+                        <span class="guide-section-title">操作步骤</span>
+                    </div>
+                    <div class="guide-step-list">
+                        <article
+                            v-for="step in quickStartSteps"
+                            :key="step.title"
+                            class="guide-step-card"
+                        >
+                            <span class="guide-step-index">{{
+                                step.index
+                            }}</span>
+                            <div class="guide-step-copy">
+                                <strong>{{ step.title }}</strong>
+                                <p>{{ step.desc }}</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="guide-section">
+                    <div class="guide-section-head">
+                        <span class="guide-section-title">上传前检查</span>
+                    </div>
+                    <div class="guide-note-list">
+                        <div
+                            v-for="note in usageNotes"
+                            :key="note.title"
+                            class="guide-note-item"
+                        >
+                            <span class="guide-note-icon">!</span>
+                            <div class="guide-note-copy">
+                                <strong>{{ note.title }}</strong>
+                                <p>{{ note.desc }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <section class="guide-section">
+                <div class="guide-section-head">
+                    <span class="guide-section-title">功能指引表</span>
+                </div>
+                <div class="guide-table-wrap">
+                    <table class="guide-table">
+                        <thead>
+                            <tr>
+                                <th>业务目标</th>
+                                <th>操作入口</th>
+                                <th>关键动作</th>
+                                <th>完成判断</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="row in guideActionRows" :key="row.goal">
+                                <td>
+                                    <strong>{{ row.goal }}</strong>
+                                    <span>{{ row.when }}</span>
+                                </td>
+                                <td>{{ row.entry }}</td>
+                                <td>{{ row.action }}</td>
+                                <td>{{ row.outcome }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="guide-section">
+                <div class="guide-section-head">
+                    <span class="guide-section-title">功能截图指引</span>
+                </div>
+                <div class="guide-feature-groups">
+                    <section
+                        v-for="group in guideFeatureGroups"
+                        :key="group.title"
+                        class="guide-feature-group"
+                    >
+                        <div class="guide-feature-group-head">
+                            <div>
+                                <strong>{{ group.title }}</strong>
+                                <p>{{ group.desc }}</p>
+                            </div>
+                            <span>{{ group.items.length }} 个页面</span>
+                        </div>
+                        <div class="guide-screenshot-grid">
+                            <figure
+                                v-for="shot in group.items"
+                                :key="shot.title"
+                                class="guide-screenshot-card"
+                            >
+                                <img
+                                    :src="shot.src"
+                                    :alt="shot.alt"
+                                    loading="lazy"
+                                />
+                                <figcaption>
+                                    <strong>{{ shot.title }}</strong>
+                                    <span>{{ shot.desc }}</span>
+                                </figcaption>
+                            </figure>
+                        </div>
+                    </section>
+                </div>
+            </section>
+
+            <section class="guide-section">
+                <div class="guide-section-head">
+                    <span class="guide-section-title">常见问题</span>
+                </div>
+                <div class="guide-faq-list">
+                    <details
+                        v-for="faq in guideFaqs"
+                        :key="faq.question"
+                        class="guide-faq-item"
+                    >
+                        <summary>
+                            <span class="guide-faq-question">
+                                <span class="guide-faq-mark">Q</span>
+                                <span>{{ faq.question }}</span>
+                            </span>
+                        </summary>
+                        <div class="guide-faq-answer">
+                            <span class="guide-faq-answer-mark">A</span>
+                            <p>{{ faq.answer }}</p>
+                        </div>
+                    </details>
+                </div>
+            </section>
         </div>
-    </el-drawer>
+    </el-dialog>
 
     <ForcePasswordChangeDialog v-model="forcePasswordVisible" />
 </template>
@@ -631,100 +721,306 @@ const avatarLetter = computed(() => {
     return name[0].toUpperCase();
 });
 
-const currentRoleLabel = computed(() => {
-    const role = userStore.userRole;
-    if (role === "superadmin") return "超级管理员";
-    if (role === "org_admin") return "组织管理员";
-    return "普通用户";
-});
+const guideFlow = [
+    {
+        index: "1",
+        title: "准备资料",
+        desc: "先确认店铺和账号权限。",
+    },
+    {
+        index: "2",
+        title: "上传处理",
+        desc: "提交文件并跟踪任务。",
+    },
+    {
+        index: "3",
+        title: "核对结果",
+        desc: "按链路查看明细和报表。",
+    },
+    {
+        index: "4",
+        title: "导出留档",
+        desc: "下载文件并保留操作记录。",
+    },
+];
 
 const quickStartSteps = [
     {
         index: "01",
-        title: "先维护店铺资料",
-        desc: "至少保证店铺名称和实际上传文件里的店铺名一致，后续任务和报表才能稳定归集。",
+        title: "检查店铺资料",
+        desc: "进入基础资料 / 店铺管理，确认店铺名称、平台、组织归属正确。文件里的店铺名要和系统店铺名保持一致。",
     },
     {
         index: "02",
-        title: "按命名规则上传文件",
-        desc: "文件名建议使用“年月_性质_店铺名”，系统会先识别年月、性质、店铺，再进入上传确认。",
+        title: "到上传中心提交文件",
+        desc: "进入工作台 / 上传中心，选择文件后确认系统识别出的核算年月、文件类型和店铺；识别不准时先修正后再提交。",
     },
     {
         index: "03",
-        title: "按模块查看任务结果",
-        desc: "普通文件先看核算任务，抖音动账文件额外看资金任务，抖音 BIC 文件额外看 BIC 任务。失败任务先看错误原因。",
+        title: "查看对应任务",
+        desc: "普通动账文件看核算任务；抖音资金链路看资金任务；BIC 文件看 BIC 任务。失败任务先读错误原因，再决定重试或重新上传。",
     },
     {
         index: "04",
-        title: "在汇总明细、报表和下载中心里核对数据",
-        desc: "汇总明细看业务归属后的处理结果，汇总报表看核算年月聚合结果，大文件导出到下载中心获取。",
+        title: "核对明细、报表和下载结果",
+        desc: "汇总明细用于追溯业务归属，汇总报表用于按月份聚合，年度报表用于资金科目核对，大文件导出后到下载中心获取。",
     },
 ];
 
-const guideSections = [
+const guideActionRows = [
     {
-        title: "工作台",
-        desc: "从首页和上传中心进入系统主流程，先上传，再看任务，再核对结果。",
-        tip: "主流程入口",
+        goal: "查看今日工作概览",
+        when: "每天进入系统后",
+        entry: "首页",
+        action: "查看关键指标、近期任务、常用入口和异常提醒。",
+        outcome: "明确当天需要上传、核对或处理的事项。",
     },
     {
-        title: "基础资料",
-        desc: "先维护店铺资料，上传识别、任务筛选和报表汇总都会依赖这里的店铺配置。",
-        tip: "先配一次",
+        goal: "维护店铺基础资料",
+        when: "新增店铺或店铺名称变化时",
+        entry: "店铺管理",
+        action: "维护平台、店铺名称、组织归属和启用状态。",
+        outcome: "文件上传后能稳定识别并归属到正确店铺。",
     },
     {
-        title: "动账核算",
-        desc: "核算任务负责处理共享核算文件；汇总明细看业务年月结果；汇总报表看核算年月聚合结果。",
-        tip: "通用链路",
+        goal: "提交平台核算文件",
+        when: "拿到平台导出的原始文件后",
+        entry: "上传中心",
+        action: "上传 Excel 或 CSV，核对系统识别出的年月、文件类型和店铺。",
+        outcome: "上传批次生成，并进入对应任务处理流程。",
     },
     {
-        title: "动账资金核算",
-        desc: "重点看资金任务、科目明细和年度报表，适合处理抖音动账延伸出的资金链路。",
-        tip: "资金链路",
+        goal: "跟踪普通动账核算",
+        when: "上传普通动账、订单、GMV、运费险文件后",
+        entry: "核算任务",
+        action: "查看任务状态、错误原因、处理摘要，必要时重试或重新统计。",
+        outcome: "任务处理成功，失败原因已定位并处理。",
     },
     {
-        title: "BIC核算",
-        desc: "BIC 文件走独立任务链路，BIC汇总看店铺聚合结果，BIC源明细看质检费源数据。",
-        tip: "独立模块",
+        goal: "核对动账明细和汇总",
+        when: "需要按店铺、平台、月份对账时",
+        entry: "汇总明细 / 汇总报表",
+        action: "先用汇总明细追溯业务口径，再用汇总报表查看核算年月聚合结果。",
+        outcome: "明细和报表金额可以互相解释，调整和导出有据可查。",
     },
     {
-        title: "规则配置",
-        desc: "管理员在这里维护动账重分类字典、资金大分类和资金重分类规则，普通用户只需要按规则上传和核对。",
-        tip: "管理员配置",
-        roles: ["superadmin"],
+        goal: "核对资金科目",
+        when: "处理抖音动账资金链路时",
+        entry: "资金任务 / 科目明细 / 年度报表",
+        action: "先看资金任务是否成功，再按科目明细和年度报表核对收支归类。",
+        outcome: "资金科目金额可解释，年度汇总与业务预期一致。",
     },
     {
-        title: "系统管理",
-        desc: "组织、用户和操作日志都放在这里，避免和日常核算流程混在一起。",
-        tip: "后台管理",
-        roles: ["superadmin", "org_admin"],
+        goal: "核对 BIC 费用数据",
+        when: "上传 BIC 源文件后",
+        entry: "BIC任务 / BIC源明细 / BIC汇总",
+        action: "先确认 BIC 任务成功，再核对源明细和店铺月份汇总。",
+        outcome: "源数据与汇总金额一致，费用归属清晰。",
+    },
+    {
+        goal: "导出与归档",
+        when: "需要对账、归档或发送结果时",
+        entry: "下载中心",
+        action: "在目标页面发起导出，再到下载中心查看生成进度和下载文件。",
+        outcome: "导出任务完成，文件可下载并留档。",
+    },
+    {
+        goal: "维护组织内用户",
+        when: "成员变更、账号停用或密码重置时",
+        entry: "用户管理",
+        action: "新增或编辑组织内用户，处理启停用和密码重置。",
+        outcome: "成员权限与组织职责匹配，离职或异常账号及时停用。",
+    },
+    {
+        goal: "排查数据异常",
+        when: "金额不一致、店铺不匹配或任务失败时",
+        entry: "任务页 / 汇总明细 / 操作日志",
+        action: "先看任务错误，再核对筛选条件、源文件和操作记录。",
+        outcome: "定位到文件、筛选条件、权限范围或系统处理原因。",
+    },
+    {
+        goal: "维护个人账号",
+        when: "需要更新资料或修改密码时",
+        entry: "个人中心",
+        action: "维护个人信息，按要求修改登录密码。",
+        outcome: "个人资料准确，账号安全状态可控。",
     },
 ];
-
-const visibleGuideSections = computed(() => {
-    const role = userStore.userRole;
-    return guideSections.filter((item) => {
-        if (!item.roles) return true;
-        return item.roles.includes(role);
-    });
-});
 
 const usageNotes = [
     {
-        title: "已接入平台与支持类型",
-        desc: "这里展示的是当前系统已经支持的平台和文档类型，上传前先对照确认，不在范围内的文件不要直接上传。",
+        title: "确认文件属于已支持平台",
+        desc: "上传前先确认文件来自系统已接入的平台和文件类型。不确定时先联系管理员确认，避免产生无法处理的任务。",
     },
     {
         title: "不要随意修改店铺名称",
-        desc: "系统会根据店铺名称做识别、任务归属和汇总统计，店铺名称一旦随意改动，很容易导致同一店铺数据被拆散。",
+        desc: "系统会根据店铺名称做识别、任务归属和汇总统计。店铺名称变化可能导致同一店铺数据被拆分。",
     },
     {
-        title: "注意文档名称",
-        desc: "文件名里的年月统一叫核算年月；业务年月是订单、动账或费用实际归属月份；上传年月只表示文件传入系统的时间，用于审计和排查。",
+        title: "区分核算年月、业务年月和上传时间",
+        desc: "文件名里的年月通常作为核算年月；业务年月是订单、动账或费用实际归属月份；上传时间只表示文件进入系统的时间。",
     },
     {
         title: "失败任务先看原因",
-        desc: "如果任务失败，先在任务列表查看错误信息，再决定重试或重新上传，不建议重复上传同一个文件。",
+        desc: "任务失败时先在任务列表查看错误信息。数据或格式问题需要重新整理文件；系统异常可尝试重试。",
+    },
+];
+
+const guideFeatureGroups = [
+    {
+        title: "工作台与基础准备",
+        desc: "先了解整体状态，再维护店铺和个人资料，为上传识别打好基础。",
+        items: [
+            {
+                title: "首页",
+                desc: "查看系统概览、关键指标和常用入口。",
+                src: "/ui-audit-screenshots/01-dashboard-light.png",
+                alt: "首页页面示例",
+            },
+            {
+                title: "店铺管理",
+                desc: "维护平台店铺，保证文件和报表按店铺归属。",
+                src: "/ui-audit-screenshots/01-shops-light.png",
+                alt: "店铺管理页面示例",
+            },
+            {
+                title: "个人中心",
+                desc: "维护个人资料，修改登录密码。",
+                src: "/ui-audit-screenshots/01-profile-light.png",
+                alt: "个人中心页面示例",
+            },
+        ],
+    },
+    {
+        title: "文件上传、任务跟踪与下载",
+        desc: "完成文件提交、处理进度查看和导出文件下载，是日常工作最高频链路。",
+        items: [
+            {
+                title: "上传中心",
+                desc: "上传平台账单文件，确认年月、类型和店铺识别结果。",
+                src: "/ui-audit-screenshots/01-upload-light.png",
+                alt: "上传中心页面示例",
+            },
+            {
+                title: "核算任务",
+                desc: "查看普通动账任务状态、错误原因和重新统计入口。",
+                src: "/ui-audit-screenshots/01-tasks-light.png",
+                alt: "核算任务页面示例",
+            },
+            {
+                title: "下载中心",
+                desc: "查看导出任务进度，下载报表和明细文件。",
+                src: "/ui-audit-screenshots/01-downloads-light.png",
+                alt: "下载中心页面示例",
+            },
+        ],
+    },
+    {
+        title: "动账核算结果",
+        desc: "用于核对订单、动账、费用等普通核算链路的处理结果。",
+        items: [
+            {
+                title: "汇总明细",
+                desc: "按业务维度追溯订单、动账和费用处理结果。",
+                src: "/ui-audit-screenshots/01-summaries-light.png",
+                alt: "汇总明细页面示例",
+            },
+            {
+                title: "汇总报表",
+                desc: "按核算年月和店铺核对汇总金额并发起导出。",
+                src: "/ui-audit-screenshots/01-summary-report-light.png",
+                alt: "汇总报表页面示例",
+            },
+        ],
+    },
+    {
+        title: "动账资金核算",
+        desc: "用于抖音动账资金链路，重点核对科目归类、收支明细和年度汇总。",
+        items: [
+            {
+                title: "资金任务",
+                desc: "查看抖音动账资金链路的任务状态和处理摘要。",
+                src: "/ui-audit-screenshots/01-transaction-tasks-light.png",
+                alt: "资金任务页面示例",
+            },
+            {
+                title: "科目明细",
+                desc: "核对资金收支科目的明细归类和金额。",
+                src: "/ui-audit-screenshots/01-transaction-summaries-light.png",
+                alt: "科目明细页面示例",
+            },
+            {
+                title: "年度报表",
+                desc: "按年度查看资金科目汇总，支持对账和留档。",
+                src: "/ui-audit-screenshots/01-transaction-summary-report-light.png",
+                alt: "年度报表页面示例",
+            },
+        ],
+    },
+    {
+        title: "BIC核算",
+        desc: "用于 BIC 文件处理、源数据追溯和店铺月份维度汇总核对。",
+        items: [
+            {
+                title: "BIC任务",
+                desc: "查看 BIC 文件处理状态和失败原因。",
+                src: "/ui-audit-screenshots/01-bic-tasks-light.png",
+                alt: "BIC任务页面示例",
+            },
+            {
+                title: "BIC源明细",
+                desc: "查看 BIC 原始行数据，辅助核对源文件。",
+                src: "/ui-audit-screenshots/01-bic-details-light.png",
+                alt: "BIC源明细页面示例",
+            },
+            {
+                title: "BIC汇总",
+                desc: "按店铺和月份查看 BIC 汇总结果。",
+                src: "/ui-audit-screenshots/01-bic-summary-light.png",
+                alt: "BIC汇总页面示例",
+            },
+        ],
+    },
+    {
+        title: "组织内管理与审计",
+        desc: "组织管理员用于维护本组织用户，并追踪关键操作记录。",
+        items: [
+            {
+                title: "用户管理",
+                desc: "维护本组织用户，处理账号启停和密码重置。",
+                src: "/ui-audit-screenshots/01-users-light.png",
+                alt: "用户管理页面示例",
+            },
+            {
+                title: "操作日志",
+                desc: "追踪上传、导出、用户和登录等关键操作记录。",
+                src: "/ui-audit-screenshots/01-audit-logs-light.png",
+                alt: "操作日志页面示例",
+            },
+        ],
+    },
+];
+
+const guideFaqs = [
+    {
+        question: "上传文件后没有看到结果怎么办？",
+        answer: "先到对应任务页查看状态。处理中需要等待；失败时查看错误原因；成功后再到汇总明细、汇总报表或下载中心核对结果。",
+    },
+    {
+        question: "为什么文件识别不到店铺？",
+        answer: "通常是文件名或文件内容里的店铺名称和店铺管理中的名称不一致。先确认店铺资料，再重新上传或调整文件命名。",
+    },
+    {
+        question: "核算任务、资金任务和 BIC 任务有什么区别？",
+        answer: "核算任务处理普通动账核算文件；资金任务处理抖音动账资金链路；BIC 任务处理 BIC 源文件。不同文件应到对应任务页查看进度。",
+    },
+    {
+        question: "导出后在哪里下载？",
+        answer: "大数据量导出一般会生成后台任务。导出完成后进入工作台 / 下载中心，找到对应文件并下载。",
+    },
+    {
+        question: "为什么有些菜单看不到？",
+        answer: "菜单会按账号权限和组织范围展示。日常核算用户只需要关注上传、任务、明细、报表和下载入口；如果缺少必要入口，请联系管理员确认权限范围。",
     },
 ];
 
@@ -1407,42 +1703,61 @@ function handleCommand(command: string) {
     container-type: inline-size;
 }
 
-:deep(.guide-drawer) {
-    .el-drawer__header {
+:deep(.guide-dialog) {
+    border-radius: 8px;
+    background: var(--bg-page);
+    overflow: hidden;
+    box-shadow: 0 22px 56px rgba(15, 23, 42, 0.2);
+
+    .el-dialog__header {
         margin-bottom: 0;
-        padding: 18px 20px 14px;
+        padding: 18px 24px 14px;
         border-bottom: 1px solid var(--border-light);
         color: var(--text-primary);
         font-size: 16px;
         font-weight: 700;
+        background:
+            linear-gradient(90deg, rgba(22, 119, 255, 0.08), transparent 52%),
+            var(--bg-card);
     }
 
-    .el-drawer__body {
+    .el-dialog__title {
+        color: var(--text-primary);
+        font-size: 17px;
+        font-weight: 700;
+    }
+
+    .el-dialog__headerbtn {
+        top: 2px;
+    }
+
+    .el-dialog__body {
         padding: 0;
         background: var(--bg-page);
     }
 }
 
-.guide-drawer-body {
-    padding: 18px 20px 24px;
+.guide-dialog-body {
+    max-height: calc(90vh - 64px);
+    padding: 20px 24px 26px;
     display: grid;
-    gap: 16px;
-}
-
-.guide-hero,
-.guide-section {
-    border: 1px solid var(--border-light);
-    border-radius: 14px;
-    background: var(--bg-card);
+    gap: 18px;
+    overflow-y: auto;
 }
 
 .guide-hero {
-    padding: 18px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 22px;
+    background:
+        linear-gradient(135deg, rgba(22, 119, 255, 0.12), transparent 45%),
+        linear-gradient(180deg, rgba(245, 158, 11, 0.08), transparent 70%),
+        var(--bg-card);
 
     h3 {
         margin: 6px 0 10px;
         color: var(--text-primary);
-        font-size: 20px;
+        font-size: 24px;
         line-height: 1.35;
     }
 }
@@ -1457,10 +1772,63 @@ function handleCommand(command: string) {
 .guide-hero-desc {
     color: var(--text-secondary);
     line-height: 1.7;
+    max-width: 920px;
+}
+
+.guide-flow {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.guide-flow-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+    padding: 13px;
+    border: 1px solid var(--border-color-light);
+    border-radius: 8px;
+    background: var(--bg-card);
+
+    strong {
+        display: block;
+        color: var(--text-primary);
+        font-size: 14px;
+        line-height: 1.35;
+    }
+
+    p {
+        margin-top: 3px;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 1.5;
+    }
+}
+
+.guide-flow-icon {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--primary-contrast);
+    font-size: 12px;
+    font-weight: 800;
+    flex-shrink: 0;
+}
+
+.guide-content-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+    gap: 18px;
 }
 
 .guide-section {
-    padding: 16px;
+    min-width: 0;
 }
 
 .guide-section-head {
@@ -1468,6 +1836,8 @@ function handleCommand(command: string) {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color-light);
 }
 
 .guide-section-title {
@@ -1477,17 +1847,16 @@ function handleCommand(command: string) {
 }
 
 .guide-step-list,
-.guide-menu-list,
-.guide-note-list {
+.guide-note-list,
+.guide-faq-list {
     display: grid;
     gap: 10px;
 }
 
 .guide-step-card,
-.guide-menu-card,
 .guide-note-item {
     border: 1px solid var(--border-light);
-    border-radius: 12px;
+    border-radius: 8px;
     background: var(--surface-highlight);
 }
 
@@ -1495,6 +1864,14 @@ function handleCommand(command: string) {
     display: flex;
     gap: 12px;
     padding: 14px;
+    transition:
+        border-color 0.18s ease,
+        background-color 0.18s ease;
+
+    &:hover {
+        border-color: var(--primary-light-5);
+        background: var(--bg-card);
+    }
 }
 
 .guide-step-index {
@@ -1503,7 +1880,7 @@ function handleCommand(command: string) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 11px;
+    border-radius: 8px;
     background: var(--primary-light);
     color: var(--primary);
     font-size: 13px;
@@ -1511,8 +1888,7 @@ function handleCommand(command: string) {
     flex-shrink: 0;
 }
 
-.guide-step-copy,
-.guide-menu-main {
+.guide-step-copy {
     min-width: 0;
 
     strong {
@@ -1527,25 +1903,6 @@ function handleCommand(command: string) {
         color: var(--text-secondary);
         line-height: 1.65;
     }
-}
-
-.guide-menu-card {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px;
-}
-
-.guide-menu-tip {
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: var(--primary-lighter);
-    color: var(--primary);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.2;
-    flex-shrink: 0;
 }
 
 .guide-note-item {
@@ -1573,6 +1930,294 @@ function handleCommand(command: string) {
                 rgba(255, 77, 79, 0.06)
             ),
             var(--bg-card);
+    }
+}
+
+.guide-table-wrap {
+    overflow: hidden;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: var(--bg-card);
+}
+
+.guide-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+
+    th,
+    td {
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--border-color-light);
+        text-align: left;
+        vertical-align: top;
+        line-height: 1.65;
+    }
+
+    th {
+        background: var(--table-header-bg);
+        color: var(--text-primary);
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    th:first-child {
+        width: 22%;
+    }
+
+    th:nth-child(2) {
+        width: 18%;
+    }
+
+    th:nth-child(3) {
+        width: 31%;
+    }
+
+    tbody tr {
+        transition: background-color 0.16s ease;
+
+        &:hover {
+            background: var(--bg-hover);
+        }
+
+        &:last-child td {
+            border-bottom: 0;
+        }
+    }
+
+    td {
+        color: var(--text-secondary);
+        font-size: 13px;
+    }
+
+    td:first-child {
+        color: var(--text-primary);
+
+        strong,
+        span {
+            display: block;
+        }
+
+        strong {
+            font-size: 14px;
+            line-height: 1.45;
+        }
+
+        span {
+            margin-top: 3px;
+            color: var(--text-tertiary);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+    }
+}
+
+.guide-feature-groups {
+    display: grid;
+    gap: 18px;
+}
+
+.guide-feature-group {
+    display: grid;
+    gap: 12px;
+}
+
+.guide-feature-group-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background:
+        linear-gradient(90deg, var(--primary-lighter), transparent 62%),
+        var(--bg-card);
+
+    strong {
+        display: block;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 1.4;
+    }
+
+    p {
+        margin-top: 4px;
+        color: var(--text-secondary);
+        line-height: 1.65;
+    }
+
+    > span {
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--bg-card);
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: nowrap;
+        border: 1px solid var(--primary-light-7);
+    }
+}
+
+.guide-screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: stretch;
+}
+
+.guide-screenshot-card {
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: var(--surface-highlight);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    transition:
+        border-color 0.18s ease,
+        box-shadow 0.18s ease;
+
+    &:hover {
+        border-color: var(--primary-light-5);
+        box-shadow: var(--shadow-md);
+    }
+
+    img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        object-position: top left;
+        border-bottom: 1px solid var(--border-light);
+        background: var(--bg-card);
+    }
+
+    figcaption {
+        display: grid;
+        gap: 3px;
+        min-height: 74px;
+        padding: 11px 12px 12px;
+        align-content: start;
+        flex: 1;
+
+        strong {
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.35;
+        }
+
+        span {
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+    }
+}
+
+.guide-faq-item {
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: var(--bg-card);
+    overflow: hidden;
+    transition:
+        border-color 0.16s ease,
+        box-shadow 0.16s ease;
+
+    &[open] {
+        border-color: var(--primary-light-5);
+        box-shadow: var(--shadow-sm);
+    }
+
+    summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 50px;
+        padding: 12px 14px;
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.45;
+        list-style: none;
+    }
+
+    summary::-webkit-details-marker {
+        display: none;
+    }
+
+    summary::after {
+        content: "";
+        width: 9px;
+        height: 9px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-right: 2px solid var(--text-tertiary);
+        border-bottom: 2px solid var(--text-tertiary);
+        transform: rotate(45deg) translateY(-2px);
+        transition:
+            border-color 0.16s ease,
+            transform 0.16s ease;
+        flex-shrink: 0;
+    }
+
+    &[open] summary::after {
+        border-color: var(--primary);
+        transform: rotate(225deg) translateY(-2px);
+    }
+}
+
+.guide-faq-question {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.guide-faq-mark,
+.guide-faq-answer-mark {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 800;
+    flex-shrink: 0;
+}
+
+.guide-faq-mark {
+    background: var(--primary-lighter);
+    color: var(--primary);
+}
+
+.guide-faq-answer {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0 14px 14px;
+    padding: 12px;
+    border: 1px solid var(--border-color-light);
+    border-radius: 8px;
+    background: var(--surface-highlight);
+}
+
+.guide-faq-answer-mark {
+    background: var(--success-light);
+    color: var(--success);
+}
+
+.guide-faq-answer {
+    p {
+        margin: 0;
+        color: var(--text-secondary);
+        line-height: 1.75;
     }
 }
 
@@ -1648,17 +2293,40 @@ function handleCommand(command: string) {
         padding: 10px;
     }
 
-    .guide-drawer-body {
-        padding: 14px;
+    :deep(.guide-dialog) {
+        width: 96vw !important;
+        margin-top: 2vh !important;
     }
 
-    .guide-hero,
-    .guide-section {
+    .guide-dialog-body {
         padding: 14px;
+        max-height: calc(96vh - 58px);
     }
 
-    .guide-menu-card {
+    .guide-hero {
+        padding: 14px;
+
+        h3 {
+            font-size: 18px;
+        }
+    }
+
+    .guide-flow,
+    .guide-content-grid,
+    .guide-screenshot-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .guide-feature-group-head {
         flex-direction: column;
+    }
+
+    .guide-table-wrap {
+        overflow-x: auto;
+    }
+
+    .guide-table {
+        min-width: 780px;
     }
 }
 

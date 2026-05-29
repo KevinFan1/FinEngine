@@ -577,6 +577,7 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
     json.dumps(detail_rows[0].raw_row)
     assert task.result_summary == {
         "总行数": 1,
+        "成功行数": 1,
         "匹配明细数": 2,
         "未匹配行数": 0,
         "失败行数": 0,
@@ -742,6 +743,7 @@ async def test_execute_task_records_row_error_reasons_without_blank_detail_rows(
     assert task.matched_rows == 0
     assert task.unmatched_rows == 1
     assert task.failed_rows == 1
+    assert task.result_summary["成功行数"] == 0
     assert len(detail_rows) == 0
     assert "第 2 行：未匹配分类" in (task.error_message or "")
     assert "第 3 行：取数字段 [订单实付应结] 金额无法解析" in (task.error_message or "")
