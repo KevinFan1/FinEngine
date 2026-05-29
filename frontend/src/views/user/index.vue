@@ -2,11 +2,6 @@
   <div class="page-container">
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
-      <SearchCardIntro
-        kicker="用户工作台"
-        title="先筛选用户，再查看或维护账号"
-        tip="支持按姓名、手机号和组织快速定位用户"
-      />
       <el-form :model="searchForm" inline>
         <el-form-item label="搜索">
           <el-input
@@ -334,7 +329,6 @@ import { getAllOrganizations, type Organization } from '@/api/organization'
 import { formatDateTime, getRoleLabel } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
-import SearchCardIntro from '@/components/SearchCardIntro.vue'
 import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 

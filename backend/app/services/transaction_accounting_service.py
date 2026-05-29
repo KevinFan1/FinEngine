@@ -47,6 +47,7 @@ from app.services.audit_service import AuditService
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
+from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
@@ -1531,7 +1532,11 @@ class TransactionAccountingService:
         await db.flush()
 
         try:
-            header, data_rows = TransactionAccountingService._load_douyin_dongzhang_rows_from_oss(upload_file)
+            period_header = await resolve_upload_period_header(db, upload_file.platform_code, "动账")
+            header, data_rows = TransactionAccountingService._load_douyin_dongzhang_rows_from_oss(
+                upload_file,
+                period_header=period_header,
+            )
             rules = await TransactionAccountingService._load_rule_candidates(db, platform_code=upload_file.platform_code)
             if not rules:
                 raise ValueError("未配置启用的动账核算规则")
@@ -1759,12 +1764,24 @@ class TransactionAccountingService:
         ]
 
     @staticmethod
-    def _load_douyin_dongzhang_rows_from_oss(upload_file: TransactionUploadFile) -> tuple[list[str], list[dict[str, object]]]:
+    def _load_douyin_dongzhang_rows_from_oss(
+        upload_file: TransactionUploadFile,
+        *,
+        period_header: str | None = None,
+    ) -> tuple[list[str], list[dict[str, object]]]:
         if upload_file.platform_code != "douyin":
             raise ValueError("动账核算 v1 仅支持抖音动账")
         suffix = Path(upload_file.original_name).suffix or ".xlsx"
         with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
             oss_service.download_to_temp(upload_file.oss_key, tmp.name)
+            upload_period = extract_upload_period(
+                tmp.name,
+                platform_code=upload_file.platform_code,
+                type_code="动账",
+                header_name=period_header,
+            )
+            upload_file.accounting_year = upload_period.year
+            upload_file.accounting_month = upload_period.month
             with open_tabular_rows(tmp.name) as rows:
                 if rows is None:
                     raise ValueError("无法打开表格文件")

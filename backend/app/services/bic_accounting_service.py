@@ -24,6 +24,7 @@ from app.services.partition_service import BIC_SOURCE_PARTITION, ensure_month_pa
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
+from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
 from app.utils.query_filters import datetime_range_filters, resolve_org_ids
@@ -692,6 +693,15 @@ class BicAccountingService:
             suffix = Path(upload_file.original_name).suffix or ".xlsx"
             with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
                 oss_service.download_to_temp(upload_file.oss_key, tmp.name)
+                period_header = await resolve_upload_period_header(db, upload_file.platform_code, "bic")
+                upload_period = extract_upload_period(
+                    tmp.name,
+                    platform_code=upload_file.platform_code,
+                    type_code="bic",
+                    header_name=period_header,
+                )
+                upload_file.accounting_year = upload_period.year
+                upload_file.accounting_month = upload_period.month
                 summary = await BicAccountingService.persist_task_result(
                     db,
                     task=task,
@@ -749,7 +759,7 @@ class BicAccountingService:
         shop_name: str,
     ) -> dict:
         if upload_file.accounting_year is None or upload_file.accounting_month is None:
-            raise ValueError("BIC文件缺少文件名年月")
+            raise ValueError("BIC文件缺少所属年月")
         shop_name = shop_name or upload_file.shop_name or ""
         if not shop_name:
             raise ValueError("BIC文件缺少店铺名称")

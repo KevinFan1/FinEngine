@@ -61,6 +61,26 @@ def test_infer_file_type_supports_other_service_from_filename() -> None:
     assert _infer_file_type(upload_file) == "其他服务款"
 
 
+def test_infer_file_type_supports_new_filename_without_period() -> None:
+    upload_file = SimpleNamespace(
+        id=8,
+        original_name="BIC_抖音旗舰店明细.xlsx",
+        parsed_type=None,
+    )
+
+    assert _infer_file_type(upload_file) == "bic"
+
+
+def test_infer_file_type_supports_new_gmv_alias() -> None:
+    upload_file = SimpleNamespace(
+        id=9,
+        original_name="GMV其他服务款_小红书店铺明细.xlsx",
+        parsed_type=None,
+    )
+
+    assert _infer_file_type(upload_file) == "其他服务款"
+
+
 def test_infer_file_type_supports_xlsm_from_filename() -> None:
     upload_file = SimpleNamespace(
         id=5,

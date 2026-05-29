@@ -18,6 +18,7 @@ from app.services.quota_service import QuotaService
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
+from app.services.upload_period_service import resolve_upload_period_header
 
 
 def _format_file_size(bytes_size: int) -> str:
@@ -142,6 +143,15 @@ class UploadService:
             )
         elif data.detected_platform:
             platform_profile = await resolve_platform_profile(db, data.detected_platform)
+
+        if data.parsed_month is not None and (data.parsed_month < 1 or data.parsed_month > 12):
+            raise ValueError("所属月份不正确")
+        if not await resolve_upload_period_header(
+            db,
+            platform_profile.source_platform_code if platform_profile else data.detected_platform,
+            data.parsed_type,
+        ):
+            raise ValueError(f"未配置所属时间规则：平台 [{data.detected_platform or '-'}]，类别 [{data.parsed_type or '-'}]")
 
         upload_file = UploadFile(
             batch_id=batch_id,

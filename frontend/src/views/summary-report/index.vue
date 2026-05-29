@@ -1,12 +1,6 @@
 <template>
     <div class="page-container">
         <el-card shadow="never" class="search-card summary-search-card">
-            <SearchCardIntro
-                kicker="动账报表工作台"
-                title="先汇总查看，再进入明细核对"
-                tip="汇总报表按核算年月聚合，导出文件在下载中心生成"
-            />
-
             <el-form :model="searchForm" inline class="summary-filter-form">
                 <el-form-item label="核算年月">
                     <el-date-picker
@@ -506,7 +500,6 @@ import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import SummaryDetailDrawer, {
     type SummaryDetailContext,

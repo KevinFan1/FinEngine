@@ -11,15 +11,14 @@ export interface ParsedFileName {
 
 /**
  * Parse financial file name.
- * Expected format: {YY|YYYY年MM月}_{性质}_{店铺名称}.xlsx/.xlsm/.xls/.csv
+ * Expected format: {性质}_{店铺名称}.xlsx/.xlsm/.xls/.csv
  * Examples:
- *   26年02月_动账_宝蕴天工.xlsx
- *   26年02月_gmv_快手店铺.xlsx
- *   2026年02月_动账_宝蕴天工.xlsx
- *   26年2月_bic_宝蕴天工.xlsx
- *   26年02月_运费险_宝蕴天工.xlsx
- *   26年02月_订单_快手店铺.xlsx
- *   26年02月_其他服务款_小红书店铺.xlsx
+ *   动账_宝蕴天工明细.xlsx
+ *   gmv_快手店铺明细.csv
+ *   BIC_宝蕴天工明细.xlsx
+ *   运费险_宝蕴天工明细.xlsx
+ *   订单_快手店铺明细.xlsx
+ *   其他服务款_小红书店铺明细.xlsx
  */
 export function parseFileName(filename: string): ParsedFileName | null {
     // Remove one or more trailing spreadsheet extensions, e.g. .xlsx.xlsx
@@ -28,24 +27,48 @@ export function parseFileName(filename: string): ParsedFileName | null {
         "",
     );
 
-    // Match pattern: YY/YYYY年M(M)月_性质_店铺
-    const regex = /^(\d{2}|\d{4})年(\d{1,2})月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _](.+)$/i;
-    const match = nameWithoutExt.match(regex);
+    const legacyRegex = /^(\d{2}|\d{4})年(\d{1,2})月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _](.+)$/i;
+    const legacyMatch = nameWithoutExt.match(legacyRegex);
+    if (legacyMatch) {
+        const year = legacyMatch[1].length === 2 ? 2000 + parseInt(legacyMatch[1], 10) : parseInt(legacyMatch[1], 10);
+        const month = parseInt(legacyMatch[2], 10);
+        if (month < 1 || month > 12) return null;
+        const type = normalizeUploadType(legacyMatch[3]);
+        const shop = cleanParsedShopName(legacyMatch[4]);
+        if (!shop) return null;
+        return { year, month, type, shop };
+    }
 
+    const regex = /^(动账|gmv|bic|BIC|运费险|订单|其他服务款|GMV订单货款|GMV其他服务款|退货费用及其他)[ _](.+)$/i;
+    const match = nameWithoutExt.match(regex);
     if (!match) return null;
 
-    const year = match[1].length === 2 ? 2000 + parseInt(match[1], 10) : parseInt(match[1], 10);
-    const month = parseInt(match[2], 10);
-    if (month < 1 || month > 12) return null;
-
-    const lowerType = match[3].toLowerCase();
-    const type = lowerType === "bic" || lowerType === "gmv" ? lowerType : match[3];
-    const shop = match[4]
-        .replace(/(?:\.(?:xlsx|xlsm|xls|csv))+$/i, "")
-        .trim();
+    const type = normalizeUploadType(match[1]);
+    const shop = cleanParsedShopName(match[2]);
     if (!shop) return null;
 
-    return { year, month, type, shop };
+    return { year: 0, month: 0, type, shop };
+}
+
+function normalizeUploadType(type: string): string {
+    const trimmed = type.trim();
+    const aliases: Record<string, string> = {
+        BIC: "bic",
+        GMV: "gmv",
+        GMV订单货款: "gmv",
+        GMV其他服务款: "其他服务款",
+        退货费用及其他: "动账",
+    };
+    if (aliases[trimmed]) return aliases[trimmed];
+    const lowerType = trimmed.toLowerCase();
+    return lowerType === "bic" || lowerType === "gmv" ? lowerType : trimmed;
+}
+
+function cleanParsedShopName(value: string): string {
+    return value
+        .replace(/(?:\.(?:xlsx|xlsm|xls|csv))+$/i, "")
+        .replace(/明细$/i, "")
+        .trim();
 }
 
 /**

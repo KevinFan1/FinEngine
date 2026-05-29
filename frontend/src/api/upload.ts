@@ -19,8 +19,8 @@ export interface UploadFileRecord {
     oss_key: string;
     platform: string;
     status: string;
-    parsed_year: number;
-    parsed_month: number;
+    parsed_year?: number | null;
+    parsed_month?: number | null;
     parsed_type: string;
     parsed_shop: string;
     created_at: string;
@@ -86,8 +86,8 @@ export function uploadCallback(data: {
     oss_key: string;
     file_size: number;
     file_hash?: string;
-    parsed_year: number;
-    parsed_month: number;
+    parsed_year?: number | null;
+    parsed_month?: number | null;
     parsed_type: string;
     parsed_shop: string;
     detected_platform: string;

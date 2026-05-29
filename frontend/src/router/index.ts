@@ -4,6 +4,8 @@ import {
     type RouteRecordRaw,
 } from "vue-router";
 import { useUserStore } from "@/stores/user";
+import { forceLogout } from "@/utils/authSession";
+import { getStoredAuthToken, isAuthTokenExpired } from "@/utils/authToken";
 
 const routes: RouteRecordRaw[] = [
     {
@@ -63,6 +65,16 @@ const routes: RouteRecordRaw[] = [
                 meta: {
                     title: "动账重分类字典",
                     icon: "Collection",
+                    roles: ["superadmin"],
+                },
+            },
+            {
+                path: "file-specs",
+                name: "FileSpecs",
+                component: () => import("@/views/file-specs/index.vue"),
+                meta: {
+                    title: "文件规格配置",
+                    icon: "Setting",
                     roles: ["superadmin"],
                 },
             },
@@ -188,8 +200,8 @@ const router = createRouter({
 
 // Navigation guards
 router.beforeEach((to, _from, next) => {
-    const rawToken = localStorage.getItem("token");
-    const token = rawToken && rawToken !== "undefined" ? rawToken : null;
+    const token = getStoredAuthToken();
+    const tokenExpired = Boolean(token && isAuthTokenExpired(token));
 
     let userInfo: any = null;
     try {
@@ -207,10 +219,13 @@ router.beforeEach((to, _from, next) => {
 
     // Public routes (login page)
     if (to.meta.requiresAuth === false) {
-        if (token) {
+        if (token && !tokenExpired) {
             // Already logged in, redirect to dashboard
             next("/dashboard");
         } else {
+            if (tokenExpired) {
+                forceLogout({ redirect: false, notify: false, broadcast: false });
+            }
             next();
         }
         return;
@@ -218,7 +233,13 @@ router.beforeEach((to, _from, next) => {
 
     // Protected routes - check authentication
     if (!token) {
-        next("/login");
+        next({ path: "/login", query: { redirect: to.fullPath } });
+        return;
+    }
+
+    if (tokenExpired) {
+        forceLogout({ redirect: false, notify: false, broadcast: true });
+        next({ path: "/login", query: { redirect: to.fullPath } });
         return;
     }
 

@@ -8,7 +8,8 @@ import {
 import type { LoginParams } from "@/api/auth";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import router from "@/router";
-import { clearAuthStorage, forceLogout, subscribeAuthLogout } from "@/utils/authSession";
+import { forceLogout, subscribeAuthLogout } from "@/utils/authSession";
+import { clearAuthStorage, getStoredAuthToken } from "@/utils/authToken";
 
 export interface UserInfo {
     id: number;
@@ -26,8 +27,7 @@ export interface UserInfo {
 }
 
 function safeGetToken(): string | null {
-    const raw = localStorage.getItem("token");
-    return raw && raw !== "undefined" ? raw : null;
+    return getStoredAuthToken();
 }
 
 function safeGetUserInfo(): UserInfo | null {
@@ -85,7 +85,8 @@ export const useUserStore = defineStore("user", () => {
             localStorage.setItem("userInfo", JSON.stringify(user));
 
             ElMessage.success("登录成功");
-            await router.push("/dashboard");
+            const redirect = router.currentRoute.value.query.redirect;
+            await router.push(typeof redirect === "string" ? redirect : "/dashboard");
         } catch (error) {
             // Clean up on failure
             token.value = null;

@@ -1,16 +1,6 @@
 <template>
     <div class="page-container">
         <el-card shadow="never" class="search-card summary-search-card">
-            <SearchCardIntro
-                kicker="汇总明细工作台"
-                title="先筛选，再勾选，再导出"
-                :tip="
-                    route.query.from === 'summary-report'
-                        ? '已承接汇总报表筛选条件'
-                        : '业务年月看实际归属，核算年月看文件账期'
-                "
-            />
-
             <el-form :model="searchForm" inline class="summary-filter-form">
                 <el-form-item label="业务年月">
                     <el-date-picker
@@ -581,7 +571,6 @@ import {
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import DouyinDongzhangDetailDrawer, {

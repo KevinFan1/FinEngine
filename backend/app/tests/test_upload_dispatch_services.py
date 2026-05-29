@@ -513,16 +513,25 @@ class _UploadDispatchSession:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("parsed_type", "expected_transaction_calls", "expected_bic_calls"),
+    (
+        "parsed_type",
+        "parsed_year",
+        "parsed_month",
+        "expected_transaction_calls",
+        "expected_bic_calls",
+    ),
     [
-        ("动账", 1, 0),
-        ("bic", 0, 1),
-        ("订单", 0, 0),
+        ("动账", 2026, 2, 1, 0),
+        ("bic", 2026, 2, 0, 1),
+        ("订单", 2026, 2, 0, 0),
+        ("订单", None, None, 0, 0),
     ],
 )
 async def test_upload_service_dispatches_shared_upload_to_independent_flows(
     monkeypatch: pytest.MonkeyPatch,
     parsed_type: str,
+    parsed_year: int | None,
+    parsed_month: int | None,
     expected_transaction_calls: int,
     expected_bic_calls: int,
 ) -> None:
@@ -607,12 +616,16 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
 
     callback_data = upload_service_module.UploadFileCallback(
         batch_id=1,
-        original_name=f"26年02月_{parsed_type}_抖音旗舰店.xlsx",
+        original_name=(
+            f"26年02月_{parsed_type}_抖音旗舰店.xlsx"
+            if parsed_year and parsed_month
+            else f"{parsed_type}_抖音旗舰店明细.xlsx"
+        ),
         oss_key="user-upload/test/current.xlsx",
         file_size=4096,
         file_hash="hash",
-        parsed_year=2026,
-        parsed_month=2,
+        parsed_year=parsed_year,
+        parsed_month=parsed_month,
         parsed_type=parsed_type,
         parsed_shop="抖音旗舰店",
         detected_platform="douyin",
@@ -629,6 +642,8 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
         item for item in session.added if isinstance(item, ProcessingTask)
     )
     assert upload_file.id is not None
+    assert upload_file.parsed_year == parsed_year
+    assert upload_file.parsed_month == parsed_month
     assert generic_task.file_id == upload_file.id
     assert transaction_calls == [upload_file.id] * expected_transaction_calls
     assert bic_calls == [upload_file.id] * expected_bic_calls

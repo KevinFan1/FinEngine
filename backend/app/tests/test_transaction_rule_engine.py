@@ -333,6 +333,12 @@ class _FakeResult:
     def scalars(self) -> _FakeScalars:
         return _FakeScalars(self._values)
 
+    def scalar_one_or_none(self):
+        return self._values[0] if self._values else None
+
+    def first(self):
+        return (self._values[0],) if self._values else None
+
 
 class _TransactionAccountingSession:
     def __init__(
@@ -544,7 +550,7 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
     monkeypatch.setattr(
         TransactionAccountingService,
         "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file: (["动账时间", "动账方向", "备注", "订单实付应结", "实际平台补贴"], [row])),
+        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "备注", "订单实付应结", "实际平台补贴"], [row])),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -642,7 +648,7 @@ async def test_execute_task_aggregates_detail_rows_during_processing(monkeypatch
     monkeypatch.setattr(
         TransactionAccountingService,
         "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file: (["动账时间", "动账方向", "备注", "订单实付应结"], rows)),
+        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "备注", "订单实付应结"], rows)),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -720,7 +726,7 @@ async def test_execute_task_records_row_error_reasons_without_blank_detail_rows(
     monkeypatch.setattr(
         TransactionAccountingService,
         "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file: (["动账时间", "动账方向", "动账场景", "备注", "动账金额", "订单实付应结"], rows)),
+        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "动账场景", "备注", "动账金额", "订单实付应结"], rows)),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -793,7 +799,7 @@ async def test_execute_task_rolls_back_before_persisting_failed_state_after_flus
     monkeypatch.setattr(
         TransactionAccountingService,
         "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file: (["动账时间", "动账方向", "备注", "订单实付应结"], [row])),
+        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "备注", "订单实付应结"], [row])),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -847,7 +853,7 @@ async def test_execute_task_marks_source_file_expired_and_preserves_previous_res
     monkeypatch.setattr(
         TransactionAccountingService,
         "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file: (_ for _ in ()).throw(OSSObjectUnavailableError("missing"))),
+        staticmethod(lambda _upload_file, period_header=None: (_ for _ in ()).throw(OSSObjectUnavailableError("missing"))),
     )
 
     result = await TransactionAccountingService.execute_task(db, task_id=10)  # type: ignore[arg-type]

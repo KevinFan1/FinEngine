@@ -14,6 +14,7 @@ from celery.signals import worker_process_shutdown
 
 from app.core.config import settings
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error
+from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import normalize_positive_summary_fields, safe_str
 
 celery_app = Celery("finengine", broker=settings.CELERY_REDIS_URL, backend=settings.CELERY_REDIS_URL)
@@ -47,7 +48,10 @@ celery_app.conf.imports = (
 logger = logging.getLogger("finengine.worker")
 _worker_loop: asyncio.AbstractEventLoop | None = None
 SUPPORTED_TEMP_SUFFIXES = {".xlsx", ".xlsm", ".xls", ".csv"}
-FILENAME_TYPE_PATTERN = re.compile(r"^\d{2,4}年\d{1,2}月[ _](动账|gmv|bic|运费险|订单|其他服务款)[ _].+\.(?:xlsx|xlsm|xls|csv)$", re.IGNORECASE)
+FILENAME_TYPE_PATTERN = re.compile(
+    r"^(?:\d{2,4}年\d{1,2}月[ _])?(动账|gmv|bic|BIC|运费险|订单|其他服务款|GMV订单货款|GMV其他服务款|退货费用及其他)[ _].+\.(?:xlsx|xlsm|xls|csv)$",
+    re.IGNORECASE,
+)
 
 
 def _get_worker_loop() -> asyncio.AbstractEventLoop:
@@ -310,6 +314,15 @@ def _normalize_file_type(raw_type: str | None) -> str | None:
     if not raw_type:
         return None
     stripped = raw_type.strip()
+    alias_map = {
+        "BIC": "bic",
+        "GMV": "gmv",
+        "GMV订单货款": "gmv",
+        "GMV其他服务款": "其他服务款",
+        "退货费用及其他": "动账",
+    }
+    if stripped in alias_map:
+        return alias_map[stripped]
     lower_type = stripped.lower()
     return lower_type if lower_type in {"bic", "gmv"} else stripped
 
@@ -626,6 +639,33 @@ async def _process_file_platform_async(
             # 3. Download file from OSS
             with tempfile.NamedTemporaryFile(suffix=_infer_temp_suffix(upload_file, oss_key), delete=True) as tmp:
                 oss_service.download_to_temp(oss_key, tmp.name)
+
+                period_header = await resolve_upload_period_header(db, platform_code, file_type)
+                upload_period = extract_upload_period(
+                    tmp.name,
+                    platform_code=platform_code,
+                    type_code=file_type,
+                    header_name=period_header,
+                )
+                source_year = upload_period.year
+                source_month = upload_period.month
+                if upload_file:
+                    if (
+                        upload_file.parsed_year is not None
+                        and upload_file.parsed_month is not None
+                        and (upload_file.parsed_year, upload_file.parsed_month) != (source_year, source_month)
+                    ):
+                        logger.warning(
+                            "上传年月和文件所属时间列不一致，使用文件内容 file_id=%s stored=%s-%s extracted=%s-%s header=%s",
+                            upload_file.id,
+                            upload_file.parsed_year,
+                            upload_file.parsed_month,
+                            source_year,
+                            source_month,
+                            upload_period.header,
+                        )
+                    upload_file.parsed_year = source_year
+                    upload_file.parsed_month = source_month
 
                 # 4. Load category dictionary (best-effort)
                 platform_stmt = select(Platform).where(Platform.code == profile.processor_code, Platform.is_deleted.is_(False))

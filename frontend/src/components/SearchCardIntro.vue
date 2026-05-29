@@ -1,8 +1,8 @@
 <template>
     <div class="search-card-head">
         <div>
-            <p class="search-card-kicker">{{ kicker }}</p>
-            <h2 class="search-card-title">{{ title }}</h2>
+            <p v-if="showKicker" class="search-card-kicker">{{ kicker }}</p>
+            <h2 class="search-card-title">{{ heading }}</h2>
         </div>
         <div v-if="tip" class="search-card-tip">
             <span>{{ tip }}</span>
@@ -11,13 +11,18 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
+
 defineOptions({ name: "SearchCardIntro" });
 
-defineProps<{
-    kicker: string;
-    title: string;
+const props = defineProps<{
+    kicker?: string;
+    title?: string;
     tip?: string;
 }>();
+
+const heading = computed(() => props.title || props.kicker || "");
+const showKicker = computed(() => Boolean(props.kicker && props.title));
 </script>
 
 <style scoped lang="scss">

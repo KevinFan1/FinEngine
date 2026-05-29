@@ -25,6 +25,33 @@ from app.tasks.processors.xiaohongshu import (
 )
 from sqlalchemy import select
 
+UPLOAD_PERIOD_HEADERS: dict[tuple[str, str], str] = {
+    ("douyin", "动账"): "动账时间",
+    ("douyin", "运费险"): "结算时间",
+    ("douyin", "bic"): "结算时间",
+    ("douyin", "订单"): "订单提交时间",
+    ("xiaohongshu", "动账"): "结算时间",
+    ("xiaohongshu", "运费险"): "结算时间",
+    ("xiaohongshu", "gmv"): "结算时间",
+    ("xiaohongshu", "其他服务款"): "结算时间",
+    ("xiaohongshu", "bic"): "结算时间",
+    ("xiaohongshu", "订单"): "订单创建时间",
+    ("weixin_video", "动账"): "记账时间",
+    ("weixin_video", "bic"): "结算时间",
+    ("weixin_video", "运费险"): "开始时间",
+    ("weixin_video", "订单"): "订单下单时间",
+    ("kuaishou", "订单"): "订单创建时间",
+    ("kuaishou", "gmv"): "实际结算时间",
+    ("kuaishou", "运费险"): "生效时间",
+    ("kuaishou", "动账"): "入账时间",
+    ("qianniu", "动账"): "数据创建时间",
+    ("qianniu", "订单"): "订单创建时间",
+    ("taobao", "动账"): "数据创建时间",
+    ("taobao", "订单"): "订单创建时间",
+    ("alipay", "动账"): "入账时间",
+    ("alipay", "订单"): "创建时间",
+}
+
 # ── Platform definitions ─────────────────────────────────────────────────────
 PLATFORMS = [
     {"code": "douyin", "name": "抖音", "sort_order": 1, "parent_code": "douyin", "processor_code": "douyin", "order_scope_code": "douyin"},
@@ -363,6 +390,7 @@ async def seed():
                     name=fs["name"],
                     headers=fs["headers"],
                     match_threshold=fs["match_threshold"],
+                    upload_period_header=UPLOAD_PERIOD_HEADERS.get((fs["platform_code"], fs["type_code"])),
                     status=1,
                 )
                 db.add(spec)
@@ -372,6 +400,7 @@ async def seed():
                 spec.headers = fs["headers"]
                 spec.match_threshold = fs["match_threshold"]
                 spec.name = fs["name"]
+                spec.upload_period_header = UPLOAD_PERIOD_HEADERS.get((fs["platform_code"], fs["type_code"]))
                 spec.status = 1
                 await db.flush()
                 print(f"[=] File spec exists: id={spec.id} name={fs['name']} — updated")

@@ -1,5 +1,6 @@
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import router from "@/router";
+import { clearAuthStorage } from "@/utils/authToken";
 
 const LOGOUT_EVENT = "finengine:auth-logout";
 const LOGOUT_STORAGE_KEY = "finengine:auth-logout-event";
@@ -22,11 +23,6 @@ type ForceLogoutOptions = {
 let initialized = false;
 let authChannel: BroadcastChannel | null = null;
 let lastNotifyAt = 0;
-
-export function clearAuthStorage() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("userInfo");
-}
 
 export function subscribeAuthLogout(handler: (payload: LogoutPayload) => void) {
     const listener = (event: Event) => {
@@ -78,7 +74,14 @@ function applyLogout(payload: LogoutPayload, broadcast: boolean) {
     }
 
     if (payload.redirect !== false && router.currentRoute.value.path !== "/login") {
-        router.push("/login");
+        const current = router.currentRoute.value;
+        router.push({
+            path: "/login",
+            query:
+                current.fullPath && current.fullPath !== "/"
+                    ? { redirect: current.fullPath }
+                    : undefined,
+        });
     }
 
     if (broadcast) {

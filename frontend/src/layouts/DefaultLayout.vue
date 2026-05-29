@@ -531,6 +531,12 @@ const menuItems: MenuItem[] = [
                 roles: ["superadmin"],
             },
             {
+                path: "/file-specs",
+                title: "文件规格配置",
+                icon: Setting,
+                roles: ["superadmin"],
+            },
+            {
                 path: "/transaction-major-categories",
                 title: "资金大分类",
                 icon: CollectionTag,

@@ -2,11 +2,6 @@
     <div class="page-container">
         <!-- Filter bar -->
         <el-card shadow="never" class="search-card">
-            <SearchCardIntro
-                kicker="任务工作台"
-                title="先筛选任务，再查看处理结果"
-                tip="支持按年月、平台、店铺、性质和状态快速收敛范围"
-            />
             <el-form :model="searchForm" inline>
                 <el-form-item label="年月">
                     <el-date-picker
@@ -656,7 +651,6 @@ import PlatformBadge from "@/components/PlatformBadge.vue";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 
 const userStore = useUserStore();

@@ -18,29 +18,25 @@
                             {{
                                 embedded
                                     ? "抽屉里保留核心规则，先命名再上传即可。"
-                                    : "先按规则命名，系统会用文件名识别年月、性质和店铺。"
+                                    : "先按规则命名，系统会从文件名识别性质和店铺，再在任务处理时从指定时间列提取所属年月。"
                             }}
                         </p>
                     </div>
                     <div class="rule-code-line" aria-label="标准文件命名格式">
-                        <span class="rule-token rule-token--date"
-                            >YY年MM月</span
-                        >
-                        <span class="rule-separator">_</span>
                         <span class="rule-token rule-token--type">性质</span>
                         <span class="rule-separator">_</span>
                         <span class="rule-token rule-token--shop"
-                            >店铺名称</span
+                            >店铺名称明细</span
                         >
                         <span class="rule-extension">.xlsx / .xls / .csv</span>
                     </div>
                     <div class="rule-meta">
                         <p class="rule-example">
-                            示例：<code>26年02月_动账_抖音旗舰店.xlsx</code>
+                            示例：<code>动账_抖音旗舰店明细.xlsx</code>
                         </p>
                         <div class="rule-hint-list">
-                            <span>年月支持 26年 或 2026年</span>
-                            <span>月份支持 2月 或 02月</span>
+                            <span>所属年月在任务处理时读取</span>
+                            <span>跨月文件会在任务中报错</span>
                             <span>GMV / BIC 不区分大小写</span>
                         </div>
                     </div>
@@ -153,7 +149,6 @@
                             @dragover.prevent="isDragging = true"
                             @dragleave.prevent="isDragging = false"
                             @drop.prevent="handleDrop"
-                            @click="triggerFileInput"
                         >
                             <input
                                 ref="fileInputRef"
@@ -161,7 +156,19 @@
                                 multiple
                                 accept=".xlsx,.xlsm,.xls,.csv"
                                 style="display: none"
+                                @click.stop
                                 @change="handleFileInputChange"
+                            />
+                            <input
+                                ref="folderInputRef"
+                                type="file"
+                                multiple
+                                webkitdirectory
+                                directory
+                                accept=".xlsx,.xlsm,.xls,.csv"
+                                style="display: none"
+                                @click.stop
+                                @change="handleFolderInputChange"
                             />
                             <div
                                 v-if="isReadingHeaders"
@@ -186,14 +193,35 @@
                                 <p class="drop-zone-text">
                                     {{
                                         isReadingHeaders
-                                            ? "正在扫描文件结构..."
-                                            : "拖拽文件到此处"
+                                            ? precheckDropText
+                                            : "拖拽文件或文件夹到此处"
                                     }}
-                                    <em v-if="!isReadingHeaders">点击选择</em>
                                 </p>
+                                <div
+                                    v-if="!isReadingHeaders"
+                                    class="drop-zone-actions"
+                                >
+                                    <el-button
+                                        size="small"
+                                        @click.stop="triggerFileInput"
+                                    >
+                                        <el-icon><Upload /></el-icon>
+                                        选择文件
+                                    </el-button>
+                                    <el-button
+                                        size="small"
+                                        @click.stop="triggerFolderInput"
+                                    >
+                                        <el-icon><FolderOpened /></el-icon>
+                                        选择文件夹
+                                    </el-button>
+                                </div>
                                 <p class="drop-zone-hint">
-                                    支持 .xlsx / .xlsm / .xls / .csv，单文件最大
-                                    1024MB，上传前会检查本月上传额度是否充足
+                                    {{
+                                        isReadingHeaders
+                                            ? precheckHintText
+                                            : "支持 .xlsx / .xlsm / .xls / .csv，可拖入文件夹，单文件最大 1024MB，上传前会检查本月上传额度是否充足"
+                                    }}
                                 </p>
                             </div>
                         </div>
@@ -381,23 +409,18 @@
                                 min-width="220"
                                 show-overflow-tooltip
                             />
-                            <el-table-column label="年月" width="100">
+                            <el-table-column label="所属年月" width="130">
                                 <template #default="{ row }">
                                     <el-tag
-                                        v-if="row.meta"
+                                        v-if="row.headerMatch.status === 'matched'"
                                         type="info"
                                         size="small"
                                         class="soft-badge"
                                     >
-                                        {{ row.meta.year }}-{{
-                                            String(row.meta.month).padStart(
-                                                2,
-                                                "0",
-                                            )
-                                        }}
+                                        任务处理时提取
                                     </el-tag>
                                     <span v-else class="text-error"
-                                        >解析失败</span
+                                        >待处理</span
                                     >
                                 </template>
                             </el-table-column>
@@ -457,6 +480,23 @@
                                             {{ platformMatchLabel(row) }}
                                         </el-tag>
                                     </el-tooltip>
+                                    <span v-else class="text-tertiary">-</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column
+                                label="取数时间列"
+                                min-width="130"
+                                show-overflow-tooltip
+                            >
+                                <template #default="{ row }">
+                                    <el-tag
+                                        v-if="row.periodHeader"
+                                        type="info"
+                                        size="small"
+                                        class="soft-badge"
+                                    >
+                                        {{ row.periodHeader }}
+                                    </el-tag>
                                     <span v-else class="text-tertiary">-</span>
                                 </template>
                             </el-table-column>
@@ -611,17 +651,6 @@
                         <div class="naming-assistant">
                             <div class="naming-fields">
                                 <label class="naming-field">
-                                    <span>年月</span>
-                                    <el-date-picker
-                                        v-model="namingMonth"
-                                        type="month"
-                                        value-format="YYYY-MM"
-                                        format="YYYY年MM月"
-                                        placeholder="选择年月"
-                                        :clearable="false"
-                                    />
-                                </label>
-                                <label class="naming-field">
                                     <span>性质</span>
                                     <el-select
                                         v-model="namingType"
@@ -697,8 +726,8 @@
                     <div v-if="!embedded" class="check-note">
                         <span class="check-note-dot"></span>
                         <span
-                            >系统只读取文件开头前 20
-                            行匹配接口表头；表头顺序不同或多余列不影响识别，部分规格支持缺字段阈值匹配。</span
+                            >系统先读取文件开头前 20
+                            行匹配接口表头，并确认规则时间列表头存在；所属年月和跨月检查交给后端任务处理。</span
                         >
                     </div>
                 </aside>
@@ -708,114 +737,123 @@
         <el-dialog
             v-model="uploadConfirmVisible"
             title="确认开始上传"
-            width="760px"
+            width="min(1560px, calc(100vw - 24px))"
+            top="3vh"
             append-to-body
             destroy-on-close
             :close-on-click-modal="false"
+            class="upload-confirm-dialog-host"
         >
-            <div class="upload-complete-dialog">
-                <div>
-                    <p class="upload-complete-title">
-                        本次将上传 {{ readyUploadItems.length }} 个文件
-                    </p>
-                    <p class="upload-complete-desc">
-                        系统会先创建统一上传记录，再根据文件类型派生任务。所有可识别文件都会进入核算任务；抖音动账文件会额外创建资金任务；抖音
-                        BIC 文件会额外创建 BIC 任务。
-                    </p>
+            <div class="upload-confirm-dialog">
+                <div class="upload-complete-dialog">
+                    <div>
+                        <p class="upload-complete-title">
+                            本次将上传 {{ readyUploadItems.length }} 个文件
+                        </p>
+                        <p class="upload-complete-desc">
+                            系统会创建统一上传记录并根据文件类型派生任务。任务处理时会从取数时间列提取所属年月；若文件跨月或无法识别年月，对应任务会失败并提示原因。所有可识别文件都会进入核算任务；抖音动账文件会额外创建资金任务；抖音
+                            BIC 文件会额外创建 BIC 任务。
+                        </p>
+                    </div>
                 </div>
-            </div>
-            <div class="upload-confirm-summary">
-                <div class="upload-confirm-stat">
-                    <span>总大小</span>
-                    <strong>{{ uploadConfirmSummary.totalSizeLabel }}</strong>
+                <div class="upload-confirm-summary">
+                    <div class="upload-confirm-stat">
+                        <span>总大小</span>
+                        <strong>{{
+                            uploadConfirmSummary.totalSizeLabel
+                        }}</strong>
+                    </div>
+                    <div class="upload-confirm-stat">
+                        <span>核算任务</span>
+                        <strong>{{ uploadConfirmSummary.orderCount }}</strong>
+                    </div>
+                    <div class="upload-confirm-stat">
+                        <span>动账资金任务</span>
+                        <strong>{{
+                            uploadConfirmSummary.transactionCount
+                        }}</strong>
+                    </div>
+                    <div class="upload-confirm-stat">
+                        <span>BIC任务</span>
+                        <strong>{{ uploadConfirmSummary.bicCount }}</strong>
+                    </div>
                 </div>
-                <div class="upload-confirm-stat">
-                    <span>核算任务</span>
-                    <strong>{{ uploadConfirmSummary.orderCount }}</strong>
+                <div class="upload-confirm-note">
+                    提交前请重点核对文件名、店铺、性质和取数时间列。所属年月会在任务处理时从取数时间列提取，若同一文件跨月会在对应任务中报错。
                 </div>
-                <div class="upload-confirm-stat">
-                    <span>动账资金任务</span>
-                    <strong>{{ uploadConfirmSummary.transactionCount }}</strong>
-                </div>
-                <div class="upload-confirm-stat">
-                    <span>BIC任务</span>
-                    <strong>{{ uploadConfirmSummary.bicCount }}</strong>
-                </div>
-            </div>
-            <div class="upload-confirm-note">
-                提交前请重点核对文件名、年月、店铺、性质和预计进入模块。若识别结果不对，先返回修改命名再上传。
-            </div>
-            <el-table
-                :data="uploadConfirmRows"
-                stripe
-                border
-                class="summary-table upload-confirm-table"
-                max-height="420"
-            >
-                <el-table-column
-                    type="index"
-                    label="#"
-                    width="52"
-                    align="center"
-                />
-                <el-table-column
-                    prop="name"
-                    label="文件名"
-                    min-width="220"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="monthLabel"
-                    label="年月"
-                    width="110"
-                    align="center"
-                />
-                <el-table-column
-                    prop="typeLabel"
-                    label="性质"
-                    width="110"
-                    align="center"
-                />
-                <el-table-column
-                    prop="shopLabel"
-                    label="店铺"
-                    min-width="170"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="platformLabel"
-                    label="平台"
-                    width="120"
-                    align="center"
-                />
-                <el-table-column
-                    prop="sizeLabel"
-                    label="大小"
-                    width="110"
-                    align="right"
-                />
-                <el-table-column
-                    prop="targetLabel"
-                    label="预计进入模块"
-                    min-width="190"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    label="检查结果"
-                    min-width="210"
-                    show-overflow-tooltip
+                <el-table
+                    :data="uploadConfirmRows"
+                    stripe
+                    border
+                    class="summary-table upload-confirm-table"
+                    max-height="620"
                 >
-                    <template #default="{ row }">
-                        <el-tag
-                            :type="row.reviewStatusType"
-                            size="small"
-                            effect="plain"
-                        >
-                            {{ row.reviewStatusLabel }}
-                        </el-tag>
-                    </template>
-                </el-table-column>
-            </el-table>
+                    <el-table-column
+                        type="index"
+                        label="#"
+                        width="48"
+                        align="center"
+                    />
+                    <el-table-column
+                        prop="name"
+                        label="文件名"
+                        min-width="240"
+                        show-overflow-tooltip
+                    />
+                    <el-table-column
+                        prop="periodHeader"
+                        label="取数时间列"
+                        width="112"
+                        align="center"
+                        show-overflow-tooltip
+                    />
+                    <el-table-column
+                        prop="typeLabel"
+                        label="性质"
+                        width="88"
+                        align="center"
+                    />
+                    <el-table-column
+                        prop="shopLabel"
+                        label="店铺"
+                        min-width="150"
+                        show-overflow-tooltip
+                    />
+                    <el-table-column
+                        prop="platformLabel"
+                        label="平台"
+                        width="100"
+                        align="center"
+                    />
+                    <el-table-column
+                        prop="sizeLabel"
+                        label="大小"
+                        width="96"
+                        align="right"
+                    />
+                    <el-table-column
+                        prop="targetLabel"
+                        label="预计进入模块"
+                        min-width="146"
+                        show-overflow-tooltip
+                    />
+                    <el-table-column
+                        label="检查结果"
+                        min-width="158"
+                        show-overflow-tooltip
+                    >
+                        <template #default="{ row }">
+                            <el-tag
+                                :type="row.reviewStatusType"
+                                size="small"
+                                effect="plain"
+                            >
+                                {{ row.reviewStatusLabel }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </div>
             <template #footer>
                 <el-button @click="uploadConfirmVisible = false"
                     >取消</el-button
@@ -823,6 +861,168 @@
                 <el-button type="primary" @click="confirmStartUpload"
                     >确认上传</el-button
                 >
+            </template>
+        </el-dialog>
+
+        <el-dialog
+            v-model="folderConfirmVisible"
+            title="确认文件"
+            width="min(1280px, calc(100vw - 32px))"
+            append-to-body
+            destroy-on-close
+            :close-on-click-modal="false"
+            class="folder-confirm-dialog-host"
+        >
+            <div class="folder-confirm-dialog">
+                <p class="folder-confirm-dialog__intro">
+                    已从文件夹中读取到
+                    <strong>{{ folderConfirmRows.length }}</strong>
+                    个可导入文件。{{
+                        folderConfirmRows.length > 0
+                            ? "确认后会逐个读取表头并进入预检。"
+                            : "没有可导入文件，请检查文件夹内容。"
+                    }}
+                </p>
+                <div class="upload-confirm-summary folder-confirm-summary">
+                    <div class="upload-confirm-stat">
+                        <span>文件数量</span>
+                        <strong>{{ folderConfirmRows.length }}</strong>
+                    </div>
+                    <div class="upload-confirm-stat">
+                        <span>总大小</span>
+                        <strong>{{ folderConfirmTotalSizeLabel }}</strong>
+                    </div>
+                    <div class="upload-confirm-stat">
+                        <span>支持格式</span>
+                        <strong>.xlsx / .xlsm / .xls / .csv</strong>
+                    </div>
+                    <div class="upload-confirm-stat">
+                        <span>已忽略</span>
+                        <strong>{{ pendingFolderSkippedCount }}</strong>
+                    </div>
+                </div>
+                <div class="upload-confirm-note">
+                    这里只确认文件清单；后续还会继续走文件预检和上传确认。所属年月仍由任务处理时从规则时间列提取。
+                </div>
+                <el-table
+                    :data="folderConfirmRows"
+                    stripe
+                    border
+                    class="summary-table folder-confirm-table"
+                    max-height="360"
+                >
+                    <el-table-column
+                        type="index"
+                        label="#"
+                        width="52"
+                        align="center"
+                    />
+                    <el-table-column
+                        prop="path"
+                        label="文件路径"
+                        min-width="320"
+                        show-overflow-tooltip
+                    />
+                    <el-table-column
+                        prop="sizeLabel"
+                        label="大小"
+                        width="120"
+                        align="right"
+                    />
+                </el-table>
+            </div>
+            <template #footer>
+                <el-button @click="cancelFolderImport">取消</el-button>
+                <el-button
+                    type="primary"
+                    :disabled="folderConfirmRows.length === 0"
+                    @click="confirmFolderImport"
+                >
+                    确认文件
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog
+            v-model="rejectedDialogVisible"
+            title="文件预检未通过"
+            width="min(1280px, calc(100vw - 48px))"
+            append-to-body
+            destroy-on-close
+            :close-on-click-modal="false"
+            class="upload-validation-dialog-host"
+        >
+            <div class="upload-validation-dialog">
+                <p class="upload-validation-dialog__intro">
+                    以下 {{ rejectedDialogRows.length }}
+                    个文件未通过文件名或表头校验，已从上传列表中跳过。请按失败原因处理后重新选择这些文件。
+                </p>
+                <div class="upload-validation-dialog__table-wrap">
+                    <table class="upload-validation-dialog__table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>文件名</th>
+                                <th>识别结果</th>
+                                <th>取数时间列</th>
+                                <th>失败原因</th>
+                                <th>处理建议</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="(item, index) in rejectedDialogRows"
+                                :key="`${item.name}-${index}`"
+                            >
+                                <td class="upload-validation-dialog__index">
+                                    {{ index + 1 }}
+                                </td>
+                                <td class="upload-validation-dialog__file">
+                                    <strong
+                                        class="upload-validation-dialog__name"
+                                        :title="item.name"
+                                    >
+                                        {{ item.name }}
+                                    </strong>
+                                </td>
+                                <td class="upload-validation-dialog__result">
+                                    <span>{{
+                                        item.platformLabel || "未识别平台"
+                                    }}</span>
+                                    <span>{{
+                                        item.typeLabel || "未识别性质"
+                                    }}</span>
+                                    <span>{{
+                                        item.shopLabel || "未识别店铺"
+                                    }}</span>
+                                </td>
+                                <td>{{ item.periodHeader || "-" }}</td>
+                                <td class="upload-validation-dialog__message">
+                                    {{ item.message }}
+                                </td>
+                                <td
+                                    class="upload-validation-dialog__suggestion"
+                                >
+                                    {{
+                                        item.suggestion ||
+                                        rejectedFileSuggestion(item.message)
+                                    }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="upload-validation-dialog__more">
+                    提示：所属年月会在任务处理时从规则时间列提取；如果同一文件内该列跨了多个月，对应任务会失败并提示拆分。
+                </p>
+            </div>
+            <template #footer>
+                <el-button
+                    type="primary"
+                    @click="rejectedDialogVisible = false"
+                >
+                    我知道了
+                </el-button>
             </template>
         </el-dialog>
 
@@ -897,11 +1097,12 @@
 <script setup lang="ts">
 defineOptions({ name: "UploadCenter" });
 
-import { ref, computed, h, nextTick } from "vue";
+import { ref, computed, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import {
     CircleCheckFilled,
     CopyDocument,
+    FolderOpened,
     InfoFilled,
     Shop,
 } from "@element-plus/icons-vue";
@@ -942,10 +1143,12 @@ const emit = defineEmits<{
 interface FileItem {
     file: File;
     name: string;
+    relativePath: string;
     meta: ParsedFileName | null;
     matchedRule: FileSpec | null;
     headers: string[];
     headerRowIndex: number | null;
+    periodHeader: string | null;
     headerMatch: HeaderMatchInfo;
     status: "pending" | "uploading" | "success" | "error";
     progress: number;
@@ -954,7 +1157,7 @@ interface FileItem {
 
 interface UploadConfirmRow {
     name: string;
-    monthLabel: string;
+    periodHeader: string;
     typeLabel: string;
     shopLabel: string;
     platformLabel: string;
@@ -962,6 +1165,11 @@ interface UploadConfirmRow {
     targetLabel: string;
     reviewStatusLabel: string;
     reviewStatusType: "success" | "warning" | "danger";
+}
+
+interface FolderConfirmRow {
+    path: string;
+    sizeLabel: string;
 }
 
 interface UploadBatchContext {
@@ -999,11 +1207,19 @@ interface HeaderRowCandidate {
 interface RejectedFileInfo {
     name: string;
     message: string;
+    typeLabel?: string;
+    shopLabel?: string;
+    platformLabel?: string;
+    periodHeader?: string;
+    suggestion?: string;
 }
 
 const FILENAME_PARSE_FAILED_MESSAGE =
-    "文件名解析失败，格式示例：2026年02月_BIC_店铺名.xls、26年02月_其他服务款_店铺名.csv";
-const MAX_REJECTED_FILES_IN_DIALOG = 10;
+    "文件名解析失败，格式示例：BIC_店铺名明细.xls、其他服务款_店铺名明细.csv";
+const HEADER_SCAN_ROW_LIMIT = 20;
+const CSV_PREVIEW_BYTES = 256 * 1024;
+const SUPPORTED_FILE_PATTERN = /\.(xlsx|xlsm|xls|csv)$/i;
+const droppedFileRelativePaths = new WeakMap<File, string>();
 
 const platformUploadRules = [
     {
@@ -1011,10 +1227,10 @@ const platformUploadRules = [
         platformCode: "douyin",
         types: ["订单", "动账", "bic", "运费险"],
         examples: [
-            "26年02月_订单_抖音旗舰店.xlsx",
-            "26年02月_动账_抖音旗舰店.xlsx",
-            "26年2月_BIC_抖音旗舰店.xlsx",
-            "26年02月_运费险_抖音旗舰店.xlsx",
+            "订单_抖音旗舰店明细.xlsx",
+            "动账_抖音旗舰店明细.xlsx",
+            "BIC_抖音旗舰店明细.xlsx",
+            "运费险_抖音旗舰店明细.xlsx",
         ],
     },
     {
@@ -1022,10 +1238,10 @@ const platformUploadRules = [
         platformCode: "kuaishou",
         types: ["gmv", "动账", "运费险", "订单"],
         examples: [
-            "26年02月_动账_快手专营店.xlsx",
-            "2026年2月_gmv_快手专营店.csv",
-            "26年02月_订单_快手专营店.xlsx",
-            "26年02月_运费险_快手专营店.csv",
+            "动账_快手专营店明细.xlsx",
+            "GMV_快手专营店明细.csv",
+            "订单_快手专营店明细.xlsx",
+            "运费险_快手专营店明细.csv",
         ],
     },
     {
@@ -1033,10 +1249,10 @@ const platformUploadRules = [
         platformCode: "xiaohongshu",
         types: ["订单", "gmv", "其他服务款", "动账"],
         examples: [
-            "26年02月_订单_小红书店铺.xlsx",
-            "26年02月_动账_小红书店铺.xlsx",
-            "2026年02月_GMV_小红书店铺.xlsx",
-            "26年02月_其他服务款_小红书店铺.xlsx",
+            "订单_小红书店铺明细.xlsx",
+            "动账_小红书店铺明细.xlsx",
+            "GMV订单货款_小红书店铺明细.xlsx",
+            "GMV其他服务款_小红书店铺明细.xlsx",
         ],
     },
     {
@@ -1044,25 +1260,25 @@ const platformUploadRules = [
         platformCode: "weixin_video",
         types: ["订单", "动账", "bic", "运费险"],
         examples: [
-            "26年02月_动账_微信小店.xlsx",
-            "26年02月_BIC_微信小店.xlsx",
-            "26年02月_订单_微信小店.xlsx",
-            "26年02月_运费险_微信小店.xlsx",
+            "动账_视频号小店明细.xlsx",
+            "BIC_视频号小店明细.xlsx",
+            "订单_视频号小店明细.xlsx",
+            "运费险_视频号小店明细.xlsx",
         ],
     },
     {
         platform: "支付宝",
         platformCode: "alipay",
         types: ["动账"],
-        examples: ["26年02月_动账_支付宝店铺.xlsx"],
+        examples: ["动账_支付宝店铺明细.xlsx"],
     },
     {
         platform: "千牛",
         platformCode: "qianniu",
         types: ["订单", "动账"],
         examples: [
-            "26年02月_订单_千牛店铺.xlsx",
-            "26年02月_动账_千牛店铺.xlsx",
+            "订单_千牛店铺明细.xlsx",
+            "动账_千牛店铺明细.xlsx",
         ],
     },
 ];
@@ -1082,7 +1298,6 @@ const visiblePlatformUploadRules = computed(() => {
         examples: rule.examples.slice(0, 1),
     }));
 });
-const namingMonth = ref("");
 const namingType = ref("");
 const namingShopName = ref("");
 const shopLoading = ref(false);
@@ -1090,20 +1305,13 @@ const shopOptions = ref<ShopRecord[]>([]);
 const SHOP_PAGE_SIZE = 100;
 
 const generatedFileName = computed(() => {
-    const monthText = formatNamingMonth(namingMonth.value);
     const typeText = namingType.value ? fileTypeLabel(namingType.value) : "";
     const shopText = sanitizeFileNamePart(namingShopName.value);
-    if (!monthText || !typeText || !shopText) return "";
-    return `${monthText}_${typeText}_${shopText}.xlsx`;
+    if (!typeText || !shopText) return "";
+    return `${typeText}_${shopText}明细.xlsx`;
 });
 
 const canCopyGeneratedName = computed(() => Boolean(generatedFileName.value));
-
-function formatNamingMonth(month: string): string {
-    const match = month.match(/^(\d{4})-(\d{2})$/);
-    if (!match) return "";
-    return `${match[1].slice(-2)}年${match[2]}月`;
-}
 
 function sanitizeFileNamePart(value: string): string {
     return value
@@ -1169,7 +1377,7 @@ function fallbackCopyText(text: string): boolean {
 
 async function copyGeneratedFileName() {
     if (!generatedFileName.value) {
-        ElMessage.warning("请先填写年月、性质和店铺名称");
+        ElMessage.warning("请先填写性质和店铺名称");
         return;
     }
 
@@ -1202,8 +1410,21 @@ function validationMessage(row: FileItem): string {
     return row.headerMatch.message;
 }
 
+function fileRelativePath(file: File): string {
+    const candidate =
+        droppedFileRelativePaths.get(file) ||
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+        file.name;
+    return candidate.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function fileDuplicateKey(file: File): string {
+    return fileRelativePath(file).toLowerCase();
+}
+
 // State
 const fileInputRef = ref<HTMLInputElement>();
+const folderInputRef = ref<HTMLInputElement>();
 const uploadTableRef = ref<TableInstance>();
 const isDragging = ref(false);
 const isUploading = ref(false);
@@ -1217,8 +1438,16 @@ const orgLoading = ref(false);
 const orgOptions = ref<Organization[]>([]);
 const targetOrgId = ref<number | undefined>(undefined);
 const isReadingHeaders = ref(false);
+const precheckTotal = ref(0);
+const precheckCurrent = ref(0);
+const precheckCurrentFileName = ref("");
 const uploadConfirmVisible = ref(false);
 const uploadCompleteDialogVisible = ref(false);
+const rejectedDialogVisible = ref(false);
+const rejectedDialogRows = ref<RejectedFileInfo[]>([]);
+const folderConfirmVisible = ref(false);
+const pendingFolderFiles = ref<File[]>([]);
+const pendingFolderSkippedCount = ref(0);
 const uploadCompleteCount = ref(0);
 const uploadingFileName = ref("");
 const uploadDialogTotal = ref(0);
@@ -1289,10 +1518,22 @@ const canUpload = computed(() => {
     );
 });
 
+const precheckDropText = computed(() => {
+    if (!precheckTotal.value) return "正在扫描文件结构...";
+    return `正在预检 ${precheckCurrent.value} / ${precheckTotal.value}`;
+});
+
+const precheckHintText = computed(() => {
+    if (!precheckCurrentFileName.value) {
+        return "正在读取文件表头，请稍候";
+    }
+    return `当前文件：${precheckCurrentFileName.value}`;
+});
+
 const uploadConfirmRows = computed<UploadConfirmRow[]>(() =>
     orderUploadItems(uploadableItems.value).map((item) => ({
         name: item.name,
-        monthLabel: formatMetaMonth(item),
+        periodHeader: item.periodHeader || "-",
         typeLabel: formatConfirmType(item),
         shopLabel: item.meta?.shop || "-",
         platformLabel:
@@ -1304,6 +1545,19 @@ const uploadConfirmRows = computed<UploadConfirmRow[]>(() =>
         reviewStatusLabel: uploadReviewStatusLabel(item),
         reviewStatusType: uploadReviewStatusType(item),
     })),
+);
+
+const folderConfirmRows = computed<FolderConfirmRow[]>(() =>
+    pendingFolderFiles.value.map((file) => ({
+        path: fileRelativePath(file),
+        sizeLabel: formatFileSize(file.size),
+    })),
+);
+
+const folderConfirmTotalSizeLabel = computed(() =>
+    formatFileSize(
+        pendingFolderFiles.value.reduce((sum, file) => sum + file.size, 0),
+    ),
 );
 
 const uploadConfirmSummary = computed(() => {
@@ -1329,11 +1583,6 @@ const uploadConfirmSummary = computed(() => {
 
 function totalFileBytes(items: FileItem[]): number {
     return items.reduce((sum, item) => sum + item.file.size, 0);
-}
-
-function formatMetaMonth(item: FileItem): string {
-    if (!item.meta) return "-";
-    return `${item.meta.year}-${String(item.meta.month).padStart(2, "0")}`;
 }
 
 function formatConfirmType(item: FileItem): string {
@@ -1431,80 +1680,78 @@ async function ensureFileSpecsLoaded() {
 usePageRefresh(refreshPage);
 
 async function showRejectedFilesDialog(rejectedFiles: RejectedFileInfo[]) {
-    const visibleFiles = rejectedFiles.slice(0, MAX_REJECTED_FILES_IN_DIALOG);
-    const hiddenCount = rejectedFiles.length - visibleFiles.length;
-    const children = [
-        h(
-            "p",
-            { class: "upload-validation-dialog__intro" },
-            `以下 ${rejectedFiles.length} 个文件未通过文件名或表头校验，已从上传列表中跳过。`,
-        ),
-        h(
-            "div",
-            { class: "upload-validation-dialog__list" },
-            visibleFiles.map((item, index) =>
-                h(
-                    "div",
-                    {
-                        class: "upload-validation-dialog__item",
-                        key: `${item.name}-${index}`,
-                    },
-                    [
-                        h(
-                            "strong",
-                            {
-                                class: "upload-validation-dialog__name",
-                                title: item.name,
-                            },
-                            item.name,
-                        ),
-                        h(
-                            "span",
-                            { class: "upload-validation-dialog__message" },
-                            item.message,
-                        ),
-                    ],
-                ),
-            ),
-        ),
-    ];
+    rejectedDialogRows.value = rejectedFiles;
+    rejectedDialogVisible.value = true;
+}
 
-    if (hiddenCount > 0) {
-        children.push(
-            h(
-                "p",
-                { class: "upload-validation-dialog__more" },
-                `还有 ${hiddenCount} 个文件未展示，请修正后重新选择。`,
-            ),
-        );
+function rejectedFileSuggestion(message: string): string {
+    if (message.includes("文件名解析失败")) {
+        return "按“性质_店铺名称明细”重命名后再上传";
     }
+    if (message.includes("多个所属年月")) {
+        return "按月份拆分文件，确保规则时间列只包含一个年月";
+    }
+    if (message.includes("未找到所属时间表头") || message.includes("前 20 行未找到")) {
+        return "检查平台和性质是否匹配，或确认表头名称没有被改动";
+    }
+    if (message.includes("表头") || message.includes("规格")) {
+        return "确认文件来源平台和文件类型，保留原始导出表头";
+    }
+    if (message.includes("未解析到有效所属年月")) {
+        return "检查规则时间列是否为空，或日期格式是否为有效日期";
+    }
+    return "修正文件后重新选择上传";
+}
 
-    try {
-        await ElMessageBox.alert(
-            h("div", { class: "upload-validation-dialog" }, children),
-            "文件预检未通过",
-            {
-                appendTo: "body",
-                confirmButtonText: "我知道了",
-                customClass: "upload-validation-message-box",
-                customStyle: {
-                    width: "min(1120px, calc(100vw - 96px))",
-                    maxWidth: "calc(100vw - 32px)",
-                },
-                closeOnClickModal: false,
-                closeOnPressEscape: false,
-                showClose: false,
-                type: "warning",
-            },
-        );
-    } catch {
-        // The dialog is confirmation-only; keep this guard for programmatic closes.
+type FileSystemEntryLike = {
+    isFile: boolean;
+    isDirectory: boolean;
+    name: string;
+    fullPath?: string;
+};
+
+type FileSystemFileEntryLike = FileSystemEntryLike & {
+    file: (success: (file: File) => void, error?: (err: DOMException) => void) => void;
+};
+
+type FileSystemDirectoryEntryLike = FileSystemEntryLike & {
+    createReader: () => {
+        readEntries: (
+            success: (entries: FileSystemEntryLike[]) => void,
+            error?: (err: DOMException) => void,
+        ) => void;
+    };
+};
+
+type DataTransferItemWithEntry = DataTransferItem & {
+    webkitGetAsEntry?: () => FileSystemEntryLike | null;
+};
+
+function mergeUniqueFiles(...groups: File[][]): File[] {
+    const seen = new Set<string>();
+    const files: File[] = [];
+    for (const group of groups) {
+        for (const file of group) {
+            const key = [
+                fileRelativePath(file).toLowerCase(),
+                file.size,
+                file.lastModified,
+            ].join("|");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            files.push(file);
+        }
     }
+    return files;
 }
 
 // File input trigger
 function triggerFileInput() {
     fileInputRef.value?.click();
+}
+
+function triggerFolderInput() {
+    folderInputRef.value?.click();
 }
 
 // Handle file input change
@@ -1516,12 +1763,146 @@ function handleFileInputChange(e: Event) {
     }
 }
 
-// Handle drag and drop
-function handleDrop(e: DragEvent) {
-    isDragging.value = false;
-    if (e.dataTransfer?.files) {
-        processFiles(Array.from(e.dataTransfer.files));
+function handleFolderInputChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (input.files) {
+        showFolderImportConfirm(Array.from(input.files));
+        input.value = "";
     }
+}
+
+// Handle drag and drop
+async function handleDrop(e: DragEvent) {
+    isDragging.value = false;
+    const hasDirectory = dataTransferHasDirectory(e.dataTransfer);
+    if (hasDirectory) {
+        isReadingHeaders.value = true;
+        precheckTotal.value = 0;
+        precheckCurrent.value = 0;
+        precheckCurrentFileName.value = "正在展开文件夹...";
+    }
+    const files = await filesFromDataTransfer(e.dataTransfer);
+    if (hasDirectory) {
+        isReadingHeaders.value = false;
+        precheckTotal.value = 0;
+        precheckCurrent.value = 0;
+        precheckCurrentFileName.value = "";
+    }
+    if (files.length > 0) {
+        if (hasDirectory) {
+            showFolderImportConfirm(files);
+        } else {
+            await processFiles(files);
+        }
+    } else if (e.dataTransfer?.items?.length) {
+        ElMessage.warning("没有在拖拽内容中找到可上传的表格文件");
+    }
+}
+
+function dataTransferHasDirectory(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer?.items?.length) return false;
+    return Array.from(dataTransfer.items).some((item) => {
+        if (item.kind !== "file") return false;
+        const entry = (item as DataTransferItemWithEntry).webkitGetAsEntry?.();
+        return Boolean(entry?.isDirectory);
+    });
+}
+
+function showFolderImportConfirm(files: File[]) {
+    const supportedFiles = mergeUniqueFiles(
+        files.filter((file) => SUPPORTED_FILE_PATTERN.test(file.name)),
+    );
+    pendingFolderFiles.value = supportedFiles;
+    pendingFolderSkippedCount.value = Math.max(
+        0,
+        files.length - supportedFiles.length,
+    );
+    folderConfirmVisible.value = true;
+}
+
+async function confirmFolderImport() {
+    const files = [...pendingFolderFiles.value];
+    folderConfirmVisible.value = false;
+    pendingFolderFiles.value = [];
+    pendingFolderSkippedCount.value = 0;
+    await processFiles(files);
+}
+
+function cancelFolderImport() {
+    folderConfirmVisible.value = false;
+    pendingFolderFiles.value = [];
+    pendingFolderSkippedCount.value = 0;
+}
+
+async function filesFromDataTransfer(
+    dataTransfer: DataTransfer | null,
+): Promise<File[]> {
+    if (!dataTransfer) return [];
+    const items = Array.from(dataTransfer.items || []);
+    if (items.length === 0) return Array.from(dataTransfer.files || []);
+
+    const entryFiles: File[] = [];
+    const plainFiles: File[] = [];
+    const transferFiles = Array.from(dataTransfer.files || []);
+    for (const item of items) {
+        if (item.kind !== "file") continue;
+        const entry = (item as DataTransferItemWithEntry).webkitGetAsEntry?.();
+        if (entry) {
+            entryFiles.push(...(await filesFromEntry(entry)));
+            continue;
+        }
+        const file = item.getAsFile();
+        if (file) plainFiles.push(file);
+    }
+
+    return mergeUniqueFiles(entryFiles, plainFiles, transferFiles);
+}
+
+async function filesFromEntry(entry: FileSystemEntryLike): Promise<File[]> {
+    if (entry.isFile) {
+        const file = await fileFromFileEntry(entry as FileSystemFileEntryLike);
+        return file ? [file] : [];
+    }
+    if (entry.isDirectory) {
+        const entries = await readAllDirectoryEntries(
+            entry as FileSystemDirectoryEntryLike,
+        );
+        const nested = await Promise.all(entries.map(filesFromEntry));
+        return nested.flat();
+    }
+    return [];
+}
+
+function fileFromFileEntry(
+    entry: FileSystemFileEntryLike,
+): Promise<File | null> {
+    return new Promise((resolve) => {
+        entry.file(
+            (file) => {
+                const fullPath = entry.fullPath?.replace(/^\/+/, "");
+                if (fullPath) {
+                    droppedFileRelativePaths.set(file, fullPath);
+                }
+                resolve(file);
+            },
+            () => resolve(null),
+        );
+    });
+}
+
+async function readAllDirectoryEntries(
+    entry: FileSystemDirectoryEntryLike,
+): Promise<FileSystemEntryLike[]> {
+    const reader = entry.createReader();
+    const entries: FileSystemEntryLike[] = [];
+    while (true) {
+        const batch = await new Promise<FileSystemEntryLike[]>((resolve) => {
+            reader.readEntries(resolve, () => resolve([]));
+        });
+        if (batch.length === 0) break;
+        entries.push(...batch);
+    }
+    return entries;
 }
 
 // Process selected files
@@ -1535,36 +1916,52 @@ async function processFiles(files: File[]) {
     uploadCompleteDialogVisible.value = false;
     await ensureFileSpecsLoaded();
     isReadingHeaders.value = true;
+    precheckTotal.value = files.length;
+    precheckCurrent.value = 0;
+    precheckCurrentFileName.value = "";
     const rejectedFiles: RejectedFileInfo[] = [];
+    const existingFileKeys = new Set(
+        fileItems.value.map((item) => item.relativePath.toLowerCase()),
+    );
 
     try {
         for (const file of files) {
+            const relativePath = fileRelativePath(file);
+            const duplicateKey = fileDuplicateKey(file);
+            precheckCurrent.value += 1;
+            precheckCurrentFileName.value = relativePath;
+
             // Validate file type
-            if (!file.name.match(/\.(xlsx|xlsm|xls|csv)$/i)) {
-                ElMessage.warning(
-                    `文件 ${file.name} 不是 Excel/CSV 文件，已跳过`,
+            if (!SUPPORTED_FILE_PATTERN.test(file.name)) {
+                rejectedFiles.push(
+                    buildRejectedFileInfo(
+                        file,
+                        "文件类型不支持，仅支持 .xlsx / .xlsm / .xls / .csv 文件",
+                    ),
                 );
                 continue;
             }
 
             // Check duplicate
-            if (fileItems.value.some((f) => f.name === file.name)) {
-                ElMessage.warning(`文件 ${file.name} 已存在，已跳过`);
+            if (existingFileKeys.has(duplicateKey)) {
+                rejectedFiles.push(
+                    buildRejectedFileInfo(file, "文件已在上传列表中，已跳过"),
+                );
                 continue;
             }
 
             // Parse filename
             const meta = parseFileName(file.name);
             if (!meta) {
-                rejectedFiles.push({
-                    name: file.name,
-                    message: FILENAME_PARSE_FAILED_MESSAGE,
-                });
+                rejectedFiles.push(
+                    buildRejectedFileInfo(file, FILENAME_PARSE_FAILED_MESSAGE),
+                );
                 continue;
             }
 
             let headers: string[] = [];
             let matchedRule: FileSpec | null = null;
+            let periodHeader: string | null = null;
             let headerMatch: HeaderMatchInfo = {
                 status: "filename_failed",
                 message: FILENAME_PARSE_FAILED_MESSAGE,
@@ -1603,32 +2000,104 @@ async function processFiles(files: File[]) {
             }
 
             if (headerMatch.status !== "matched" || !matchedRule) {
-                rejectedFiles.push({
-                    name: file.name,
-                    message: headerMatch.message,
-                });
+                rejectedFiles.push(
+                    buildRejectedFileInfo(file, headerMatch.message, {
+                        meta,
+                        matchedRule,
+                    }),
+                );
+                continue;
+            }
+
+            periodHeader = uploadPeriodHeaderForSpec(
+                matchedRule,
+                meta.type,
+            );
+            if (!periodHeader) {
+                rejectedFiles.push(
+                    buildRejectedFileInfo(
+                        file,
+                        `未配置所属时间规则：${matchedRule.platform_name || matchedRule.platform_code} / ${fileTypeLabel(meta.type)}`,
+                        {
+                            meta,
+                            matchedRule,
+                        },
+                    ),
+                );
+                continue;
+            }
+
+            try {
+                resolvePeriodHeaderIndex(headers, periodHeader);
+                headerMatch = {
+                    ...headerMatch,
+                    message: `${headerMatch.message}；任务处理时将从${periodHeader}列提取所属年月`,
+                };
+            } catch (err: any) {
+                rejectedFiles.push(
+                    buildRejectedFileInfo(
+                        file,
+                        err?.message || "取数时间列表头校验失败",
+                        {
+                            meta,
+                            matchedRule,
+                            periodHeader,
+                        },
+                    ),
+                );
                 continue;
             }
 
             fileItems.value.push({
                 file,
-                name: file.name,
+                name: relativePath,
+                relativePath,
                 meta,
                 matchedRule,
                 headers,
                 headerRowIndex: headerMatch.headerRowIndex,
+                periodHeader,
                 headerMatch,
                 status: "pending",
                 progress: 0,
             });
+            existingFileKeys.add(duplicateKey);
         }
     } finally {
         isReadingHeaders.value = false;
+        precheckTotal.value = 0;
+        precheckCurrent.value = 0;
+        precheckCurrentFileName.value = "";
     }
 
     if (rejectedFiles.length > 0) {
         await showRejectedFilesDialog(rejectedFiles);
     }
+}
+
+function buildRejectedFileInfo(
+    file: File,
+    message: string,
+    options: {
+        meta?: ParsedFileName | null;
+        matchedRule?: FileSpec | null;
+        periodHeader?: string | null;
+        suggestion?: string;
+    } = {},
+): RejectedFileInfo {
+    const meta = options.meta ?? parseFileName(file.name);
+    const matchedRule = options.matchedRule ?? null;
+    return {
+        name: fileRelativePath(file),
+        message,
+        typeLabel: meta ? fileTypeLabel(meta.type) : undefined,
+        shopLabel: meta?.shop || undefined,
+        platformLabel: matchedRule
+            ? matchedRule.platform_name || matchedRule.platform_code
+            : undefined,
+        periodHeader: options.periodHeader || undefined,
+        suggestion: options.suggestion,
+    };
 }
 
 // Read the first non-empty rows using SheetJS. Some platform exports place notes
@@ -1677,12 +2146,9 @@ async function readTabularHeaderRows(
     });
 }
 
-const HEADER_SCAN_ROW_LIMIT = 20;
-const CSV_HEADER_SCAN_BYTES = 256 * 1024;
-
 async function readCsvHeaderRows(file: File): Promise<HeaderRowCandidate[]> {
     const buffer = await file
-        .slice(0, Math.min(file.size, CSV_HEADER_SCAN_BYTES))
+        .slice(0, Math.min(file.size, CSV_PREVIEW_BYTES))
         .arrayBuffer();
     const text = decodeCsvBuffer(buffer);
     const rows = parseCsvPreviewRows(text, HEADER_SCAN_ROW_LIMIT);
@@ -1749,16 +2215,27 @@ function parseCsvPreviewRows(text: string, maxRows: number): string[][] {
     return rows;
 }
 
-function decodeCsvBuffer(buffer: ArrayBuffer): string {
-    const encodings = ["utf-8", "gb18030"];
-    for (const encoding of encodings) {
-        try {
-            return new TextDecoder(encoding, { fatal: true }).decode(buffer);
-        } catch {
-            // Try the next common CSV export encoding.
-        }
+function uploadPeriodHeaderForSpec(
+    spec: FileSpec,
+    _typeCode: string,
+): string | null {
+    const header = String(spec.upload_period_header || "").trim();
+    return header || null;
+}
+
+function resolvePeriodHeaderIndex(headers: string[], headerName: string): number {
+    const target = canonicalHeader(headerName);
+    const indexes = headers
+        .map((header, index) => ({ header: canonicalHeader(header), index }))
+        .filter((item) => item.header === target)
+        .map((item) => item.index);
+    if (indexes.length === 0) {
+        throw new Error(`未找到所属时间表头：${headerName}`);
     }
-    return new TextDecoder("utf-8").decode(buffer);
+    if (indexes.length > 1) {
+        throw new Error(`所属时间表头重复：${headerName}`);
+    }
+    return indexes[0];
 }
 
 function loadXlsx() {
@@ -2063,6 +2540,7 @@ function isFileReadyForUpload(item: FileItem): boolean {
         item.status !== "uploading" &&
         item.meta !== null &&
         item.matchedRule !== null &&
+        Boolean(item.periodHeader) &&
         item.headerMatch.status === "matched"
     );
 }
@@ -2183,11 +2661,11 @@ async function uploadSingleFile(
         await uploadFileToOss(context.ossClient, ossKey, item);
         await uploadCallback({
             batch_id: context.batchId,
-            original_name: item.name,
+            original_name: item.file.name,
             oss_key: ossKey,
             file_size: item.file.size,
-            parsed_year: item.meta.year,
-            parsed_month: item.meta.month,
+            parsed_year: item.meta.year || null,
+            parsed_month: item.meta.month || null,
             parsed_type: item.meta.type,
             parsed_shop: item.meta.shop,
             detected_platform: item.matchedRule?.platform_code || "",
@@ -2270,16 +2748,8 @@ async function confirmStartUpload() {
         try {
             const result = await checkUploadQuota(totalBytes);
             if (!result.can_upload) {
-                await ElMessageBox.alert(
-                    `${result.message}\n\n本次上传文件总大小：${totalMB} MB`,
-                    "本月上传额度不足",
-                    {
-                        appendTo: "body",
-                        confirmButtonText: "我知道了",
-                        customClass: "upload-quota-limit-message-box",
-                        modalClass: "upload-quota-limit-message-box__mask",
-                        type: "warning",
-                    },
+                ElMessage.warning(
+                    `${result.message}，本次上传文件总大小：${totalMB} MB`,
                 );
                 return;
             }
@@ -2649,7 +3119,7 @@ function exportFailedList() {
     border-radius: var(--radius-card);
     padding: 28px 18px;
     text-align: center;
-    cursor: pointer;
+    cursor: default;
     transition:
         border-color 0.18s,
         background-color 0.18s,
@@ -2690,23 +3160,24 @@ function exportFailedList() {
     }
 
     .drop-zone-text {
-        margin: 12px 0 5px;
+        margin: 12px 0 10px;
         color: var(--text-primary);
         font-size: 15px;
         font-weight: 700;
-
-        em {
-            color: var(--text-secondary);
-            font-style: normal;
-            font-weight: 800;
-            margin-left: 6px;
-        }
     }
 
     .drop-zone-hint {
         font-size: 12px;
         color: var(--text-tertiary);
     }
+}
+
+.drop-zone-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
 .drop-zone-content {
@@ -2822,11 +3293,31 @@ function exportFailedList() {
     border-radius: 0;
 }
 
+:global(.upload-confirm-dialog-host) {
+    margin-top: 3vh !important;
+    max-width: calc(100vw - 24px);
+}
+
+:global(.upload-confirm-dialog-host .el-dialog__body) {
+    max-height: calc(100vh - 112px);
+    overflow: auto;
+}
+
+.upload-confirm-dialog {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
 .upload-confirm-summary {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
     margin: 14px 0 12px;
+}
+
+.upload-confirm-dialog > .upload-confirm-summary {
+    margin: 0;
 }
 
 .upload-confirm-stat {
@@ -2862,7 +3353,51 @@ function exportFailedList() {
     line-height: 1.6;
 }
 
+.upload-confirm-dialog > .upload-confirm-note {
+    margin-bottom: 0;
+}
+
 .upload-confirm-table {
+    width: 100%;
+
+    :deep(.el-table__cell) {
+        vertical-align: middle;
+    }
+}
+
+.folder-confirm-dialog-host {
+    :deep(.el-dialog__body) {
+        padding-top: 8px;
+    }
+
+    :deep(.el-dialog__footer) {
+        padding-top: 0;
+    }
+}
+
+.folder-confirm-dialog {
+    display: grid;
+    gap: 12px;
+}
+
+.folder-confirm-dialog__intro {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+
+    strong {
+        color: var(--text-primary);
+        font-size: 18px;
+        font-weight: 800;
+    }
+}
+
+.folder-confirm-summary {
+    margin-top: 2px;
+}
+
+.folder-confirm-table {
     :deep(.el-table__cell) {
         vertical-align: middle;
     }
@@ -3403,52 +3938,94 @@ function exportFailedList() {
     }
 }
 
-:global(.el-message-box.upload-validation-message-box) {
-    width: min(1120px, calc(100vw - 96px));
-    width: min(1120px, calc(100vw - 96px)) !important;
-    max-width: calc(100vw - 32px);
-    max-width: calc(100vw - 32px) !important;
-
-    .el-message-box__status {
-        background: var(--warning-light);
-    }
-}
-
-:global(.upload-validation-dialog) {
+.upload-validation-dialog {
     display: grid;
     gap: 12px;
     min-width: 0;
 }
 
-:global(.upload-validation-dialog__intro),
-:global(.upload-validation-dialog__more) {
+.upload-validation-dialog__intro,
+.upload-validation-dialog__more {
     margin: 0;
     color: var(--text-secondary);
     font-size: 13px;
     line-height: 1.6;
 }
 
-:global(.upload-validation-dialog__list) {
-    display: grid;
-    gap: 8px;
-    max-height: 320px;
+.upload-validation-dialog__table-wrap {
+    max-height: min(58vh, 560px);
     overflow: auto;
-}
-
-:global(.upload-validation-dialog__item) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
-    align-items: center;
-    gap: 24px;
-    min-width: 0;
-    padding: 10px 12px;
     border: 1px solid var(--border-color-light);
     border-radius: var(--radius-sm);
     background: var(--bg-elevated);
 }
 
-:global(.upload-validation-dialog__name) {
-    min-width: 0;
+.upload-validation-dialog__table {
+    width: 100%;
+    min-width: 1040px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 12px;
+}
+
+.upload-validation-dialog__table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-weight: 700;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color-light);
+}
+
+.upload-validation-dialog__table td {
+    padding: 10px 12px;
+    color: var(--text-secondary);
+    vertical-align: top;
+    border-bottom: 1px solid var(--border-color-light);
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+.upload-validation-dialog__table tr:last-child td {
+    border-bottom: 0;
+}
+
+.upload-validation-dialog__table th:nth-child(1),
+.upload-validation-dialog__table td:nth-child(1) {
+    width: 48px;
+    text-align: center;
+}
+
+.upload-validation-dialog__table th:nth-child(2),
+.upload-validation-dialog__table td:nth-child(2) {
+    width: 270px;
+}
+
+.upload-validation-dialog__table th:nth-child(3),
+.upload-validation-dialog__table td:nth-child(3) {
+    width: 180px;
+}
+
+.upload-validation-dialog__table th:nth-child(4),
+.upload-validation-dialog__table td:nth-child(4) {
+    width: 120px;
+}
+
+.upload-validation-dialog__table th:nth-child(5),
+.upload-validation-dialog__table td:nth-child(5) {
+    width: 280px;
+}
+
+.upload-validation-dialog__index {
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+}
+
+.upload-validation-dialog__name {
+    display: block;
     color: var(--text-primary);
     font-size: 13px;
     font-weight: 700;
@@ -3458,11 +4035,23 @@ function exportFailedList() {
     white-space: nowrap;
 }
 
-:global(.upload-validation-dialog__message) {
+.upload-validation-dialog__result {
+    display: grid;
+    gap: 3px;
+}
+
+.upload-validation-dialog__result span {
+    display: block;
+    color: var(--text-secondary);
+}
+
+.upload-validation-dialog__message {
     color: var(--error);
-    font-size: 12px;
-    line-height: 1.55;
-    white-space: nowrap;
+    font-weight: 600;
+}
+
+.upload-validation-dialog__suggestion {
+    color: var(--text-primary);
 }
 
 .upload-blocking-mask {
@@ -3580,14 +4169,8 @@ function exportFailedList() {
 }
 
 @media (max-width: 768px) {
-    :global(.upload-validation-dialog__item) {
-        grid-template-columns: 1fr;
-        align-items: start;
-        gap: 5px;
-    }
-
-    :global(.upload-validation-dialog__name),
-    :global(.upload-validation-dialog__message) {
+    .upload-validation-dialog__name,
+    .upload-validation-dialog__message {
         overflow-wrap: anywhere;
         white-space: normal;
     }

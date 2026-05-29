@@ -1,12 +1,6 @@
 <template>
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
-            <SearchCardIntro
-                kicker="BIC汇总"
-                title="按店铺查看 BIC 汇总"
-                tip="仅统计费用项为 质检费(通过) 的结算金额"
-            />
-
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="核算年月">
                     <el-date-picker v-model="searchForm.monthRange" type="monthrange" start-placeholder="核算年月起" end-placeholder="核算年月止" range-separator="至" clearable value-format="YYYY-MM" style="width: 260px" />
@@ -270,7 +264,6 @@ import { ElMessage, type TableInstance } from "element-plus";
 import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";

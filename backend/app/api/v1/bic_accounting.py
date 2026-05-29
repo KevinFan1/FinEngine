@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.core.deps import get_current_user, require_org_admin_or_above
+from app.core.deps import get_current_user
 from app.models.bic_accounting import BicTask, BicUploadFile
 from app.models.user import User
 from app.schemas.bic_accounting import BicDetailOut, BicSourceRowOut, BicTaskOut
@@ -160,7 +160,6 @@ async def rerun_task(
     task_id: int,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     ip = request.client.host if request.client else None
@@ -186,7 +185,6 @@ async def batch_recalculate_tasks(
     body: BicTaskBatchActionIn,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     task_ids = list(dict.fromkeys(body.task_ids))

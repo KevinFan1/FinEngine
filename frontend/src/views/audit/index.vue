@@ -2,12 +2,6 @@
   <div class="page-container">
     <!-- Filter bar -->
     <el-card shadow="never" class="search-card audit-search-card">
-      <SearchCardIntro
-        kicker="AUDIT TRAIL"
-        title="先定位操作，再查看日志详情"
-        tip="支持按模块、操作类型、操作人和时间范围快速筛选"
-      />
-
       <el-form :model="searchForm" inline class="audit-filter-form">
         <el-form-item label="模块">
           <el-select
@@ -242,7 +236,6 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils
 import { useUserStore } from '@/stores/user'
 import { getAllOrganizations, type Organization } from '@/api/organization'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
-import SearchCardIntro from '@/components/SearchCardIntro.vue'
 import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 

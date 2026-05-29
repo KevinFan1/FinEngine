@@ -1,11 +1,6 @@
 <template>
     <div class="page-container">
     <el-card shadow="never" class="search-card">
-      <SearchCardIntro
-        kicker="店铺工作台"
-        title="先筛选店铺，再查看或维护资料"
-        tip="支持按平台和关键词快速定位店铺"
-      />
       <el-form :model="searchForm" inline>
         <el-form-item label="搜索">
           <el-input
@@ -334,7 +329,6 @@ import { getFallbackPlatforms, toReportPlatformOptions, type PlatformOption } fr
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from '@/utils/pagination'
 import PlatformBadge from '@/components/PlatformBadge.vue'
 import ActiveFilterTags from '@/components/ActiveFilterTags.vue'
-import SearchCardIntro from '@/components/SearchCardIntro.vue'
 import { usePageRefresh } from '@/composables/pageRefresh'
 import type { ActiveFilterTag } from '@/components/activeFilterTags'
 

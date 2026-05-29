@@ -2,13 +2,6 @@
     <div class="page-container major-category-page">
         <el-card shadow="never" class="search-card">
             <div class="major-toolbar">
-                <div class="major-toolbar__intro">
-                    <SearchCardIntro
-                        kicker="MAJOR CATEGORY"
-                        title="资金大分类"
-                        tip="在这里维护大分类本身，并直接勾选科目归属"
-                    />
-                </div>
                 <div class="major-toolbar__actions">
                     <el-input
                         v-model="searchText"
@@ -367,7 +360,6 @@ import {
     type TransactionMajorCategory,
     type TransactionSubject,
 } from "@/api/transactionAccounting";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import { formatDateTime } from "@/utils/format";
 

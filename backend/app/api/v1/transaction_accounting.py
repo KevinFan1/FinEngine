@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_async_session
-from app.core.deps import get_current_user, require_org_admin_or_above, require_superadmin
+from app.core.deps import get_current_user, require_superadmin
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.transaction_accounting import (
@@ -511,7 +511,6 @@ async def upload_init(
     body: TransactionUploadInit,
     org_id: int | None = Query(None),
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     if not settings.ALIYUN_STS_ROLE_ARN or not settings.ALIYUN_ACCESS_KEY_ID:
@@ -552,7 +551,6 @@ async def upload_callback(
     body: TransactionUploadCallback,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     ip, ua = _client_info(request)
@@ -614,7 +612,6 @@ async def rerun_task(
     task_id: int,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     ip, ua = _client_info(request)
@@ -633,7 +630,6 @@ async def batch_recalculate_tasks(
     body: TransactionTaskBatchActionIn,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     task_ids = list(dict.fromkeys(body.task_ids))

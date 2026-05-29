@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_async_session
-from app.core.deps import get_current_user, require_org_admin_or_above
+from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse
 from app.services.oss_service import assume_sts_role, oss_service
@@ -41,7 +41,6 @@ class StsCredentialOut(BaseModel):
 async def get_oss_sts(
     batch_id: int = Query(..., description="上传批次 ID"),
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get Alibaba Cloud OSS temporary credentials for direct frontend upload.

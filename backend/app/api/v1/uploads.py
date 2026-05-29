@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.core.deps import get_current_user, require_org_admin_or_above
+from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.upload import UploadBatchCreate, UploadBatchDetail, UploadBatchOut, UploadFileCallback, UploadFileOut
@@ -18,7 +18,6 @@ async def create_upload_batch(
     body: UploadBatchCreate,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Create a new upload batch."""
@@ -44,7 +43,6 @@ async def upload_file_callback(
     body: UploadFileCallback,
     request: Request,
     current_user: User = Depends(get_current_user),
-    _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Record a completed file upload and auto-create a processing task."""

@@ -1,11 +1,6 @@
 <template>
     <div class="page-container download-page">
         <el-card shadow="never" class="search-card">
-            <SearchCardIntro
-                kicker="下载中心"
-                title="先筛选导出任务，再下载结果文件"
-                tip="支持按模块和状态快速收敛范围，完成后通过临时凭证下载"
-            />
             <el-form :model="searchForm" inline>
                 <el-form-item label="状态">
                     <el-select v-model="searchForm.status" clearable placeholder="状态">
@@ -259,7 +254,6 @@ defineOptions({ name: "DownloadCenter" });
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Download, Loading, Refresh } from "@element-plus/icons-vue";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import {
     downloadExportJobFile,
     listExportJobs,

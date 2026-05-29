@@ -1,12 +1,6 @@
 <template>
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
-            <SearchCardIntro
-                kicker="年度报表"
-                :title="`${searchForm.year} 年年度报表`"
-                tip="业务年份看归属年度，核算年月用于限定来源账期"
-            />
-
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="业务年份">
                     <el-date-picker
@@ -293,7 +287,6 @@ import { Download } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";

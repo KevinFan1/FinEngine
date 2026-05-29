@@ -1,12 +1,6 @@
 <template>
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
-            <SearchCardIntro
-                kicker="科目明细"
-                title="按科目和重分类查看明细"
-                tip="业务年月表示资金实际归属月份"
-            />
-
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="业务年月">
                     <el-date-picker
@@ -373,7 +367,6 @@ import {
     PAGE_SIZE_OPTIONS,
     PAGINATION_LAYOUT,
 } from "@/utils/pagination";
-import SearchCardIntro from "@/components/SearchCardIntro.vue";
 import {
     detailSummaryMethod,
     formatAmount,

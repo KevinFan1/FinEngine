@@ -6,6 +6,7 @@ import axios, {
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { decryptResponse, encryptRequest } from "@/api/crypto";
 import { forceLogout } from "@/utils/authSession";
+import { getStoredAuthToken, isAuthTokenExpired } from "@/utils/authToken";
 
 // API response wrapper type
 export interface ApiResponse<T = any> {
@@ -48,7 +49,14 @@ const service: AxiosInstance = axios.create({
 // Request interceptor - inject JWT token
 service.interceptors.request.use(
     async (config: InternalAxiosRequestConfig) => {
-        const token = localStorage.getItem("token");
+        const token = getStoredAuthToken();
+        if (token && isAuthTokenExpired(token) && !isAuthPublicRequest(config.url)) {
+            const message = "登录已超时，请重新登录";
+            forceLogout({ message });
+            const error = new ApiBusinessError(message, 401);
+            markRequestErrorShown(error, message);
+            return Promise.reject(error);
+        }
         if (token && config.headers) {
             config.headers.Authorization = `Bearer ${token}`;
         }
@@ -63,6 +71,15 @@ service.interceptors.request.use(
         return Promise.reject(error);
     },
 );
+
+function isAuthPublicRequest(url: string | undefined): boolean {
+    return Boolean(
+        url &&
+            ["/auth/login", "/auth/captcha"].some(
+                (publicUrl) => url === publicUrl || url.endsWith(publicUrl),
+            ),
+    );
+}
 
 // Response interceptor - handle errors
 service.interceptors.response.use(
