@@ -16,6 +16,7 @@ from app.models.upload import UploadFile
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.task import TaskListOut, TaskOut
+from app.services.oss_service import is_oss_object_unavailable_error, oss_service
 from app.services.platform_profile_service import resolve_platform_profile
 from app.services.shop_visibility import active_shop_filter
 from app.utils.query_filters import datetime_range_filters, parse_query_datetime, split_int_filter_values
@@ -56,6 +57,12 @@ class TaskBatchActionOut(BaseModel):
     failed_count: int
     success_ids: list[int]
     failed_items: list[dict[str, object]]
+
+
+class TaskSourceDownloadOut(BaseModel):
+    download_url: str
+    filename: str
+    expires_seconds: int
 
 
 @router.get("", response_model=ApiResponse[PageResponse[TaskListOut]])
@@ -265,6 +272,45 @@ async def _load_task_with_file(
     if current_user.role != "superadmin" and task.org_id != current_user.org_id:
         return ApiResponse(code=403, message="无权访问该任务")
     return task, upload_file
+
+
+@router.post("/{task_id}/source-download", response_model=ApiResponse[TaskSourceDownloadOut])
+async def get_task_source_download(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Return a short-lived download URL for the uploaded source file."""
+    if current_user.role != "superadmin":
+        return ApiResponse(code=403, message="仅超级管理员可下载原表")
+
+    loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
+    if isinstance(loaded, ApiResponse):
+        return loaded
+
+    _task, upload_file = loaded
+    if not upload_file.oss_key:
+        return ApiResponse(code=404, message="原表不存在")
+
+    expires_seconds = 300
+    try:
+        download_url = oss_service.sign_download_url(
+            upload_file.oss_key,
+            expires_seconds=expires_seconds,
+            filename=upload_file.original_name,
+        )
+    except Exception as exc:
+        if is_oss_object_unavailable_error(exc):
+            return ApiResponse(code=404, message="源文件已过期或不存在，无法下载")
+        return ApiResponse(code=502, message=f"生成下载链接失败: {exc}")
+
+    return ApiResponse(
+        data=TaskSourceDownloadOut(
+            download_url=download_url,
+            filename=upload_file.original_name,
+            expires_seconds=expires_seconds,
+        )
+    )
 
 
 async def _validate_task_action(

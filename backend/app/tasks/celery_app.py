@@ -14,7 +14,7 @@ from celery.signals import worker_process_shutdown
 
 from app.core.config import settings
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error
-from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
+from app.services.upload_period_service import EmptyTabularDataError, extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import normalize_positive_summary_fields, safe_str
 
 celery_app = Celery("finengine", broker=settings.CELERY_REDIS_URL, backend=settings.CELERY_REDIS_URL)
@@ -143,6 +143,28 @@ def _set_task_result_from_summary(task, summary: dict) -> None:
     task.processed_rows = int(summary.get("total_rows") or 0)
     task.success_rows = int(summary.get("success_rows") or 0)
     task.failed_rows = int(summary.get("failed_rows") or 0)
+
+
+def _mark_task_empty_success(task, upload_file, *, file_type: str) -> None:
+    task.status = "success"
+    task.progress = 100
+    task.processed_rows = 0
+    task.success_rows = 0
+    task.failed_rows = 0
+    task.error_message = "空表，没有数据"
+    task.result_summary = {
+        "type": file_type,
+        "total_rows": 0,
+        "success_rows": 0,
+        "failed_rows": 0,
+        "groups": 0,
+        "errors": ["空表，没有数据"],
+    }
+    task.finished_at = datetime.now(timezone.utc)
+    if upload_file:
+        upload_file.status = "success"
+        upload_file.error_message = task.error_message
+        upload_file.row_count = 0
 
 
 def _group_return_cost_by_order_created_time(
@@ -655,31 +677,36 @@ async def _process_file_platform_async(
                 oss_service.download_to_temp(oss_key, tmp.name)
 
                 period_header = await resolve_upload_period_header(db, platform_code, file_type)
-                upload_period = extract_upload_period(
-                    tmp.name,
-                    platform_code=platform_code,
-                    type_code=file_type,
-                    header_name=period_header,
-                )
-                source_year = upload_period.year
-                source_month = upload_period.month
-                if upload_file:
-                    if (
-                        upload_file.parsed_year is not None
-                        and upload_file.parsed_month is not None
-                        and (upload_file.parsed_year, upload_file.parsed_month) != (source_year, source_month)
-                    ):
-                        logger.warning(
-                            "上传年月和文件所属时间列不一致，使用文件内容 file_id=%s stored=%s-%s extracted=%s-%s header=%s",
-                            upload_file.id,
-                            upload_file.parsed_year,
-                            upload_file.parsed_month,
-                            source_year,
-                            source_month,
-                            upload_period.header,
-                        )
-                    upload_file.parsed_year = source_year
-                    upload_file.parsed_month = source_month
+                try:
+                    upload_period = extract_upload_period(
+                        tmp.name,
+                        platform_code=platform_code,
+                        type_code=file_type,
+                        header_name=period_header,
+                    )
+                    source_year = upload_period.year
+                    source_month = upload_period.month
+                    if upload_file:
+                        if (
+                            upload_file.parsed_year is not None
+                            and upload_file.parsed_month is not None
+                            and (upload_file.parsed_year, upload_file.parsed_month) != (source_year, source_month)
+                        ):
+                            logger.warning(
+                                "上传年月和文件所属时间列不一致，使用文件内容 file_id=%s stored=%s-%s extracted=%s-%s header=%s",
+                                upload_file.id,
+                                upload_file.parsed_year,
+                                upload_file.parsed_month,
+                                source_year,
+                                source_month,
+                                upload_period.header,
+                            )
+                        upload_file.parsed_year = source_year
+                        upload_file.parsed_month = source_month
+                except EmptyTabularDataError:
+                    _mark_task_empty_success(task, upload_file, file_type=file_type)
+                    await db.commit()
+                    return
 
                 # 4. Load category dictionary (best-effort)
                 platform_stmt = select(Platform).where(Platform.code == profile.processor_code, Platform.is_deleted.is_(False))

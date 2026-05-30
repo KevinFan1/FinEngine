@@ -24,7 +24,7 @@ from app.services.partition_service import BIC_SOURCE_PARTITION, ensure_month_pa
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
-from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
+from app.services.upload_period_service import EmptyTabularDataError, extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
 from app.utils.query_filters import datetime_range_filters, resolve_org_ids
@@ -53,6 +53,27 @@ def _restore_bic_result_state(task: BicTask, state: dict[str, object]) -> None:
     task.success_rows = int(state.get("success_rows") or 0)
     task.failed_rows = int(state.get("failed_rows") or 0)
     task.result_summary = state.get("result_summary")  # type: ignore[assignment]
+
+
+def _mark_bic_empty_success(task: BicTask, upload_file: BicUploadFile) -> None:
+    task.processed_rows = 0
+    task.success_rows = 0
+    task.failed_rows = 0
+    task.result_summary = {
+        "文件类型": "BIC",
+        "总行数": 0,
+        "符合条件行数": 0,
+        "失败行数": 0,
+        "明细分组数": 0,
+        "源数据行数": 0,
+        "错误明细": ["空表，没有数据"],
+    }
+    task.status = "success"
+    task.progress = 100
+    task.error_message = "空表，没有数据"
+    task.finished_at = datetime.now(timezone.utc)
+    upload_file.status = "processed"
+    upload_file.error_message = task.error_message
 
 
 def _service_provider_filter(column, service_provider: str | None):
@@ -694,14 +715,20 @@ class BicAccountingService:
             with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
                 oss_service.download_to_temp(upload_file.oss_key, tmp.name)
                 period_header = await resolve_upload_period_header(db, upload_file.platform_code, "bic")
-                upload_period = extract_upload_period(
-                    tmp.name,
-                    platform_code=upload_file.platform_code,
-                    type_code="bic",
-                    header_name=period_header,
-                )
-                upload_file.accounting_year = upload_period.year
-                upload_file.accounting_month = upload_period.month
+                try:
+                    upload_period = extract_upload_period(
+                        tmp.name,
+                        platform_code=upload_file.platform_code,
+                        type_code="bic",
+                        header_name=period_header,
+                    )
+                    upload_file.accounting_year = upload_period.year
+                    upload_file.accounting_month = upload_period.month
+                except EmptyTabularDataError:
+                    _mark_bic_empty_success(task, upload_file)
+                    await db.flush()
+                    await db.refresh(task)
+                    return task
                 summary = await BicAccountingService.persist_task_result(
                     db,
                     task=task,

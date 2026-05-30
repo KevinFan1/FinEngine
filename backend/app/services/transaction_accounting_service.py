@@ -4,11 +4,14 @@ import io
 import logging
 import re
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from time import perf_counter
+from typing import Iterator
 
 from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
@@ -47,7 +50,7 @@ from app.services.audit_service import AuditService
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
-from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
+from app.services.upload_period_service import parse_period_value, resolve_upload_period_header
 from app.services.transaction_rule_engine import TransactionEvaluationResult, TransactionRuleCandidate, evaluate_transaction_row_matches
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
@@ -183,6 +186,63 @@ class TransactionAnnualSummaryReport:
     year: int
     months: list[str]
     rows: list[TransactionAnnualSummaryReportRow]
+
+
+class _DouyinDongzhangRowStream:
+    def __init__(
+        self,
+        *,
+        header: list[str],
+        header_row_number: int,
+        row_iter: Iterator[tuple[object, ...] | list[str]],
+        col_idx: dict[str, int],
+        period_header: str,
+        period_index: int,
+        download_seconds: float,
+        open_seconds: float,
+    ) -> None:
+        self.header = header
+        self.header_row_number = header_row_number
+        self.period_header = period_header
+        self.download_seconds = download_seconds
+        self.open_seconds = open_seconds
+        self.period_counts: Counter[str] = Counter()
+        self.period_row_count = 0
+        self.rows = self._iter_rows(row_iter=row_iter, col_idx=col_idx, period_index=period_index)
+
+    def _iter_rows(
+        self,
+        *,
+        row_iter: Iterator[tuple[object, ...] | list[str]],
+        col_idx: dict[str, int],
+        period_index: int,
+    ) -> Iterator[tuple[int, dict[str, object]]]:
+        for row_number, row in enumerate(row_iter, start=self.header_row_number + 1):
+            if not any(safe_str(cell) for cell in row):
+                continue
+
+            period_value = row[period_index] if period_index < len(row) else None
+            period = parse_period_value(period_value)
+            if period is not None:
+                key = f"{period[0]}-{period[1]:02d}"
+                self.period_counts[key] += 1
+                self.period_row_count += 1
+
+            yield row_number, FinancialSummaryExcelProcessorMixin._row_to_values(row, col_idx)
+
+    def resolve_upload_period(self) -> tuple[int, int]:
+        if not self.period_counts:
+            raise ValueError(f"{self.period_header}列未解析到有效所属年月")
+        if len(self.period_counts) > 1:
+            summary = "、".join(
+                f"{period} 共 {count} 行"
+                for period, count in sorted(self.period_counts.items())
+            )
+            raise ValueError(f"{self.period_header}列检测到多个所属年月：{summary}。请按月份拆分文件后重新上传")
+
+        only_period = next(iter(self.period_counts))
+        year_text, month_text = only_period.split("-", 1)
+        return int(year_text), int(month_text)
 
 
 class TransactionAccountingService:
@@ -1516,6 +1576,13 @@ class TransactionAccountingService:
 
     @staticmethod
     async def execute_task(db: AsyncSession, *, task_id: int) -> TransactionTask:
+        task_started = perf_counter()
+        load_seconds = 0.0
+        rules_seconds = 0.0
+        process_seconds = 0.0
+        persist_seconds = 0.0
+        download_seconds: float | None = None
+        open_seconds: float | None = None
         task = await db.get(TransactionTask, task_id)
         if task is None or task.is_deleted:
             raise ValueError("动账核算任务不存在")
@@ -1533,70 +1600,122 @@ class TransactionAccountingService:
 
         try:
             period_header = await resolve_upload_period_header(db, upload_file.platform_code, "动账")
-            header, data_rows = TransactionAccountingService._load_douyin_dongzhang_rows_from_oss(
-                upload_file,
-                period_header=period_header,
-            )
-            rules = await TransactionAccountingService._load_rule_candidates(db, platform_code=upload_file.platform_code)
-            if not rules:
-                raise ValueError("未配置启用的动账核算规则")
+            load_started = perf_counter()
+            with TransactionAccountingService._iter_douyin_dongzhang_rows_from_oss(upload_file, period_header=period_header) as row_stream:
+                load_seconds = perf_counter() - load_started
+                download_seconds = row_stream.download_seconds
+                open_seconds = row_stream.open_seconds
 
-            summary_accumulator: dict[tuple[int, int, int | None, int | None], dict[str, object]] = {}
-            rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]] = {}
-            error_messages: list[str] = []
-            counts = defaultdict(int)
-            source_success_rows = 0
-            rule_map = {rule.id: rule for rule in rules}
-            for offset, row in enumerate(data_rows, start=2):
-                direction_field = TransactionAccountingService._first_existing_field(row, [rule.direction_field for rule in rules], default="动账方向")
-                scene_field = TransactionAccountingService._first_existing_field(row, [rule.scene_field for rule in rules], default="动账场景")
-                remark_field = TransactionAccountingService._first_existing_field(row, [rule.remark_field for rule in rules], default="备注")
-                detail_year, detail_month, period_error = TransactionAccountingService._resolve_transaction_period(row)
-                evaluations = evaluate_transaction_row_matches(
-                    row=row,
-                    row_number=offset,
-                    rules=rules,
-                    direction_field=direction_field,
-                    scene_field=scene_field,
-                    remark_field=remark_field,
-                )
-                row_has_match = False
-                for evaluation in evaluations:
-                    detail_evaluation = TransactionAccountingService._period_failed_result(evaluation=evaluation, message=period_error) if period_error else evaluation
-                    counts[detail_evaluation.status] += 1
-                    matched_rule = rule_map.get(detail_evaluation.rule_id) if detail_evaluation.rule_id else None
-                    if detail_evaluation.status == "matched" and matched_rule is not None:
-                        row_has_match = True
-                        key = (
-                            matched_rule.subject_id,
-                            matched_rule.category_id,
-                            detail_year,
-                            detail_month,
-                        )
-                        bucket = summary_accumulator.setdefault(key, {"amount": Decimal("0"), "count": 0, "first_row": offset})
-                        bucket["amount"] = bucket["amount"] + detail_evaluation.calculated_amount
-                        bucket["count"] = int(bucket["count"]) + 1
-                        bucket["first_row"] = min(int(bucket["first_row"]), offset)
-                        rule_key = (matched_rule.id, detail_year, detail_month)
-                        rule_bucket = rule_accumulator.setdefault(rule_key, {"amount": Decimal("0"), "count": 0, "first_row": offset})
-                        rule_bucket["amount"] = rule_bucket["amount"] + detail_evaluation.calculated_amount
-                        rule_bucket["count"] = int(rule_bucket["count"]) + 1
-                        rule_bucket["first_row"] = min(int(rule_bucket["first_row"]), offset)
-                        continue
+                rules_started = perf_counter()
+                rules = await TransactionAccountingService._load_rule_candidates(db, platform_code=upload_file.platform_code)
+                rules_seconds = perf_counter() - rules_started
+                if not rules:
+                    raise ValueError("未配置启用的动账核算规则")
 
-                    if detail_evaluation.status in {"unmatched", "failed"}:
-                        error_message = TransactionAccountingService._build_transaction_row_error_message(
-                            row=row,
-                            evaluation=detail_evaluation,
-                            direction_field=direction_field,
-                            scene_field=scene_field,
-                            remark_field=remark_field,
-                            period_error=period_error,
-                        )
-                        if len(error_messages) < TRANSACTION_ERROR_SAMPLE_LIMIT:
-                            error_messages.append(error_message)
-                if row_has_match:
-                    source_success_rows += 1
+                summary_accumulator: dict[tuple[int, int, int | None, int | None], dict[str, object]] = {}
+                rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]] = {}
+                error_messages: list[str] = []
+                counts = defaultdict(int)
+                source_success_rows = 0
+                total_rows = 0
+                rule_map = {rule.id: rule for rule in rules}
+                direction_fields = [rule.direction_field for rule in rules]
+                scene_fields = [rule.scene_field for rule in rules]
+                remark_fields = [rule.remark_field for rule in rules]
+
+                process_started = perf_counter()
+                for offset, row in row_stream.rows:
+                    total_rows += 1
+                    direction_field = TransactionAccountingService._first_existing_field(row, direction_fields, default="动账方向")
+                    scene_field = TransactionAccountingService._first_existing_field(row, scene_fields, default="动账场景")
+                    remark_field = TransactionAccountingService._first_existing_field(row, remark_fields, default="备注")
+                    detail_year, detail_month, period_error = TransactionAccountingService._resolve_transaction_period(row)
+                    evaluations = evaluate_transaction_row_matches(
+                        row=row,
+                        row_number=offset,
+                        rules=rules,
+                        direction_field=direction_field,
+                        scene_field=scene_field,
+                        remark_field=remark_field,
+                    )
+                    row_has_match = False
+                    for evaluation in evaluations:
+                        detail_evaluation = TransactionAccountingService._period_failed_result(evaluation=evaluation, message=period_error) if period_error else evaluation
+                        counts[detail_evaluation.status] += 1
+                        matched_rule = rule_map.get(detail_evaluation.rule_id) if detail_evaluation.rule_id else None
+                        if detail_evaluation.status == "matched" and matched_rule is not None:
+                            row_has_match = True
+                            key = (
+                                matched_rule.subject_id,
+                                matched_rule.category_id,
+                                detail_year,
+                                detail_month,
+                            )
+                            bucket = summary_accumulator.setdefault(key, {"amount": Decimal("0"), "count": 0, "first_row": offset})
+                            bucket["amount"] = bucket["amount"] + detail_evaluation.calculated_amount
+                            bucket["count"] = int(bucket["count"]) + 1
+                            bucket["first_row"] = min(int(bucket["first_row"]), offset)
+                            rule_key = (matched_rule.id, detail_year, detail_month)
+                            rule_bucket = rule_accumulator.setdefault(rule_key, {"amount": Decimal("0"), "count": 0, "first_row": offset})
+                            rule_bucket["amount"] = rule_bucket["amount"] + detail_evaluation.calculated_amount
+                            rule_bucket["count"] = int(rule_bucket["count"]) + 1
+                            rule_bucket["first_row"] = min(int(rule_bucket["first_row"]), offset)
+                            continue
+
+                        if detail_evaluation.status in {"unmatched", "failed"}:
+                            error_message = TransactionAccountingService._build_transaction_row_error_message(
+                                row=row,
+                                evaluation=detail_evaluation,
+                                direction_field=direction_field,
+                                scene_field=scene_field,
+                                remark_field=remark_field,
+                                period_error=period_error,
+                            )
+                            if len(error_messages) < TRANSACTION_ERROR_SAMPLE_LIMIT:
+                                error_messages.append(error_message)
+                    if row_has_match:
+                        source_success_rows += 1
+
+                process_seconds = perf_counter() - process_started
+                if total_rows == 0:
+                    task.total_rows = 0
+                    task.matched_rows = 0
+                    task.unmatched_rows = 0
+                    task.failed_rows = 0
+                    task.progress = 100
+                    task.status = "success"
+                    task.result_summary = {
+                        "总行数": 0,
+                        "成功行数": 0,
+                        "匹配明细数": 0,
+                        "未匹配行数": 0,
+                        "失败行数": 0,
+                        "汇总分组数": 0,
+                        "错误明细": ["空表，没有数据"],
+                    }
+                    task.error_message = "空表，没有数据"
+                    task.finished_at = datetime.now(timezone.utc)
+                    upload_file.status = "processed"
+                    upload_file.error_message = task.error_message
+                    logger.info(
+                        "transaction_accounting.task_perf task_id=%s file_id=%s rows=0 matched=0 unmatched=0 failed=0 rules=%s groups=0 download_seconds=%.3f open_seconds=%.3f load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=0.000 total_seconds=%.3f rows_per_second=0.0 empty=true",
+                        task.id,
+                        upload_file.id,
+                        len(rules),
+                        download_seconds or 0.0,
+                        open_seconds or 0.0,
+                        load_seconds,
+                        rules_seconds,
+                        process_seconds,
+                        perf_counter() - task_started,
+                    )
+                    await db.flush()
+                    await db.refresh(task)
+                    return task
+
+                upload_year, upload_month = row_stream.resolve_upload_period()
+                upload_file.accounting_year = upload_year
+                upload_file.accounting_month = upload_month
 
             TransactionAccountingService._log_rule_result_summaries(
                 task=task,
@@ -1604,6 +1723,7 @@ class TransactionAccountingService:
                 rule_map=rule_map,
                 rule_accumulator=rule_accumulator,
             )
+            persist_started = perf_counter()
             await db.execute(delete(TransactionDetail).where(TransactionDetail.task_id == task.id))
             await db.execute(delete(TransactionSummaryRow).where(TransactionSummaryRow.task_id == task.id))
             await TransactionAccountingService._create_aggregated_result_rows(
@@ -1613,7 +1733,8 @@ class TransactionAccountingService:
                 summary_accumulator=summary_accumulator,
             )
             await db.flush()
-            task.total_rows = len(data_rows)
+            persist_seconds = perf_counter() - persist_started
+            task.total_rows = total_rows
             task.matched_rows = counts["matched"]
             task.unmatched_rows = counts["unmatched"]
             task.failed_rows = counts["failed"]
@@ -1639,6 +1760,25 @@ class TransactionAccountingService:
                 task.error_message = None
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "processed"
+            logger.info(
+                "transaction_accounting.task_perf task_id=%s file_id=%s rows=%s matched=%s unmatched=%s failed=%s rules=%s groups=%s download_seconds=%.3f open_seconds=%.3f load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f rows_per_second=%.1f",
+                task.id,
+                upload_file.id,
+                task.total_rows,
+                task.matched_rows,
+                task.unmatched_rows,
+                task.failed_rows,
+                len(rules),
+                len(summary_accumulator),
+                download_seconds or 0.0,
+                open_seconds or 0.0,
+                load_seconds,
+                rules_seconds,
+                process_seconds,
+                persist_seconds,
+                perf_counter() - task_started,
+                (task.total_rows / process_seconds) if process_seconds > 0 else 0.0,
+            )
         except Exception as exc:
             await db.rollback()
             task = await db.get(TransactionTask, task_id)
@@ -1655,6 +1795,18 @@ class TransactionAccountingService:
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "expired" if is_expired else "failed"
             upload_file.error_message = task.error_message
+            logger.warning(
+                "transaction_accounting.task_failed task_id=%s file_id=%s status=%s load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f error=%s",
+                task.id,
+                upload_file.id,
+                task.status,
+                load_seconds,
+                rules_seconds,
+                process_seconds,
+                persist_seconds,
+                perf_counter() - task_started,
+                task.error_message,
+            )
         await db.flush()
         await db.refresh(task)
         return task
@@ -1775,19 +1927,30 @@ class TransactionAccountingService:
         *,
         period_header: str | None = None,
     ) -> tuple[list[str], list[dict[str, object]]]:
+        with TransactionAccountingService._iter_douyin_dongzhang_rows_from_oss(upload_file, period_header=period_header) as row_stream:
+            rows = [row for _, row in row_stream.rows]
+            if not rows:
+                return row_stream.header, rows
+            upload_year, upload_month = row_stream.resolve_upload_period()
+            upload_file.accounting_year = upload_year
+            upload_file.accounting_month = upload_month
+            return row_stream.header, rows
+
+    @staticmethod
+    @contextmanager
+    def _iter_douyin_dongzhang_rows_from_oss(
+        upload_file: TransactionUploadFile,
+        *,
+        period_header: str | None = None,
+    ) -> Iterator[_DouyinDongzhangRowStream]:
         if upload_file.platform_code != "douyin":
             raise ValueError("动账核算 v1 仅支持抖音动账")
         suffix = Path(upload_file.original_name).suffix or ".xlsx"
         with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+            download_started = perf_counter()
             oss_service.download_to_temp(upload_file.oss_key, tmp.name)
-            upload_period = extract_upload_period(
-                tmp.name,
-                platform_code=upload_file.platform_code,
-                type_code="动账",
-                header_name=period_header,
-            )
-            upload_file.accounting_year = upload_period.year
-            upload_file.accounting_month = upload_period.month
+            download_seconds = perf_counter() - download_started
+            open_started = perf_counter()
             with open_tabular_rows(tmp.name) as rows:
                 if rows is None:
                     raise ValueError("无法打开表格文件")
@@ -1801,8 +1964,22 @@ class TransactionAccountingService:
                 missing = FinancialSummaryExcelProcessorMixin._missing_headers(col_idx, required_headers)
                 if missing:
                     raise ValueError(f"缺少抖音动账必要表头: {', '.join(missing)}")
-                data_rows = [FinancialSummaryExcelProcessorMixin._row_to_values(row, col_idx) for row in row_iter if any(safe_str(cell) for cell in row)]
-                return header, data_rows
+
+                resolved_period_header = period_header or "动账时间"
+                period_col_idx = FinancialSummaryExcelProcessorMixin._build_col_idx(header, (resolved_period_header,))
+                if resolved_period_header not in period_col_idx:
+                    raise ValueError(f"缺少所属时间表头: {resolved_period_header}")
+
+                yield _DouyinDongzhangRowStream(
+                    header=header,
+                    header_row_number=_header_row_number,
+                    row_iter=row_iter,
+                    col_idx=col_idx,
+                    period_header=resolved_period_header,
+                    period_index=period_col_idx[resolved_period_header],
+                    download_seconds=download_seconds,
+                    open_seconds=perf_counter() - open_started,
+                )
 
     @staticmethod
     def _rows_to_dicts(header: list[str], rows: list[list[object]]) -> list[dict[str, object]]:

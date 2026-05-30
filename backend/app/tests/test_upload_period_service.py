@@ -4,6 +4,7 @@ import pytest
 from openpyxl import Workbook
 
 from app.services.upload_period_service import (
+    EmptyTabularDataError,
     extract_upload_period,
     get_upload_period_header,
     normalize_period_type,
@@ -57,6 +58,24 @@ def test_extract_upload_period_rejects_multiple_months(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="多个所属年月"):
         extract_upload_period(str(file_path), platform_code="抖音", type_code="动账")
+
+
+def test_extract_upload_period_marks_header_only_sheet_as_empty(tmp_path: Path) -> None:
+    file_path = tmp_path / "dongzhang_empty.xlsx"
+    _write_workbook(file_path, ["流水号", "动账时间"], [])
+
+    with pytest.raises(EmptyTabularDataError, match="空表，没有数据"):
+        extract_upload_period(str(file_path), platform_code="抖音", type_code="动账")
+
+
+def test_extract_upload_period_keeps_invalid_period_error_for_non_empty_rows(tmp_path: Path) -> None:
+    file_path = tmp_path / "dongzhang_invalid_period.xlsx"
+    _write_workbook(file_path, ["流水号", "动账时间"], [["a", "不是日期"]])
+
+    with pytest.raises(ValueError, match="动账时间列未解析到有效所属年月") as exc_info:
+        extract_upload_period(str(file_path), platform_code="抖音", type_code="动账")
+
+    assert not isinstance(exc_info.value, EmptyTabularDataError)
 
 
 def test_extract_upload_period_supports_header_aliases_and_type_aliases(tmp_path: Path) -> None:

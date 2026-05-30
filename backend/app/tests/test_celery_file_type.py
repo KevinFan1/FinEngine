@@ -15,6 +15,7 @@ from app.tasks.celery_app import (
     _group_return_cost_by_order_created_time,
     _group_money_by_order_or_fallback_time,
     _infer_file_type,
+    _mark_task_empty_success,
     _result_task_status_from_processor_result,
     _result_task_status_from_summary,
 )
@@ -321,6 +322,41 @@ def test_mark_task_failed_sets_expired_for_unavailable_source_file() -> None:
     assert upload_file.status == "expired"
     assert upload_file.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
     assert upload_file.row_count == 8
+
+
+def test_mark_task_empty_success_keeps_success_status_with_empty_reason() -> None:
+    task = SimpleNamespace(
+        status="processing",
+        progress=20,
+        processed_rows=4,
+        success_rows=3,
+        failed_rows=1,
+        error_message=None,
+        result_summary=None,
+        finished_at=None,
+    )
+    upload_file = SimpleNamespace(status="processing", error_message=None, row_count=4)
+
+    _mark_task_empty_success(task, upload_file, file_type="动账")
+
+    assert task.status == "success"
+    assert task.progress == 100
+    assert task.processed_rows == 0
+    assert task.success_rows == 0
+    assert task.failed_rows == 0
+    assert task.error_message == "空表，没有数据"
+    assert task.result_summary == {
+        "type": "动账",
+        "total_rows": 0,
+        "success_rows": 0,
+        "failed_rows": 0,
+        "groups": 0,
+        "errors": ["空表，没有数据"],
+    }
+    assert task.finished_at is not None
+    assert upload_file.status == "success"
+    assert upload_file.error_message == "空表，没有数据"
+    assert upload_file.row_count == 0
 
 
 def test_celery_imports_include_bic_task_module() -> None:

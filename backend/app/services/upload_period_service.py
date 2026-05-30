@@ -36,6 +36,10 @@ class UploadPeriodResult:
     period_counts: dict[str, int]
 
 
+class EmptyTabularDataError(ValueError):
+    """Raised when a table has headers but no non-empty data rows."""
+
+
 TYPE_ALIASES = {
     "BIC": "bic",
     "GMV": "gmv",
@@ -182,8 +186,12 @@ def extract_upload_period(
         target_index = _resolve_single_header_index(header_row, resolved_header_name)
 
         period_counts: Counter[str] = Counter()
+        data_rows = 0
         valid_rows = 0
         for row in row_iter:
+            if not any(safe_str(cell) for cell in row):
+                continue
+            data_rows += 1
             value = row[target_index] if target_index < len(row) else None
             period = parse_period_value(value)
             if period is None:
@@ -193,6 +201,8 @@ def extract_upload_period(
             valid_rows += 1
 
     if not period_counts:
+        if data_rows == 0:
+            raise EmptyTabularDataError("空表，没有数据")
         raise ValueError(f"{resolved_header_name}列未解析到有效所属年月")
     if len(period_counts) > 1:
         summary = "、".join(f"{period} 共 {count} 行" for period, count in sorted(period_counts.items()))

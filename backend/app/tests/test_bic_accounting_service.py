@@ -13,6 +13,7 @@ from app.services.bic_accounting_service import (
     BIC_RECONCILIATION_SOURCE_EXPORT_HEADERS,
     BicAccountingService,
     _dedupe_bic_rows,
+    _mark_bic_empty_success,
     _service_provider_filter,
     _upsert_source_rows_by_flow,
 )
@@ -461,6 +462,52 @@ def test_service_provider_filter_uses_fuzzy_multi_value_matching() -> None:
     assert "%服务商A%" in statement
     assert "%服务商B%" in statement
     assert " OR " in statement
+
+
+def test_mark_bic_empty_success_keeps_success_status_with_empty_reason() -> None:
+    task = BicTask(
+        id=1,
+        file_id=2,
+        org_id=3,
+        user_id=4,
+        status="processing",
+        progress=20,
+        processed_rows=6,
+        success_rows=5,
+        failed_rows=1,
+        result_summary={"old": True},
+    )
+    upload_file = BicUploadFile(
+        id=2,
+        org_id=3,
+        user_id=4,
+        original_name="26年02月_bic_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        status="processing",
+    )
+
+    _mark_bic_empty_success(task, upload_file)
+
+    assert task.status == "success"
+    assert task.progress == 100
+    assert task.processed_rows == 0
+    assert task.success_rows == 0
+    assert task.failed_rows == 0
+    assert task.error_message == "空表，没有数据"
+    assert task.result_summary == {
+        "文件类型": "BIC",
+        "总行数": 0,
+        "符合条件行数": 0,
+        "失败行数": 0,
+        "明细分组数": 0,
+        "源数据行数": 0,
+        "错误明细": ["空表，没有数据"],
+    }
+    assert task.finished_at is not None
+    assert upload_file.status == "processed"
+    assert upload_file.error_message == "空表，没有数据"
 
 
 @pytest.mark.asyncio

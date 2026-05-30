@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from openpyxl import Workbook
 import pytest
@@ -57,6 +58,59 @@ def make_rule(
         result_direction=result_direction,
         priority=priority,
     )
+
+
+class _FakeDongzhangRowStream:
+    def __init__(
+        self,
+        *,
+        header: list[str],
+        rows: list[dict[str, object]],
+        period: tuple[int, int] = (2026, 2),
+    ) -> None:
+        self.header = header
+        self.header_row_number = 1
+        self.rows = ((index, row) for index, row in enumerate(rows, start=2))
+        self.period_header = "动账时间"
+        self.download_seconds = 0.0
+        self.open_seconds = 0.0
+        self._period = period
+
+    def resolve_upload_period(self) -> tuple[int, int]:
+        return self._period
+
+
+class _FakeDongzhangRowStreamContext:
+    def __init__(self, row_stream: _FakeDongzhangRowStream | Exception) -> None:
+        self._row_stream = row_stream
+
+    def __enter__(self) -> _FakeDongzhangRowStream:
+        if isinstance(self._row_stream, Exception):
+            raise self._row_stream
+        return self._row_stream
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
+        return None
+
+
+def _mock_dongzhang_row_stream(
+    monkeypatch,
+    *,
+    header: list[str],
+    rows: list[dict[str, object]],
+    period: tuple[int, int] = (2026, 2),
+):
+    mock = Mock(
+        return_value=_FakeDongzhangRowStreamContext(
+            _FakeDongzhangRowStream(header=header, rows=rows, period=period)
+        )
+    )
+    monkeypatch.setattr(
+        TransactionAccountingService,
+        "_iter_douyin_dongzhang_rows_from_oss",
+        staticmethod(mock),
+    )
+    return mock
 
 
 def test_evaluate_transaction_row_uses_highest_priority_matching_rule() -> None:
@@ -293,6 +347,8 @@ def test_load_douyin_dongzhang_rows_finds_header_after_preface(tmp_path: Path, m
     assert rows[0]["备注"] == "订单结算"
     assert rows[0]["平台服务费"] == "1"
     assert rows[0]["佣金"] == "2"
+    assert upload_file.accounting_year == 2026
+    assert upload_file.accounting_month == 5
 
 
 def test_parse_transaction_filename_uses_existing_upload_naming_rule() -> None:
@@ -547,10 +603,11 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
         _ = platform_code
         return rules
 
-    monkeypatch.setattr(
-        TransactionAccountingService,
-        "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "备注", "订单实付应结", "实际平台补贴"], [row])),
+    stream_mock = _mock_dongzhang_row_stream(
+        monkeypatch,
+        header=["动账时间", "动账方向", "备注", "订单实付应结", "实际平台补贴"],
+        rows=[row],
+        period=(2026, 2),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -588,9 +645,73 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
         (1, 11, Decimal("100.00")),
         (2, 21, Decimal("3.50")),
     }
+    stream_mock.assert_called_once()
     assert sum("transaction_accounting.rule_result" in record.message for record in caplog.records) == 2
     assert sum("transaction_accounting.category_result" in record.message for record in caplog.records) == 2
+    assert sum("transaction_accounting.task_perf" in record.message for record in caplog.records) == 1
     assert not any("transaction_accounting.row_multi_rule_match" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_execute_task_marks_header_only_file_success_with_empty_reason(monkeypatch) -> None:
+    task = TransactionTask(id=13, file_id=23, org_id=1, user_id=2, status="queued", progress=0)
+    upload_file = TransactionUploadFile(
+        id=23,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+    )
+    subject = TransactionSubject(id=1, name="收到抖音分账款", sort_order=10, status=1)
+    category = TransactionCategory(id=11, subject_id=1, name="订单结算", sort_order=10, status=1)
+    db = _TransactionAccountingSession(
+        task=task,
+        upload_file=upload_file,
+        subjects=[subject],
+        categories=[category],
+    )
+
+    async def fake_load_rule_candidates(_db, *, platform_code: str | None) -> list[TransactionRuleCandidate]:
+        _ = platform_code
+        return [make_rule(rule_id=1, subject_id=1, category_id=11)]
+
+    _mock_dongzhang_row_stream(
+        monkeypatch,
+        header=["动账时间", "动账方向", "备注", "订单实付应结"],
+        rows=[],
+        period=(2026, 2),
+    )
+    monkeypatch.setattr(
+        TransactionAccountingService,
+        "_load_rule_candidates",
+        staticmethod(fake_load_rule_candidates),
+    )
+
+    await TransactionAccountingService.execute_task(db, task_id=13)  # type: ignore[arg-type]
+
+    assert task.status == "success"
+    assert task.progress == 100
+    assert task.total_rows == 0
+    assert task.matched_rows == 0
+    assert task.unmatched_rows == 0
+    assert task.failed_rows == 0
+    assert task.error_message == "空表，没有数据"
+    assert task.result_summary == {
+        "总行数": 0,
+        "成功行数": 0,
+        "匹配明细数": 0,
+        "未匹配行数": 0,
+        "失败行数": 0,
+        "汇总分组数": 0,
+        "错误明细": ["空表，没有数据"],
+    }
+    assert upload_file.status == "processed"
+    assert upload_file.error_message == "空表，没有数据"
+    assert db.added_rows == []
 
 
 @pytest.mark.asyncio
@@ -646,10 +767,11 @@ async def test_execute_task_aggregates_detail_rows_during_processing(monkeypatch
         _ = platform_code
         return rules
 
-    monkeypatch.setattr(
-        TransactionAccountingService,
-        "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "备注", "订单实付应结"], rows)),
+    _mock_dongzhang_row_stream(
+        monkeypatch,
+        header=["动账时间", "动账方向", "备注", "订单实付应结"],
+        rows=rows,
+        period=(2026, 2),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -724,10 +846,11 @@ async def test_execute_task_records_row_error_reasons_without_blank_detail_rows(
         _ = platform_code
         return rules
 
-    monkeypatch.setattr(
-        TransactionAccountingService,
-        "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "动账场景", "备注", "动账金额", "订单实付应结"], rows)),
+    _mock_dongzhang_row_stream(
+        monkeypatch,
+        header=["动账时间", "动账方向", "动账场景", "备注", "动账金额", "订单实付应结"],
+        rows=rows,
+        period=(2026, 2),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -798,10 +921,11 @@ async def test_execute_task_rolls_back_before_persisting_failed_state_after_flus
         _ = platform_code
         return rules
 
-    monkeypatch.setattr(
-        TransactionAccountingService,
-        "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file, period_header=None: (["动账时间", "动账方向", "备注", "订单实付应结"], [row])),
+    _mock_dongzhang_row_stream(
+        monkeypatch,
+        header=["动账时间", "动账方向", "备注", "订单实付应结"],
+        rows=[row],
+        period=(2026, 2),
     )
     monkeypatch.setattr(
         TransactionAccountingService,
@@ -854,8 +978,8 @@ async def test_execute_task_marks_source_file_expired_and_preserves_previous_res
 
     monkeypatch.setattr(
         TransactionAccountingService,
-        "_load_douyin_dongzhang_rows_from_oss",
-        staticmethod(lambda _upload_file, period_header=None: (_ for _ in ()).throw(OSSObjectUnavailableError("missing"))),
+        "_iter_douyin_dongzhang_rows_from_oss",
+        staticmethod(lambda _upload_file, period_header=None: _FakeDongzhangRowStreamContext(OSSObjectUnavailableError("missing"))),
     )
 
     result = await TransactionAccountingService.execute_task(db, task_id=10)  # type: ignore[arg-type]

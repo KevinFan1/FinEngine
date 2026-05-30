@@ -349,7 +349,7 @@
                 </el-table-column>
                 <el-table-column
                     label="操作"
-                    width="190"
+                    width="220"
                     align="center"
                     fixed="right"
                     class-name="task-action-column"
@@ -362,6 +362,20 @@
                                 @click="openTaskDetail(row)"
                                 >查看</el-button
                             >
+                            <el-tooltip
+                                v-if="userStore.isSuperAdmin"
+                                content="下载原表"
+                                placement="top"
+                            >
+                                <el-button
+                                    type="primary"
+                                    link
+                                    :loading="downloadingTaskId === row.id"
+                                    @click="handleDownloadSource(row)"
+                                >
+                                    <el-icon><Download /></el-icon>
+                                </el-button>
+                            </el-tooltip>
                             <el-button
                                 v-if="row.status === 'failed'"
                                 type="primary"
@@ -490,6 +504,15 @@
                             >
                                 已过期
                             </el-tag>
+                            <el-button
+                                v-if="userStore.isSuperAdmin"
+                                size="small"
+                                :loading="downloadingTaskId === taskDetail.id"
+                                @click="handleDownloadSource(taskDetail)"
+                            >
+                                <el-icon><Download /></el-icon>
+                                原表
+                            </el-button>
                         </div>
                     </div>
                     <div class="detail-result-card">
@@ -627,6 +650,7 @@ import {
     recalculateTask,
     batchRetryTasks,
     batchRecalculateTasks,
+    getTaskSourceDownload,
     type Task,
     type TaskBatchActionResult,
 } from "@/api/task";
@@ -652,6 +676,7 @@ import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
+import { Download } from "@element-plus/icons-vue";
 
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
@@ -689,6 +714,7 @@ const shopLoading = ref(false);
 const shopOptions = ref<Shop[]>([]);
 const retryingTaskId = ref<number | null>(null);
 const recalculatingTaskId = ref<number | null>(null);
+const downloadingTaskId = ref<number | null>(null);
 const batchRetrying = ref(false);
 const batchRecalculating = ref(false);
 const retryDialogVisible = ref(false);
@@ -859,6 +885,25 @@ function formatJson(value: unknown) {
 function openTaskDetail(row: Task) {
     taskDetail.value = row;
     taskDetailDrawerVisible.value = true;
+}
+
+async function handleDownloadSource(row: Task) {
+    if (!userStore.isSuperAdmin || downloadingTaskId.value !== null) return;
+    downloadingTaskId.value = row.id;
+    try {
+        const credential = await getTaskSourceDownload(row.id);
+        const link = document.createElement("a");
+        link.href = credential.download_url;
+        link.download = credential.filename || row.filename || "原表.xlsx";
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch {
+        // Error handled by interceptor
+    } finally {
+        downloadingTaskId.value = null;
+    }
 }
 
 function handleSelectionChange(rows: Task[]) {

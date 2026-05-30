@@ -70,6 +70,12 @@ export interface TaskBatchActionResult {
     }>;
 }
 
+export interface TaskSourceDownload {
+    download_url: string;
+    filename: string;
+    expires_seconds: number;
+}
+
 /**
  * Get task list
  */
@@ -111,4 +117,8 @@ export function recalculateTask(id: number) {
 
 export function batchRecalculateTasks(taskIds: number[]) {
     return post<TaskBatchActionResult>("/tasks/batch/recalculate", { task_ids: taskIds });
+}
+
+export function getTaskSourceDownload(id: number) {
+    return post<TaskSourceDownload>(`/tasks/${id}/source-download`);
 }

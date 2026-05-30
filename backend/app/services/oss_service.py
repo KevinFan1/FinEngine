@@ -147,11 +147,24 @@ class AliyunOSSService:
         """Upload bytes or a file-like object to OSS, using the selected endpoint."""
         self._bucket(internal=internal).put_object(oss_key, content, headers=headers)
 
-    def sign_download_url(self, oss_key: str, *, expires_seconds: int = 300) -> str:
+    def sign_download_url(
+        self,
+        oss_key: str,
+        *,
+        expires_seconds: int = 300,
+        filename: str | None = None,
+    ) -> str:
         """Generate a short-lived public download URL for a private OSS object."""
         self._require_config()
         bucket = self._bucket(internal=False)
-        return bucket.sign_url("GET", oss_key, expires_seconds)
+        params = None
+        if filename:
+            escaped_filename = filename.replace("\\", "\\\\").replace('"', r"\"")
+            encoded_filename = urllib.parse.quote(filename)
+            params = {
+                "response-content-disposition": f"attachment; filename=\"{escaped_filename}\"; filename*=UTF-8''{encoded_filename}",
+            }
+        return bucket.sign_url("GET", oss_key, expires_seconds, params=params)
 
 
 # ── Alibaba Cloud OSS STS ────────────────────────────────────────────────────
