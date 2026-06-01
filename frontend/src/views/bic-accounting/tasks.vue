@@ -236,10 +236,19 @@
                         </div>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="190" align="center" fixed="right" class-name="task-action-column">
+                <el-table-column label="操作" width="220" align="center" fixed="right" class-name="task-action-column">
                     <template #default="{ row }">
                         <div class="task-action-group">
                             <el-button type="primary" link @click="openTaskDetail(row)">查看</el-button>
+                            <el-button
+                                v-if="userStore.isSuperAdmin"
+                                type="primary"
+                                link
+                                :loading="downloadingTaskId === row.id"
+                                @click="handleDownloadSource(row)"
+                            >
+                                下载原表
+                            </el-button>
                             <el-button
                                 v-if="canRecalculate(row)"
                                 type="primary"
@@ -289,6 +298,14 @@
                             <el-tag :type="taskStatusType(taskDetail.status)" size="small">
                                 {{ taskStatusLabel(taskDetail.status) }}
                             </el-tag>
+                            <el-button
+                                v-if="userStore.isSuperAdmin"
+                                size="small"
+                                :loading="downloadingTaskId === taskDetail.id"
+                                @click="handleDownloadSource(taskDetail)"
+                            >
+                                下载原表
+                            </el-button>
                         </div>
                     </div>
                     <div class="detail-result-card">
@@ -372,6 +389,7 @@ import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import {
     batchRecalculateBicTasks,
+    getBicTaskSourceDownload,
     listBicTasks,
     rerunBicTask,
     type BicTask,
@@ -404,6 +422,7 @@ const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
 const rerunningTaskId = ref<number | null>(null);
+const downloadingTaskId = ref<number | null>(null);
 const batchRecalculating = ref(false);
 const selectedRows = ref<BicTask[]>([]);
 const taskDetailDrawerVisible = ref(false);
@@ -710,6 +729,23 @@ async function rerunTask(row: BicTask) {
         await fetchData();
     } finally {
         rerunningTaskId.value = null;
+    }
+}
+
+async function handleDownloadSource(row: BicTask) {
+    if (!userStore.isSuperAdmin || downloadingTaskId.value !== null) return;
+    downloadingTaskId.value = row.id;
+    try {
+        const credential = await getBicTaskSourceDownload(row.id);
+        const link = document.createElement("a");
+        link.href = credential.download_url;
+        link.download = credential.filename || row.original_name || "原表.xlsx";
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } finally {
+        downloadingTaskId.value = null;
     }
 }
 

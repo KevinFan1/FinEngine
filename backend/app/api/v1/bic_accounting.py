@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.bic_accounting import BicDetailOut, BicSourceRowOut, BicTaskOut
 from app.schemas.common import ApiResponse, PageResponse
 from app.services.bic_accounting_service import BicAccountingService
+from app.services.oss_service import is_oss_object_unavailable_error, oss_service
 from app.utils.query_filters import parse_query_datetime
 
 router = APIRouter()
@@ -28,6 +29,12 @@ class BicTaskBatchActionOut(BaseModel):
     failed_count: int
     success_ids: list[int]
     failed_items: list[dict[str, object]]
+
+
+class BicTaskSourceDownloadOut(BaseModel):
+    download_url: str
+    filename: str
+    expires_seconds: int
 
 
 def _task_out(task, upload_file, org_name: str | None = None) -> BicTaskOut:
@@ -153,6 +160,47 @@ async def list_tasks(
     )
     items = [_task_out(task, upload_file, org_name) for task, upload_file, _shop_color, org_name in rows]
     return ApiResponse(data=PageResponse(items=items, total=total, page=page, page_size=page_size))
+
+
+@router.post("/tasks/{task_id}/source-download", response_model=ApiResponse[BicTaskSourceDownloadOut])
+async def get_task_source_download(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    if current_user.role != "superadmin":
+        return ApiResponse(code=403, message="仅超级管理员可下载原表")
+
+    task = await db.get(BicTask, task_id)
+    if task is None or task.is_deleted:
+        return ApiResponse(code=404, message="任务不存在")
+
+    upload_file = await db.get(BicUploadFile, task.file_id)
+    if upload_file is None or upload_file.is_deleted:
+        return ApiResponse(code=404, message="上传文件不存在")
+
+    if not upload_file.oss_key:
+        return ApiResponse(code=404, message="原表不存在")
+
+    expires_seconds = 300
+    try:
+        download_url = oss_service.sign_download_url(
+            upload_file.oss_key,
+            expires_seconds=expires_seconds,
+            filename=upload_file.original_name,
+        )
+    except Exception as exc:
+        if is_oss_object_unavailable_error(exc):
+            return ApiResponse(code=404, message="源文件已过期或不存在，无法下载")
+        return ApiResponse(code=502, message=f"生成下载链接失败: {exc}")
+
+    return ApiResponse(
+        data=BicTaskSourceDownloadOut(
+            download_url=download_url,
+            filename=upload_file.original_name,
+            expires_seconds=expires_seconds,
+        )
+    )
 
 
 @router.post("/tasks/{task_id}/run", response_model=ApiResponse[BicTaskOut])

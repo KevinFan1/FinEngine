@@ -362,20 +362,15 @@
                                 @click="openTaskDetail(row)"
                                 >查看</el-button
                             >
-                            <el-tooltip
+                            <el-button
                                 v-if="userStore.isSuperAdmin"
-                                content="下载原表"
-                                placement="top"
+                                type="primary"
+                                link
+                                :loading="downloadingTaskId === row.id"
+                                @click="handleDownloadSource(row)"
                             >
-                                <el-button
-                                    type="primary"
-                                    link
-                                    :loading="downloadingTaskId === row.id"
-                                    @click="handleDownloadSource(row)"
-                                >
-                                    <el-icon><Download /></el-icon>
-                                </el-button>
-                            </el-tooltip>
+                                下载原表
+                            </el-button>
                             <el-button
                                 v-if="row.status === 'failed'"
                                 type="primary"
@@ -510,8 +505,7 @@
                                 :loading="downloadingTaskId === taskDetail.id"
                                 @click="handleDownloadSource(taskDetail)"
                             >
-                                <el-icon><Download /></el-icon>
-                                原表
+                                下载原表
                             </el-button>
                         </div>
                     </div>
@@ -676,7 +670,6 @@ import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
-import { Download } from "@element-plus/icons-vue";
 
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);

@@ -25,6 +25,7 @@ dependencies = [
     "loguru>=0.7.3",
     "slowapi>=0.1.9",
     "prometheus-client>=0.25.0",
+    "pandas>=3.0.3",
 ]
 
 [project.scripts]
@@ -63,3 +64,7 @@ dev-dependencies = [
     "httpx>=0.28",
     "ruff>=0.8",
 ]
+
+
+[tool.uv.pip]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"

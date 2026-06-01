@@ -1,6 +1,7 @@
 """Aggregation service — upsert parsed financial data into the summary table."""
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.shop import Shop
@@ -8,6 +9,17 @@ from app.models.summary import FinancialSummary
 from app.services.shop_service import ShopService
 from app.tasks.processors.base import normalize_positive_summary_fields
 from app.utils.money import ZERO_MONEY, safe_decimal
+
+
+_SUMMARY_LOOKUP_INDEX_ELEMENTS = [
+    FinancialSummary.org_id,
+    FinancialSummary.summary_year,
+    FinancialSummary.summary_month,
+    FinancialSummary.shop_id,
+    FinancialSummary.source_platform_code,
+    FinancialSummary.source_year,
+    FinancialSummary.source_month,
+]
 
 
 class AggregationService:
@@ -72,40 +84,17 @@ class AggregationService:
         )
         source_year_value = AggregationService._normalize_source_date_part(source_year)
         source_month_value = AggregationService._normalize_source_date_part(source_month)
-        # Find existing or create new
-        stmt = select(FinancialSummary).where(
-            FinancialSummary.org_id == org_id,
-            FinancialSummary.summary_year == year,
-            FinancialSummary.summary_month == month,
-            FinancialSummary.shop_id == shop.id,
-            FinancialSummary.source_platform_code == source_platform,
-            FinancialSummary.source_year == source_year_value,
-            FinancialSummary.source_month == source_month_value,
-            FinancialSummary.is_deleted.is_(False),
+        summary = await AggregationService._insert_or_get_summary(
+            db,
+            org_id=org_id,
+            shop=shop,
+            year=year,
+            month=month,
+            source_year=source_year_value,
+            source_month=source_month_value,
+            source_platform=source_platform,
+            report_platform=report_platform,
         )
-        result = await db.execute(stmt)
-        summary = result.scalar_one_or_none()
-
-        if summary is None:
-            summary = FinancialSummary(
-                org_id=org_id,
-                shop_id=shop.id,
-                summary_year=year,
-                summary_month=month,
-                source_year=source_year_value,
-                source_month=source_month_value,
-                source_platform_code=source_platform,
-                report_platform_code=report_platform,
-                platform_name=source_platform,
-                shop_name=shop.shop_name,
-            )
-            db.add(summary)
-            await db.flush()
-        else:
-            summary.source_platform_code = source_platform
-            summary.report_platform_code = report_platform
-            summary.platform_name = source_platform
-            summary.shop_name = shop.shop_name
 
         # Aggregate rows by type
         if type_code in {"动账", "gmv"}:
@@ -168,39 +157,17 @@ class AggregationService:
         )
         source_year_value = AggregationService._normalize_source_date_part(source_year)
         source_month_value = AggregationService._normalize_source_date_part(source_month)
-        stmt = select(FinancialSummary).where(
-            FinancialSummary.org_id == org_id,
-            FinancialSummary.summary_year == year,
-            FinancialSummary.summary_month == month,
-            FinancialSummary.shop_id == shop.id,
-            FinancialSummary.source_platform_code == source_platform,
-            FinancialSummary.source_year == source_year_value,
-            FinancialSummary.source_month == source_month_value,
-            FinancialSummary.is_deleted.is_(False),
+        summary = await AggregationService._insert_or_get_summary(
+            db,
+            org_id=org_id,
+            shop=shop,
+            year=year,
+            month=month,
+            source_year=source_year_value,
+            source_month=source_month_value,
+            source_platform=source_platform,
+            report_platform=report_platform,
         )
-        result = await db.execute(stmt)
-        summary = result.scalar_one_or_none()
-
-        if summary is None:
-            summary = FinancialSummary(
-                org_id=org_id,
-                shop_id=shop.id,
-                summary_year=year,
-                summary_month=month,
-                source_year=source_year_value,
-                source_month=source_month_value,
-                source_platform_code=source_platform,
-                report_platform_code=report_platform,
-                platform_name=source_platform,
-                shop_name=shop.shop_name,
-            )
-            db.add(summary)
-            await db.flush()
-        else:
-            summary.source_platform_code = source_platform
-            summary.report_platform_code = report_platform
-            summary.platform_name = source_platform
-            summary.shop_name = shop.shop_name
 
         # Directly set aggregated values
         for key in (
@@ -343,41 +310,102 @@ class AggregationService:
         )
         source_year_value = AggregationService._normalize_source_date_part(source_year)
         source_month_value = AggregationService._normalize_source_date_part(source_month)
-        stmt = select(FinancialSummary).where(
-            FinancialSummary.org_id == org_id,
-            FinancialSummary.summary_year == year,
-            FinancialSummary.summary_month == month,
-            FinancialSummary.shop_id == shop.id,
-            FinancialSummary.source_platform_code == source_platform,
-            FinancialSummary.source_year == source_year_value,
-            FinancialSummary.source_month == source_month_value,
-            FinancialSummary.is_deleted.is_(False),
+        summary = await AggregationService._insert_or_get_summary(
+            db,
+            org_id=org_id,
+            shop=shop,
+            year=year,
+            month=month,
+            source_year=source_year_value,
+            source_month=source_month_value,
+            source_platform=source_platform,
+            report_platform=report_platform,
+        )
+
+        return summary
+
+    @staticmethod
+    async def _insert_or_get_summary(
+        db: AsyncSession,
+        *,
+        org_id: int,
+        shop: Shop,
+        year: int,
+        month: int,
+        source_year: int,
+        source_month: int,
+        source_platform: str,
+        report_platform: str,
+    ) -> FinancialSummary:
+        stmt = (
+            insert(FinancialSummary)
+            .values(
+                org_id=org_id,
+                shop_id=shop.id,
+                summary_year=year,
+                summary_month=month,
+                source_year=source_year,
+                source_month=source_month,
+                source_platform_code=source_platform,
+                report_platform_code=report_platform,
+                platform_name=source_platform,
+                shop_name=shop.shop_name,
+                is_deleted=False,
+                deleted_at=None,
+            )
+            .on_conflict_do_nothing(
+                index_elements=_SUMMARY_LOOKUP_INDEX_ELEMENTS,
+                index_where=text("is_deleted = false"),
+            )
+            .returning(FinancialSummary)
         )
         result = await db.execute(stmt)
         summary = result.scalar_one_or_none()
 
         if summary is None:
-            summary = FinancialSummary(
+            summary = await AggregationService._find_summary(
+                db,
                 org_id=org_id,
                 shop_id=shop.id,
-                summary_year=year,
-                summary_month=month,
-                source_year=source_year_value,
-                source_month=source_month_value,
-                source_platform_code=source_platform,
-                report_platform_code=report_platform,
-                platform_name=source_platform,
-                shop_name=shop.shop_name,
+                year=year,
+                month=month,
+                source_year=source_year,
+                source_month=source_month,
+                source_platform=source_platform,
             )
-            db.add(summary)
-            await db.flush()
-        else:
-            summary.source_platform_code = source_platform
-            summary.report_platform_code = report_platform
-            summary.platform_name = source_platform
-            summary.shop_name = shop.shop_name
+            if summary is None:
+                raise ValueError("财务汇总创建失败，请稍后重试")
 
+        summary.source_platform_code = source_platform
+        summary.report_platform_code = report_platform
+        summary.platform_name = source_platform
+        summary.shop_name = shop.shop_name
         return summary
+
+    @staticmethod
+    async def _find_summary(
+        db: AsyncSession,
+        *,
+        org_id: int,
+        shop_id: int,
+        year: int,
+        month: int,
+        source_year: int,
+        source_month: int,
+        source_platform: str,
+    ) -> FinancialSummary | None:
+        stmt = select(FinancialSummary).where(
+            FinancialSummary.org_id == org_id,
+            FinancialSummary.summary_year == year,
+            FinancialSummary.summary_month == month,
+            FinancialSummary.shop_id == shop_id,
+            FinancialSummary.source_platform_code == source_platform,
+            FinancialSummary.source_year == source_year,
+            FinancialSummary.source_month == source_month,
+            FinancialSummary.is_deleted.is_(False),
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
 
     @staticmethod
     def _normalize_platform_codes(

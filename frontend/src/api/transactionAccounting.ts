@@ -139,6 +139,12 @@ export interface TransactionTaskBatchActionResult {
     }>;
 }
 
+export interface TransactionTaskSourceDownload {
+    download_url: string;
+    filename: string;
+    expires_seconds: number;
+}
+
 export interface TransactionDetail {
     id: number;
     task_id: number;
@@ -424,6 +430,12 @@ export function batchRecalculateTransactionTasks(taskIds: number[]) {
     return post<TransactionTaskBatchActionResult>(
         "/transaction-accounting/tasks/batch/recalculate",
         { task_ids: taskIds },
+    );
+}
+
+export function getTransactionTaskSourceDownload(id: number) {
+    return post<TransactionTaskSourceDownload>(
+        `/transaction-accounting/tasks/${id}/source-download`,
     );
 }
 

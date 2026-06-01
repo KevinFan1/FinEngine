@@ -40,6 +40,12 @@ export interface BicTaskBatchActionResult {
     }>;
 }
 
+export interface BicTaskSourceDownload {
+    download_url: string;
+    filename: string;
+    expires_seconds: number;
+}
+
 export type BicExportScope = "all" | "current_page" | "selected";
 export type BicSourceExportScope = "all" | "current_page" | "selected";
 
@@ -181,6 +187,12 @@ export function batchRecalculateBicTasks(taskIds: number[]) {
     return post<BicTaskBatchActionResult>(
         "/bic-accounting/tasks/batch/recalculate",
         { task_ids: taskIds },
+    );
+}
+
+export function getBicTaskSourceDownload(id: number) {
+    return post<BicTaskSourceDownload>(
+        `/bic-accounting/tasks/${id}/source-download`,
     );
 }
 

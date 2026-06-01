@@ -81,6 +81,8 @@ FIELD_LABELS = {
     "categories": "分类字典",
 }
 
+SYSTEM_ERROR_MESSAGE = "系统处理错误，请稍后重试"
+
 
 def api_json_response(code: int, message: str, data: Any = None) -> JSONResponse:
     return JSONResponse(
@@ -203,7 +205,7 @@ def _integrity_error_message(exc: BaseException) -> str:
         "uq_fin_bic_source_platform_flow": "BIC 源明细流水号已存在",
         "uq_douyin_dongzhang_detail_flow": "抖音动账源明细流水号已存在",
     }
-    return constraint_messages.get(constraint_name, "数据已存在或不符合唯一性要求，请检查后重试")
+    return constraint_messages.get(constraint_name, SYSTEM_ERROR_MESSAGE)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -247,16 +249,16 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def integrity_error_exception_handler(request: Request, exc: IntegrityError) -> JSONResponse:
-        logger.warning("api.integrity_error path={} message={}", request.url.path, exc)
+        logger.error("api.integrity_error path={} message={}", request.url.path, exc)
         return api_json_response(code=status.HTTP_400_BAD_REQUEST, message=_integrity_error_message(exc))
 
     @app.exception_handler(DataError)
     async def data_error_exception_handler(request: Request, exc: DataError) -> JSONResponse:
-        logger.warning("api.data_error path={} message={}", request.url.path, exc)
-        return api_json_response(code=status.HTTP_400_BAD_REQUEST, message="参数格式不正确，请检查后重试")
+        logger.error("api.data_error path={} message={}", request.url.path, exc)
+        return api_json_response(code=status.HTTP_400_BAD_REQUEST, message=SYSTEM_ERROR_MESSAGE)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         message = str(exc) or "服务器内部错误"
         logger.exception("api.unhandled_exception path={} message={}", request.url.path, message)
-        return api_json_response(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message="服务器内部错误，请稍后重试")
+        return api_json_response(code=status.HTTP_500_INTERNAL_SERVER_ERROR, message=SYSTEM_ERROR_MESSAGE)

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session, register_after_commit
+from app.core.database import get_async_session
 from app.core.deps import get_current_user
 from app.models.export_job import ExportJob
 from app.models.user import User
@@ -35,7 +35,7 @@ async def create_export_job(
 ):
     try:
         job = await ExportJobService.create_job(db, data=body, user=current_user)
-        register_after_commit(db, lambda: ExportJobService.dispatch_job_by_id(job.id))
+        ExportJobService.dispatch_job_after_commit(db, job)
     except ValueError as exc:
         return ApiResponse(code=400, message=str(exc))
     return ApiResponse(
@@ -55,6 +55,7 @@ async def list_export_jobs(
 ):
     if status and status not in EXPORT_JOB_STATUSES:
         return ApiResponse(code=400, message="导出状态不正确")
+    await ExportJobService.dispatch_unsubmitted_jobs(db, user=current_user)
     jobs, total = await ExportJobService.list_jobs(
         db,
         user=current_user,

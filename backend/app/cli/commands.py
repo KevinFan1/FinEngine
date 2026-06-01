@@ -40,17 +40,19 @@ def recover_queued_tasks() -> None:
 
     from app.tasks.celery_app import recover_queued_processing_tasks, reconcile_terminal_running_processing_tasks
     from app.tasks.bic_accounting import recover_queued_bic_tasks
+    from app.tasks.export_jobs import recover_queued_export_jobs
     from app.tasks.transaction_accounting import recover_queued_transaction_tasks
 
     reconciled_count = reconcile_terminal_running_processing_tasks(limit=args.limit)
     processing_count = recover_queued_processing_tasks(limit=args.limit)
     bic_count = recover_queued_bic_tasks(limit=args.limit)
+    export_count = recover_queued_export_jobs(limit=args.limit)
     transaction_count = recover_queued_transaction_tasks(limit=args.limit)
-    total = processing_count + bic_count + transaction_count
+    total = processing_count + bic_count + transaction_count + export_count
     print(
         "已处理任务恢复："
         f"修正卡住运行中任务 {reconciled_count} 个；"
-        f"重新投递排队任务 {total} 个（通用 {processing_count}，BIC {bic_count}，动账 {transaction_count}）"
+        f"重新投递排队任务 {total} 个（通用 {processing_count}，BIC {bic_count}，动账 {transaction_count}，下载中心 {export_count}）"
     )
 
 

@@ -29,6 +29,8 @@ from app.utils.query_filters import resolve_org_ids
 
 
 EXPORT_JOB_STATUSES = {"queued", "running", "success", "failed", "expired"}
+
+
 @dataclass(frozen=True)
 class ExportSpec:
     module: str
@@ -357,6 +359,22 @@ class ExportJobService:
         return job
 
     @staticmethod
+    def dispatch_job_after_commit(db: AsyncSession, job: ExportJob) -> None:
+        from app.core.database import register_after_commit
+
+        async def dispatch() -> None:
+            try:
+                await ExportJobService.dispatch_job(db, job)
+            except Exception as exc:
+                job.status = "failed"
+                job.progress = 100
+                job.error_message = f"导出任务投递失败: {exc}"
+                job.finished_at = datetime.now(timezone.utc)
+                await db.flush()
+
+        register_after_commit(db, dispatch)
+
+    @staticmethod
     async def dispatch_job_by_id(job_id: int) -> None:
         from app.core.database import async_session_factory
         from app.tasks.export_jobs import run_export_job
@@ -365,9 +383,106 @@ class ExportJobService:
             job = await session.get(ExportJob, job_id)
             if job is None or job.is_deleted:
                 return
-            result = run_export_job.delay(job.id)
-            job.celery_task_id = result.id
+            try:
+                result = run_export_job.delay(job.id)
+                job.celery_task_id = result.id
+            except Exception as exc:
+                job.status = "failed"
+                job.progress = 100
+                job.error_message = f"导出任务投递失败: {exc}"
+                job.finished_at = datetime.now(timezone.utc)
             await session.commit()
+
+    @staticmethod
+    def _visibility_filters(user: User) -> list[Any]:
+        if user.role == "superadmin":
+            return []
+        if user.role == "org_admin":
+            return [ExportJob.org_id == user.org_id]
+        return [ExportJob.user_id == user.id]
+
+    @staticmethod
+    async def dispatch_unsubmitted_jobs(
+        db: AsyncSession,
+        *,
+        user: User,
+        limit: int = 20,
+    ) -> int:
+        from app.tasks.export_jobs import run_export_job
+
+        result = await db.execute(
+            select(ExportJob)
+            .where(
+                ExportJob.status == "queued",
+                ExportJob.celery_task_id.is_(None),
+                ExportJob.is_deleted.is_(False),
+                *ExportJobService._visibility_filters(user),
+            )
+            .order_by(ExportJob.id.asc())
+            .limit(limit)
+        )
+        jobs = list(result.scalars().all())
+        dispatched = 0
+        now = datetime.now(timezone.utc)
+        for job in jobs:
+            try:
+                async_result = run_export_job.delay(job.id)
+                job.celery_task_id = async_result.id
+                dispatched += 1
+            except Exception as exc:
+                job.status = "failed"
+                job.progress = 100
+                job.error_message = f"导出任务投递失败: {exc}"
+                job.finished_at = now
+        if jobs:
+            await db.flush()
+        return dispatched
+
+    @staticmethod
+    async def recover_queued_jobs(db: AsyncSession, *, limit: int = 100) -> int:
+        from app.tasks.export_jobs import run_export_job
+
+        result = await db.execute(
+            select(ExportJob)
+            .where(
+                ExportJob.status == "queued",
+                ExportJob.is_deleted.is_(False),
+            )
+            .order_by(ExportJob.id.asc())
+            .limit(limit)
+        )
+        jobs = list(result.scalars().all())
+        dispatched = 0
+        for job in jobs:
+            async_result = run_export_job.delay(job.id)
+            job.celery_task_id = async_result.id
+            dispatched += 1
+        if jobs:
+            await db.flush()
+        return dispatched
+
+    @staticmethod
+    async def mark_job_running(
+        db: AsyncSession,
+        *,
+        job_id: int,
+        celery_task_id: str | None = None,
+    ) -> ExportJob:
+        job = await db.get(ExportJob, job_id)
+        if job is None or job.is_deleted:
+            raise ValueError("导出任务不存在")
+        if job.status in {"success", "failed", "expired"}:
+            return job
+
+        job.status = "running"
+        job.progress = max(int(job.progress or 0), 10)
+        job.started_at = datetime.now(timezone.utc)
+        job.finished_at = None
+        job.error_message = None
+        if celery_task_id:
+            job.celery_task_id = celery_task_id
+        await db.flush()
+        return job
 
     @staticmethod
     async def list_jobs(
@@ -416,10 +531,12 @@ class ExportJobService:
         return None
 
     @staticmethod
-    async def run_job(db: AsyncSession, *, job_id: int) -> ExportJob:
+    async def run_job(db: AsyncSession, *, job_id: int, mark_running: bool = True) -> ExportJob:
         job = await db.get(ExportJob, job_id)
         if job is None or job.is_deleted:
             raise ValueError("导出任务不存在")
+        if job.status in {"success", "failed", "expired"}:
+            return job
         user = await db.get(User, job.user_id)
         if user is None or user.is_deleted:
             raise ValueError("导出用户不存在")
@@ -427,12 +544,13 @@ class ExportJobService:
         if spec is None:
             raise ValueError("不支持的导出类型")
 
-        now = datetime.now(timezone.utc)
-        job.status = "running"
-        job.progress = 10
-        job.started_at = now
-        job.error_message = None
-        await db.flush()
+        if mark_running:
+            job.status = "running"
+            job.progress = max(int(job.progress or 0), 10)
+            job.started_at = datetime.now(timezone.utc)
+            job.finished_at = None
+            job.error_message = None
+            await db.flush()
 
         try:
             artifact = await spec.handler(db, user, dict(job.params or {}))
@@ -509,4 +627,5 @@ class ExportJobService:
             "endpoint": oss_service.normalized_endpoint(),
             "oss_key": job.oss_key,
             "filename": job.filename,
+            "file_size": job.file_size,
         }

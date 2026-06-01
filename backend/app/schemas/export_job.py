@@ -46,3 +46,4 @@ class ExportJobDownloadCredentialOut(BaseModel):
     endpoint: str
     oss_key: str
     filename: str
+    file_size: int | None = None
