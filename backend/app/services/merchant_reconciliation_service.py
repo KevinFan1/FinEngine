@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +38,8 @@ from app.schemas.merchant_reconciliation import (
     MerchantReconciliationStatsOut,
 )
 from app.services.audit_service import AuditService
+from app.services.merchant_reconciliation_exporter import MerchantReconciliationExporter
+from app.services.merchant_reconciliation_summary import MerchantReconciliationSummaryBuilder
 from app.services.shop_visibility import active_shop_filter
 from app.services.shop_service import ShopService
 from app.tasks.processors.base import canonical_header, open_tabular_rows, parse_datetime, safe_str
@@ -267,15 +268,6 @@ def _allocation_amount(row_gmv: Decimal, total_gmv: Decimal, total_amount: Decim
     if total_gmv == ZERO_MONEY or total_amount == ZERO_MONEY:
         return ZERO_MONEY
     return (row_gmv * total_amount / total_gmv).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-
-
-def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
-    cells: list[WriteOnlyCell] = []
-    for label in headers:
-        cell = WriteOnlyCell(sheet, value=label)
-        cell.font = Font(bold=True)
-        cells.append(cell)
-    return cells
 
 
 class MerchantReconciliationService:
@@ -1481,44 +1473,19 @@ class MerchantReconciliationService:
         org_id: int | None = None,
         adjustment: dict[str, Decimal] | None = None,
     ) -> dict[str, object]:
-        adjustment = adjustment or {}
-        paid_flow_amount = ZERO_MONEY
-        bank_flow_amount = ZERO_MONEY
-        paid_flow_amount = safe_decimal(adjustment.get("paid_flow_amount"))
-        row = {
-            "key": f"{org_id or ''}|{our_subject}|{receipt_subject}",
-            "org_id": org_id,
-            "org_name": org_name,
-            "accounting_year": accounting_year,
-            "accounting_month": accounting_month,
-            "accounting_date": f"{int(accounting_year):04d}-{int(accounting_month):02d}",
-            "our_subject": our_subject,
-            "merchant_receipt_subject": receipt_subject,
-            "receipt_merchant": receipt_subject,
-            "gmv": ZERO_MONEY,
-            "merchant_payable_net_amount": ZERO_MONEY,
-            "opening_balance": ZERO_MONEY,
-            "business_fee_deduction": safe_decimal(adjustment.get("business_fee_deduction")),
-            "other_deduction_amount": safe_decimal(adjustment.get("other_deduction_amount")),
-            "payable_goods_balance": ZERO_MONEY,
-            "paid_flow_amount": paid_flow_amount,
-            "unpaid_flow_amount": ZERO_MONEY,
-            "bank_flow_amount": bank_flow_amount,
-            "bank_payment_diff": ZERO_MONEY,
-            "row_count": 0,
-            "bank_status": "pending",
-        }
-        MerchantReconciliationService._refresh_summary_flow_amounts(row)
-        return row
+        return MerchantReconciliationSummaryBuilder.empty_summary_row(
+            org_id=org_id,
+            org_name=org_name,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            our_subject=our_subject,
+            receipt_subject=receipt_subject,
+            adjustment=adjustment,
+        )
 
     @staticmethod
     def _summary_group_key_from_detail_row(row: dict[str, object]) -> tuple[str, str, str]:
-        org_id = MerchantReconciliationService._optional_int(row.get("org_id"))
-        return (
-            str(org_id) if org_id is not None else _normalize_text(row.get("org_name")),
-            _normalize_text(row.get("merchant_name") or row.get("our_subject") or row.get("shop_name")),
-            _normalize_text(row.get("receipt_merchant") or row.get("merchant_receipt_subject")),
-        )
+        return MerchantReconciliationSummaryBuilder.summary_group_key_from_detail_row(row)
 
     @staticmethod
     async def _load_matched_summary_groups(
@@ -1690,34 +1657,7 @@ class MerchantReconciliationService:
     def _collect_summary_detail_totals(
         rows: Iterable[dict[str, object]],
     ) -> tuple[dict[tuple[str, str, str], dict[str, object]], dict[int, dict[tuple[str, str, str], Decimal]]]:
-        detail_totals: dict[tuple[str, str, str], dict[str, object]] = {}
-        payment_group_weights: dict[int, dict[tuple[str, str, str], Decimal]] = {}
-        for row in rows:
-            key = MerchantReconciliationService._summary_group_key_from_detail_row(row)
-            item = detail_totals.setdefault(
-                key,
-                {
-                    "org_id": MerchantReconciliationService._optional_int(row.get("org_id")),
-                    "org_name": row.get("org_name"),
-                    "gmv": ZERO_MONEY,
-                    "merchant_payable_net_amount": ZERO_MONEY,
-                    "row_count": 0,
-                },
-            )
-            gmv = safe_decimal(row.get("gmv"))
-            live_amount = safe_decimal(row.get("live_amount"))
-            item["gmv"] = safe_decimal(item["gmv"]) + gmv
-            item["merchant_payable_net_amount"] = safe_decimal(item["merchant_payable_net_amount"]) + live_amount
-            item["row_count"] = int(item["row_count"]) + int(row.get("row_count") or 1)
-            if not item.get("org_name") and row.get("org_name"):
-                item["org_name"] = row.get("org_name")
-
-            payment_id = MerchantReconciliationService._optional_int(row.get("red_sheet_payment_id"))
-            if payment_id is None:
-                continue
-            group_weights = payment_group_weights.setdefault(payment_id, {})
-            group_weights[key] = group_weights.get(key, ZERO_MONEY) + live_amount
-        return detail_totals, payment_group_weights
+        return MerchantReconciliationSummaryBuilder.collect_summary_detail_totals(rows)
 
     @staticmethod
     def _build_summary_rows_from_aggregates(
@@ -1727,68 +1667,16 @@ class MerchantReconciliationService:
         accounting_year: int,
         accounting_month: int,
     ) -> list[dict[str, object]]:
-        summary_by_key: dict[tuple[str, str, str], dict[str, object]] = {}
-        for key, adjustment in payment_adjustments.items():
-            org_token, our_subject, receipt_merchant = key
-            row_org_id = MerchantReconciliationService._optional_int(adjustment.get("org_id")) or MerchantReconciliationService._optional_int(org_token)
-            org_name = safe_str(adjustment.get("org_name")) or (None if row_org_id is not None else org_token)
-            summary_by_key[key] = MerchantReconciliationService._empty_summary_row(
-                org_id=row_org_id,
-                org_name=org_name or None,
-                accounting_year=accounting_year,
-                accounting_month=accounting_month,
-                our_subject=our_subject,
-                receipt_subject=receipt_merchant,
-                adjustment=adjustment,
-            )
-        for key, totals in detail_totals.items():
-            org_token, our_subject, receipt_merchant = key
-            row_org_id = MerchantReconciliationService._optional_int(totals.get("org_id")) or MerchantReconciliationService._optional_int(org_token)
-            org_name = safe_str(totals.get("org_name")) or (None if row_org_id is not None else org_token)
-            adjustment = payment_adjustments.get(key, {})
-            item = summary_by_key.setdefault(
-                key,
-                MerchantReconciliationService._empty_summary_row(
-                    org_id=row_org_id,
-                    org_name=org_name or None,
-                    accounting_year=accounting_year,
-                    accounting_month=accounting_month,
-                    our_subject=our_subject,
-                    receipt_subject=receipt_merchant,
-                    adjustment=adjustment,
-                ),
-            )
-            merchant_payable = safe_decimal(totals.get("merchant_payable_net_amount"))
-            if item.get("org_id") is None and row_org_id is not None:
-                item["org_id"] = row_org_id
-                item["key"] = f"{row_org_id}|{our_subject}|{receipt_merchant}"
-            if not item.get("org_name") and org_name:
-                item["org_name"] = org_name
-            item["gmv"] = safe_decimal(item["gmv"]) + safe_decimal(totals.get("gmv"))
-            item["merchant_payable_net_amount"] = safe_decimal(item["merchant_payable_net_amount"]) + merchant_payable
-            item["row_count"] = int(item["row_count"]) + int(totals.get("row_count") or 0)
-            MerchantReconciliationService._refresh_summary_flow_amounts(item)
-
-        return MerchantReconciliationService._sort_summary_rows(list(summary_by_key.values()))
+        return MerchantReconciliationSummaryBuilder.build_summary_rows_from_aggregates(
+            detail_totals=detail_totals,
+            payment_adjustments=payment_adjustments,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+        )
 
     @staticmethod
     def _refresh_summary_flow_amounts(item: dict[str, object]) -> None:
-        item["payable_goods_balance"] = (
-            safe_decimal(item.get("merchant_payable_net_amount"))
-            + safe_decimal(item.get("opening_balance"))
-            - safe_decimal(item.get("business_fee_deduction"))
-            - safe_decimal(item.get("other_deduction_amount"))
-        )
-        item["unpaid_flow_amount"] = safe_decimal(item["payable_goods_balance"]) - safe_decimal(item["paid_flow_amount"])
-        item["bank_payment_diff"] = safe_decimal(item["unpaid_flow_amount"]) - safe_decimal(item["bank_flow_amount"])
-        bank_flow_amount = safe_decimal(item["bank_flow_amount"])
-        bank_payment_diff = safe_decimal(item["bank_payment_diff"])
-        if bank_flow_amount == ZERO_MONEY:
-            item["bank_status"] = "pending"
-        elif bank_payment_diff == ZERO_MONEY:
-            item["bank_status"] = "matched"
-        else:
-            item["bank_status"] = "diff"
+        MerchantReconciliationSummaryBuilder.refresh_summary_flow_amounts(item)
 
     @staticmethod
     def _filter_summary_rows_by_bank_status(
@@ -1796,20 +1684,14 @@ class MerchantReconciliationService:
         *,
         bank_status: str | None,
     ) -> list[dict[str, object]]:
-        if not bank_status:
-            return rows
-        return [row for row in rows if row.get("bank_status") == bank_status]
+        return MerchantReconciliationSummaryBuilder.filter_summary_rows_by_bank_status(
+            rows,
+            bank_status=bank_status,
+        )
 
     @staticmethod
     def _sort_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        return sorted(
-            rows,
-            key=lambda item: (
-                str(item.get("org_name") or ""),
-                str(item.get("our_subject") or ""),
-                str(item.get("merchant_receipt_subject") or item.get("receipt_merchant") or ""),
-            ),
-        )
+        return MerchantReconciliationSummaryBuilder.sort_summary_rows(rows)
 
     @staticmethod
     async def _load_opening_balance_records(
@@ -1842,10 +1724,10 @@ class MerchantReconciliationService:
 
     @staticmethod
     def _opening_balance_key(*, org_id: int, our_subject: object, receipt_merchant: object) -> tuple[int, str, str]:
-        return (
-            int(org_id),
-            _entity_match_text(our_subject),
-            _entity_match_text(receipt_merchant),
+        return MerchantReconciliationSummaryBuilder.opening_balance_key(
+            org_id=org_id,
+            our_subject=our_subject,
+            receipt_merchant=receipt_merchant,
         )
 
     @staticmethod
@@ -1874,53 +1756,13 @@ class MerchantReconciliationService:
         accounting_month: int,
         append_missing: bool,
     ) -> None:
-        balance_by_key = {
-            MerchantReconciliationService._opening_balance_key(
-                org_id=balance.org_id,
-                our_subject=balance.our_subject,
-                receipt_merchant=balance.receipt_merchant,
-            ): (balance, org_name)
-            for balance, org_name in opening_balance_rows
-        }
-        used_keys: set[tuple[int, str, str]] = set()
-        for row in summary_rows:
-            row_org_id = MerchantReconciliationService._optional_int(row.get("org_id"))
-            if row_org_id is None:
-                continue
-            key = MerchantReconciliationService._opening_balance_key(
-                org_id=row_org_id,
-                our_subject=row.get("our_subject"),
-                receipt_merchant=row.get("merchant_receipt_subject") or row.get("receipt_merchant"),
-            )
-            balance_pair = balance_by_key.get(key)
-            if balance_pair is None:
-                continue
-            balance, _org_name = balance_pair
-            row["opening_balance"] = safe_decimal(balance.opening_balance)
-            MerchantReconciliationService._refresh_summary_flow_amounts(row)
-            used_keys.add(key)
-
-        if not append_missing:
-            return
-        for balance, org_name in opening_balance_rows:
-            key = MerchantReconciliationService._opening_balance_key(
-                org_id=balance.org_id,
-                our_subject=balance.our_subject,
-                receipt_merchant=balance.receipt_merchant,
-            )
-            if key in used_keys:
-                continue
-            row = MerchantReconciliationService._empty_summary_row(
-                org_id=int(balance.org_id),
-                org_name=org_name,
-                accounting_year=accounting_year,
-                accounting_month=accounting_month,
-                our_subject=balance.our_subject,
-                receipt_subject=balance.receipt_merchant,
-            )
-            row["opening_balance"] = safe_decimal(balance.opening_balance)
-            MerchantReconciliationService._refresh_summary_flow_amounts(row)
-            summary_rows.append(row)
+        MerchantReconciliationSummaryBuilder.merge_opening_balance_rows(
+            summary_rows,
+            opening_balance_rows,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            append_missing=append_missing,
+        )
 
     @staticmethod
     async def _load_bank_flow_summary_totals(
@@ -1987,10 +1829,12 @@ class MerchantReconciliationService:
             payment_id = MerchantReconciliationService._optional_int(payment.id if payment is not None else None)
             weighted_keys = sorted((payment_group_weights.get(payment_id or 0) or {}).items(), key=lambda item: item[0])
             if weighted_keys:
+                # 银行流水先桥接红单付款，再按汇总权重分摊，避免同一笔付款被多个商品编码重复计入。
                 allocated = MerchantReconciliationService._allocate_money_by_weight(amount, weighted_keys)
                 for key, value in allocated.items():
                     totals[key] = totals.get(key, ZERO_MONEY) + value
                 continue
+            # 兜底主体匹配只用于兼容未桥接红单付款的历史数据；能桥接时始终以红单付款为准。
             key = (
                 str(int(bank_row.org_id or 0)),
                 _entity_match_text(bank_row.account_name),
@@ -2004,40 +1848,24 @@ class MerchantReconciliationService:
         summary_rows: list[dict[str, object]],
         bank_flow_totals: dict[tuple[str, str, str], Decimal],
     ) -> None:
-        for row in summary_rows:
-            row_org_id = MerchantReconciliationService._optional_int(row.get("org_id"))
-            org_token = str(row_org_id) if row_org_id is not None else _normalize_text(row.get("org_name"))
-            key = (
-                org_token,
-                _entity_match_text(row.get("our_subject")),
-                _entity_match_text(row.get("merchant_receipt_subject") or row.get("receipt_merchant")),
-            )
-            row["bank_flow_amount"] = bank_flow_totals.get(key, ZERO_MONEY)
-            MerchantReconciliationService._refresh_summary_flow_amounts(row)
+        MerchantReconciliationSummaryBuilder.merge_bank_flow_totals(summary_rows, bank_flow_totals)
 
     @staticmethod
     def _build_summary_workbook(rows: Iterable[dict[str, object]]) -> io.BytesIO:
-        wb = Workbook(write_only=True)
-        ws = wb.create_sheet(title="商家对账汇总")
-        ws.append(_write_only_header_row(ws, [label for _field, label, _money_flag in SUMMARY_EXPORT_COLUMNS]))
-        for row in rows:
-            ws.append([MerchantReconciliationService._format_export_value(row.get(field), money=money_flag) for field, _label, money_flag in SUMMARY_EXPORT_COLUMNS])
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        return buffer
+        return MerchantReconciliationExporter.build_workbook(
+            rows,
+            title="商家对账汇总",
+            columns=SUMMARY_EXPORT_COLUMNS,
+        )
 
     @staticmethod
     def _save_summary_workbook(rows: Iterable[dict[str, object]], *, output_path: Path) -> int:
-        wb = Workbook(write_only=True)
-        ws = wb.create_sheet(title="商家对账汇总")
-        ws.append(_write_only_header_row(ws, [label for _field, label, _money_flag in SUMMARY_EXPORT_COLUMNS]))
-        row_count = 0
-        for row in rows:
-            ws.append([MerchantReconciliationService._format_export_value(row.get(field), money=money_flag) for field, _label, money_flag in SUMMARY_EXPORT_COLUMNS])
-            row_count += 1
-        wb.save(output_path)
-        return row_count
+        return MerchantReconciliationExporter.save_workbook(
+            rows,
+            output_path=output_path,
+            title="商家对账汇总",
+            columns=SUMMARY_EXPORT_COLUMNS,
+        )
 
     @staticmethod
     async def export_details(
@@ -2701,100 +2529,55 @@ class MerchantReconciliationService:
         payable_goods_balance: Decimal,
         paid_flow_amount: Decimal = ZERO_MONEY,
     ) -> None:
-        item = adjustments.setdefault(
+        MerchantReconciliationSummaryBuilder.add_payment_adjustment(
+            adjustments,
             key,
-            {
-                "business_fee_deduction": ZERO_MONEY,
-                "other_deduction_amount": ZERO_MONEY,
-                "payable_goods_balance": ZERO_MONEY,
-                "paid_flow_amount": ZERO_MONEY,
-            },
+            business_fee_deduction=business_fee_deduction,
+            other_deduction_amount=other_deduction_amount,
+            payable_goods_balance=payable_goods_balance,
+            paid_flow_amount=paid_flow_amount,
         )
-        item["business_fee_deduction"] += business_fee_deduction
-        item["other_deduction_amount"] += other_deduction_amount
-        item["payable_goods_balance"] += payable_goods_balance
-        item["paid_flow_amount"] += paid_flow_amount
 
     @staticmethod
     def _allocate_money_by_weight(
         amount: Decimal,
         weighted_keys: list[tuple[tuple[str, str, str], Decimal]],
     ) -> dict[tuple[str, str, str], Decimal]:
-        if not weighted_keys:
-            return {}
-        if len(weighted_keys) == 1:
-            return {weighted_keys[0][0]: amount}
-
-        weights = [(key, abs(safe_decimal(weight))) for key, weight in weighted_keys]
-        total_weight = sum((weight for _key, weight in weights), ZERO_MONEY)
-        if total_weight == ZERO_MONEY:
-            weights = [(key, Decimal("1")) for key, _weight in weights]
-            total_weight = Decimal(len(weights))
-
-        allocations: dict[tuple[str, str, str], Decimal] = {}
-        remaining = amount
-        for index, (key, weight) in enumerate(weights):
-            if index == len(weights) - 1:
-                allocations[key] = remaining
-                break
-            value = (amount * weight / total_weight).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-            allocations[key] = value
-            remaining -= value
-        return allocations
+        return MerchantReconciliationSummaryBuilder.allocate_money_by_weight(amount, weighted_keys)
 
     @staticmethod
     def _optional_int(value: object) -> int | None:
-        if value is None or value == "":
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+        return MerchantReconciliationSummaryBuilder.optional_int(value)
 
     @staticmethod
     def _build_detail_workbook(rows: Iterable[dict[str, object]]) -> io.BytesIO:
-        wb = Workbook(write_only=True)
-        ws = wb.create_sheet(title="商家对账明细")
-        ws.append(_write_only_header_row(ws, [label for _field, label, _money_flag in RECONCILIATION_EXPORT_COLUMNS]))
-        for row in rows:
-            MerchantReconciliationService._append_export_row(ws, row)
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        return buffer
+        return MerchantReconciliationExporter.build_workbook(
+            rows,
+            title="商家对账明细",
+            columns=RECONCILIATION_EXPORT_COLUMNS,
+        )
 
     @staticmethod
     def _save_detail_workbook(rows: Iterable[dict[str, object]], *, output_path: Path) -> int:
-        wb = Workbook(write_only=True)
-        ws = wb.create_sheet(title="商家对账明细")
-        ws.append(_write_only_header_row(ws, [label for _field, label, _money_flag in RECONCILIATION_EXPORT_COLUMNS]))
-        row_count = 0
-        for row in rows:
-            MerchantReconciliationService._append_export_row(ws, row)
-            row_count += 1
-        wb.save(output_path)
-        return row_count
+        return MerchantReconciliationExporter.save_workbook(
+            rows,
+            output_path=output_path,
+            title="商家对账明细",
+            columns=RECONCILIATION_EXPORT_COLUMNS,
+        )
 
     @staticmethod
     def _append_export_row(ws, row: dict[str, object]) -> None:
-        ws.append([MerchantReconciliationService._format_export_value(row.get(field), money=money_flag) for field, _label, money_flag in RECONCILIATION_EXPORT_COLUMNS])
+        MerchantReconciliationExporter.append_row(ws, row, columns=RECONCILIATION_EXPORT_COLUMNS)
 
     @staticmethod
     def _format_export_value(value: object, *, money: bool = False) -> object:
-        if money:
-            return float(safe_decimal(value))
-        if isinstance(value, Decimal):
-            return float(value)
-        if isinstance(value, datetime):
-            return MerchantReconciliationService._format_datetime(value)
-        if isinstance(value, date):
-            return value.isoformat()
-        return value
+        return MerchantReconciliationExporter.format_export_value(value, money=money)
 
     @staticmethod
     def _format_datetime(value: object) -> str:
         if isinstance(value, datetime):
-            return value.strftime("%Y-%m-%d %H:%M:%S")
+            return str(MerchantReconciliationExporter.format_export_value(value))
         return str(value or "")
 
     @staticmethod

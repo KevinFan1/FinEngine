@@ -7,6 +7,8 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 from app.models.merchant_reconciliation import MerchantOpeningBalance, MerchantRedSheetPayment, MerchantRedSheetPurchase
+from app.services.merchant_reconciliation_exporter import MerchantReconciliationExporter
+from app.services.merchant_reconciliation_summary import MerchantReconciliationSummaryBuilder
 from app.services.merchant_reconciliation_service import (
     PAYMENT_HEADERS,
     PURCHASE_HEADERS,
@@ -15,6 +17,51 @@ from app.services.merchant_reconciliation_service import (
     _RedSheetContext,
 )
 from app.utils.live_code import extract_live_code
+
+
+def test_summary_builder_refreshes_bank_statuses() -> None:
+    row = MerchantReconciliationSummaryBuilder.empty_summary_row(
+        org_id=2,
+        org_name="组织A",
+        accounting_year=2026,
+        accounting_month=4,
+        our_subject="我方主体",
+        receipt_subject="收款商家",
+        adjustment={"paid_flow_amount": Decimal("70.00")},
+    )
+    row["merchant_payable_net_amount"] = Decimal("100.00")
+    row["opening_balance"] = Decimal("10.00")
+    row["business_fee_deduction"] = Decimal("5.00")
+    row["other_deduction_amount"] = Decimal("2.00")
+    row["bank_flow_amount"] = Decimal("33.00")
+
+    MerchantReconciliationSummaryBuilder.refresh_summary_flow_amounts(row)
+
+    assert row["payable_goods_balance"] == Decimal("103.00")
+    assert row["unpaid_flow_amount"] == Decimal("33.00")
+    assert row["bank_payment_diff"] == Decimal("0.00")
+    assert row["bank_status"] == "matched"
+
+
+def test_summary_builder_allocates_money_by_weight_with_rounding_remainder() -> None:
+    allocations = MerchantReconciliationSummaryBuilder.allocate_money_by_weight(
+        Decimal("100.00"),
+        [
+            (("2", "主体A", "商家A"), Decimal("1")),
+            (("2", "主体B", "商家B"), Decimal("2")),
+            (("2", "主体C", "商家C"), Decimal("3")),
+        ],
+    )
+
+    assert allocations[("2", "主体A", "商家A")] == Decimal("16.67")
+    assert allocations[("2", "主体B", "商家B")] == Decimal("33.33")
+    assert allocations[("2", "主体C", "商家C")] == Decimal("50.00")
+    assert sum(allocations.values(), Decimal("0.00")) == Decimal("100.00")
+
+
+def test_exporter_formats_money_dates_and_datetimes() -> None:
+    assert MerchantReconciliationExporter.format_export_value(Decimal("12.30"), money=True) == 12.3
+    assert MerchantReconciliationExporter.format_export_value(datetime(2026, 4, 1, 9, 8, 7)) == "2026-04-01 09:08:07"
 
 
 def test_red_sheet_template_uses_fixed_month_sheet_names_and_headers() -> None:
