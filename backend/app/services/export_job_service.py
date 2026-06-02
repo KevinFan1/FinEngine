@@ -22,6 +22,7 @@ from app.models.user import User
 from app.schemas.export_job import ExportJobCreate
 from app.services.bic_accounting_service import BicAccountingService
 from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
+from app.services.merchant_reconciliation_service import MerchantReconciliationService
 from app.services.oss_service import assume_sts_role, oss_service
 from app.services.summary_service import SummaryService
 from app.services.transaction_accounting_service import TransactionAccountingService
@@ -314,6 +315,51 @@ async def _bic_reconciliation_export(db: AsyncSession, user: User, params: dict[
     )
 
 
+async def _merchant_reconciliation_detail_export(db: AsyncSession, user: User, params: dict[str, Any]):
+    output_path = _new_temp_export_path()
+    scope = str(params.get("scope") or "all")
+    try:
+        row_count = await MerchantReconciliationService.export_details_to_file(
+            db,
+            user=user,
+            output_path=output_path,
+            org_id=params.get("org_id"),
+            accounting_year=int(params["accounting_year"]),
+            accounting_month=int(params["accounting_month"]),
+            shop_id=int(params["shop_id"]),
+            keyword=params.get("keyword"),
+            match_status=params.get("match_status"),
+            ids=_parse_int_ids(params.get("ids")) if scope == "selected" else None,
+            page=_int_param(params, "page") if scope == "current_page" else None,
+            page_size=_int_param(params, "page_size") if scope == "current_page" else None,
+        )
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+    return ExportArtifact(output_path, row_count=row_count)
+
+
+async def _merchant_reconciliation_summary_export(db: AsyncSession, user: User, params: dict[str, Any]):
+    output_path = _new_temp_export_path()
+    try:
+        row_count = await MerchantReconciliationService.export_summary_to_file(
+            db,
+            user=user,
+            output_path=output_path,
+            org_id=params.get("org_id"),
+            accounting_year=int(params["accounting_year"]),
+            accounting_month=int(params["accounting_month"]),
+            shop_id=_int_param(params, "shop_id"),
+            keyword=params.get("keyword"),
+            page=_int_param(params, "page"),
+            page_size=_int_param(params, "page_size"),
+        )
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+    return ExportArtifact(output_path, row_count=row_count)
+
+
 EXPORT_SPECS: dict[str, ExportSpec] = {
     "summary.detail": ExportSpec("summary", _summary_export),
     "summary.report": ExportSpec("summary", _summary_report_export),
@@ -324,6 +370,8 @@ EXPORT_SPECS: dict[str, ExportSpec] = {
     "bic.details": ExportSpec("bic_accounting", _bic_detail_export),
     "bic.source_rows": ExportSpec("bic_accounting", _bic_source_export),
     "bic.reconciliation": ExportSpec("bic_accounting", _bic_reconciliation_export),
+    "merchant_reconciliation.details": ExportSpec("merchant_reconciliation", _merchant_reconciliation_detail_export),
+    "merchant_reconciliation.summary": ExportSpec("merchant_reconciliation", _merchant_reconciliation_summary_export),
 }
 
 

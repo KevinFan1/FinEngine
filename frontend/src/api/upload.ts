@@ -89,8 +89,8 @@ export function uploadCallback(data: {
     parsed_year?: number | null;
     parsed_month?: number | null;
     parsed_type: string;
-    parsed_shop: string;
+    parsed_shop?: string;
     detected_platform: string;
 }) {
-    return post<null>("/uploads/callback", data);
+    return post<UploadFileRecord>("/uploads/callback", data);
 }

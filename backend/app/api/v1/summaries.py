@@ -13,6 +13,7 @@ from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.summary import SummaryDongzhangDetailOut, SummaryOut, SummaryReportOut
 from app.services.audit_service import AuditService
 from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
+from app.services.merchant_reconciliation_service import MerchantReconciliationService
 from app.services.summary_service import SummaryService
 from app.utils.query_filters import resolve_org_ids
 
@@ -365,10 +366,21 @@ async def list_summary_dongzhang_details(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    derived_map = await MerchantReconciliationService.build_detail_derived_field_map(db, details=rows)
 
     return ApiResponse(
         data=PageResponse(
-            items=[SummaryDongzhangDetailOut(**DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name, shop_color=shop_color)) for row in rows],
+            items=[
+                SummaryDongzhangDetailOut(
+                    **DouyinDongzhangDetailService.serialize_detail_row(
+                        row,
+                        org_name=org_name,
+                        shop_color=shop_color,
+                        derived_fields=derived_map.get(int(row.id)),
+                    )
+                )
+                for row in rows
+            ],
             total=total,
             page=page,
             page_size=page_size,

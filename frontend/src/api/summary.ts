@@ -51,6 +51,15 @@ export interface SummaryDongzhangDetailRecord {
     commission_derived: number;
     bic: number;
     insurance_fee: number;
+    major_merchant_name: string;
+    our_subject: string;
+    merchant_receipt_subject: string;
+    receipt_merchant: string;
+    allocated_bic: number;
+    allocated_insurance_fee: number;
+    live_amount: number;
+    merchant_match_status: string;
+    merchant_match_error: string;
     transaction_time: string;
     transaction_flow_no: string;
     transaction_direction: string;
@@ -63,6 +72,7 @@ export interface SummaryDongzhangDetailRecord {
     after_sale_no: string;
     order_time: string;
     product_id: string;
+    product_code: string;
     product_name: string;
     author_id: string;
     author_name: string;

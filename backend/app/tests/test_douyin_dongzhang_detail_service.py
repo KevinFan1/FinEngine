@@ -46,6 +46,7 @@ def test_serialize_detail_row_formats_money_and_dates() -> None:
         after_sale_no = "after-1"
         order_time = datetime(2026, 4, 20, 12, 0, 0)
         product_id = "prod-1"
+        product_code = "CAN123"
         product_name = "商品A"
         author_id = "author-1"
         author_name = "达人A"
@@ -87,6 +88,11 @@ def test_serialize_detail_row_formats_money_and_dates() -> None:
     assert payload["refund_to_compensation"] == 10.2
     assert payload["platform_fee_raw"] == -11.0
     assert payload["remark"] == "备注A"
+    assert payload["major_merchant_name"] == ""
+    assert payload["merchant_receipt_subject"] == ""
+    assert payload["allocated_bic"] == 0
+    assert payload["allocated_insurance_fee"] == 0
+    assert payload["live_amount"] == 0
 
 
 def test_build_export_workbook_writes_header_only() -> None:
@@ -110,13 +116,17 @@ def test_build_export_workbook_header_order_matches_frontend() -> None:
         "动账金额",
     ]
     assert "调年月(系统的业务年月)" in headers
-    assert headers[-6:] == [
-        "平台其他收入",
-        "平台服务费（修改正数）",
-        "退货及其他费用",
-        "达人佣金",
-        "BIC",
-        "运费险",
+    assert "商品编码" in headers
+    assert headers[-9:] == [
+        "大商家名称",
+        "我方主体",
+        "商家收款主体",
+        "收款商家",
+        "分摊BIC",
+        "分摊运费险",
+        "直播款",
+        "商家对账匹配状态",
+        "商家对账匹配失败原因",
     ]
 
 
@@ -145,3 +155,30 @@ def test_normalize_payload_strips_excel_text_prefix() -> None:
     assert normalized["sub_order_no"] == "6925040387642719692"
     assert normalized["order_no"] == "6925040387642719692"
     assert normalized["transaction_amount"] == Decimal("83.16")
+
+
+def test_normalize_payload_derives_missing_product_code() -> None:
+    normalized = DouyinDongzhangDetailService._normalize_payload(
+        {
+            "source_row_number": 2,
+            "summary_year": 2026,
+            "summary_month": 4,
+            "product_name": "淡水珍珠项链-多样性发一件-约4.5mm-V45054-25（东哥）",
+        }
+    )
+
+    assert normalized["product_code"] == "V45054"
+
+
+def test_normalize_payload_keeps_existing_product_code() -> None:
+    normalized = DouyinDongzhangDetailService._normalize_payload(
+        {
+            "source_row_number": 2,
+            "summary_year": 2026,
+            "summary_month": 4,
+            "product_code": "MANUAL123",
+            "product_name": "淡水珍珠项链-多样性发一件-约4.5mm-V45054-25（东哥）",
+        }
+    )
+
+    assert normalized["product_code"] == "MANUAL123"

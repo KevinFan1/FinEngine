@@ -196,6 +196,54 @@ def test_douyin_dongzhang_strips_excel_text_prefix_from_detail_fields(tmp_path: 
     assert detail_row["order_no"] == "6925040387642719692"
 
 
+def test_douyin_dongzhang_extracts_product_code(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_product_code.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-04-01 01:17:24",
+                动账时间="2026-04-02 10:00:00",
+                动账方向="入账",
+                动账金额="83.16",
+                动账场景="货款结算入账",
+                商品名称="足金项链 can123+can456 T20260001",
+                订单实付应结="83.16",
+                订单退款="0",
+                平台服务费="0",
+                佣金="0",
+                招商服务费="0",
+                站外推广费="0",
+                服务商佣金="0",
+            ),
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                下单时间="2026-04-01 01:17:24",
+                动账时间="2026-04-02 10:00:00",
+                动账方向="入账",
+                动账金额="83.16",
+                动账场景="货款结算入账",
+                商品名称="淡水珍珠项链-多样性发一件-约4.5mm-V45054-25（东哥）",
+                订单实付应结="83.16",
+                订单退款="0",
+                平台服务费="0",
+                佣金="0",
+                招商服务费="0",
+                站外推广费="0",
+                服务商佣金="0",
+            )
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+
+    assert result["success_rows"] == 2
+    assert result["detail_rows"][0]["product_code"] == "CAN123+CAN456,T20260001"
+    assert result["detail_rows"][1]["product_code"] == "V45054"
+
+
 def test_douyin_simple_monthly_sum_types(tmp_path: Path) -> None:
     bic_path = tmp_path / "douyin_bic.xlsx"
     _write_workbook(

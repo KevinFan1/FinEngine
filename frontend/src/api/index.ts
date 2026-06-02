@@ -233,8 +233,13 @@ export async function post<T>(url: string, data?: any): Promise<T> {
 /**
  * Multipart form upload
  */
-export async function uploadForm<T>(url: string, data: FormData): Promise<T> {
+export async function uploadForm<T>(
+    url: string,
+    data: FormData,
+    params?: Record<string, any>,
+): Promise<T> {
     const response = await service.post<ApiResponse<T>>(url, data, {
+        params,
         headers: {
             "Content-Type": "multipart/form-data",
         },

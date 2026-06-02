@@ -67,6 +67,8 @@ class TaskListOut(BaseModel):
     error_reason: str | None = None
     action_expired: bool = False
     action_expire_reason: str | None = None
+    result_summary: dict | None = None
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
+    updated_at: datetime | None = None

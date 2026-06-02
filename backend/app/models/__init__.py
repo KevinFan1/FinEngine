@@ -5,6 +5,14 @@ from app.models.category_dict import CategoryDict
 from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
 from app.models.export_job import ExportJob
 from app.models.file_spec import FileSpec
+from app.models.merchant_reconciliation import (
+    MerchantBankFlowFile,
+    MerchantBankFlowRow,
+    MerchantOpeningBalance,
+    MerchantRedSheet,
+    MerchantRedSheetPayment,
+    MerchantRedSheetPurchase,
+)
 from app.models.operation_log import OperationLog
 from app.models.order_index import OrderIndex
 from app.models.organization import Organization
@@ -38,6 +46,12 @@ __all__ = [
     "DouyinDongzhangDetail",
     "ExportJob",
     "FileSpec",
+    "MerchantRedSheet",
+    "MerchantRedSheetPayment",
+    "MerchantRedSheetPurchase",
+    "MerchantBankFlowFile",
+    "MerchantBankFlowRow",
+    "MerchantOpeningBalance",
     "Organization",
     "User",
     "UploadBatch",

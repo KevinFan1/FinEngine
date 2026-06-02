@@ -49,7 +49,7 @@ logger = logging.getLogger("finengine.worker")
 _worker_loop: asyncio.AbstractEventLoop | None = None
 SUPPORTED_TEMP_SUFFIXES = {".xlsx", ".xlsm", ".xls", ".csv"}
 FILENAME_TYPE_PATTERN = re.compile(
-    r"^(?:\d{2,4}年\d{1,2}月[ _])?(动账|gmv|bic|BIC|运费险|订单|其他服务款|GMV订单货款|GMV其他服务款|退货费用及其他)[ _].+\.(?:xlsx|xlsm|xls|csv)$",
+    r"^(?:\d{2,4}年\d{1,2}月[ _])?(动账|gmv|bic|BIC|运费险|订单|其他服务款|GMV订单货款|GMV其他服务款|退货费用及其他|银行流水)[ _].+\.(?:xlsx|xlsm|xls|csv)$",
     re.IGNORECASE,
 )
 
@@ -356,6 +356,7 @@ def _normalize_file_type(raw_type: str | None) -> str | None:
         "GMV订单货款": "gmv",
         "GMV其他服务款": "其他服务款",
         "退货费用及其他": "动账",
+        "银行流水": "银行流水",
     }
     if stripped in alias_map:
         return alias_map[stripped]
@@ -438,6 +439,42 @@ def process_file_platform(
     )
 
 
+@celery_app.task(bind=True, name="process_merchant_red_sheet")
+def process_merchant_red_sheet(
+    self,
+    task_id: int,
+    file_id: int,
+    oss_key: str,
+):
+    """Process a merchant red-sheet upload from OSS."""
+    _run_async_in_worker(
+        _process_merchant_red_sheet_async(
+            self,
+            task_id=task_id,
+            file_id=file_id,
+            oss_key=oss_key,
+        )
+    )
+
+
+@celery_app.task(bind=True, name="process_merchant_bank_flow")
+def process_merchant_bank_flow(
+    self,
+    task_id: int,
+    file_id: int,
+    oss_key: str,
+):
+    """Process a merchant bank-flow upload from OSS."""
+    _run_async_in_worker(
+        _process_merchant_bank_flow_async(
+            self,
+            task_id=task_id,
+            file_id=file_id,
+            oss_key=oss_key,
+        )
+    )
+
+
 @celery_app.task(name="app.tasks.scan_due_sync_tasks", ignore_result=True)
 def scan_due_sync_tasks() -> int:
     """Compatibility shim for stale Celery beat messages from older builds.
@@ -486,14 +523,28 @@ async def _recover_queued_processing_tasks_async(limit: int = 100) -> int:
         rows = task_rows.all()
         dispatched = 0
         for task, upload_file in rows:
-            async_result = process_file_platform.delay(
-                file_id=upload_file.id,
-                oss_key=upload_file.oss_key,
-                org_id=task.org_id,
-                platform_code=upload_file.detected_platform or "",
-                shop_name=upload_file.parsed_shop or "",
-                shop_id=upload_file.shop_id,
-            )
+            file_type = _normalize_file_type(upload_file.parsed_type)
+            if file_type == "红单":
+                async_result = process_merchant_red_sheet.delay(
+                    task_id=task.id,
+                    file_id=upload_file.id,
+                    oss_key=upload_file.oss_key,
+                )
+            elif file_type == "银行流水":
+                async_result = process_merchant_bank_flow.delay(
+                    task_id=task.id,
+                    file_id=upload_file.id,
+                    oss_key=upload_file.oss_key,
+                )
+            else:
+                async_result = process_file_platform.delay(
+                    file_id=upload_file.id,
+                    oss_key=upload_file.oss_key,
+                    org_id=task.org_id,
+                    platform_code=upload_file.detected_platform or "",
+                    shop_name=upload_file.parsed_shop or "",
+                    shop_id=upload_file.shop_id,
+                )
             task.celery_task_id = async_result.id
             dispatched += 1
         await db.commit()
@@ -591,15 +642,242 @@ async def _requeue_order_dependent_tasks_after_order_upload_async(order_file_id:
         return len(rows)
 
 
+async def _process_merchant_red_sheet_async(
+    task_instance,
+    *,
+    task_id: int,
+    file_id: int,
+    oss_key: str,
+) -> None:
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.task import ProcessingTask
+    from app.models.upload import UploadFile
+    from app.models.user import User
+    from app.services.merchant_reconciliation_service import MerchantReconciliationService
+    from app.services.oss_service import oss_service
+
+    async with async_session_factory() as db:
+        task_result = await db.execute(
+            select(ProcessingTask).where(
+                ProcessingTask.id == task_id,
+                ProcessingTask.file_id == file_id,
+                ProcessingTask.is_deleted.is_(False),
+            )
+        )
+        task = task_result.scalar_one_or_none()
+        file_result = await db.execute(
+            select(UploadFile).where(
+                UploadFile.id == file_id,
+                UploadFile.is_deleted.is_(False),
+            )
+        )
+        upload_file = file_result.scalar_one_or_none()
+        if task is None or upload_file is None:
+            return
+
+        previous_result_state = _capture_processing_result_state(task, upload_file)
+        task.status = "running"
+        task.progress = 10
+        task.celery_task_id = task_instance.request.id
+        task.started_at = datetime.now(timezone.utc)
+        upload_file.status = "processing"
+        await db.commit()
+
+        try:
+            operator = await db.get(User, upload_file.user_id)
+            if operator is None:
+                raise ValueError("上传用户不存在，无法处理红单")
+            if upload_file.parsed_year is None or upload_file.parsed_month is None:
+                raise ValueError("红单任务缺少年月，请重新上传")
+
+            with tempfile.NamedTemporaryFile(suffix=_infer_temp_suffix(upload_file, oss_key), delete=True) as tmp:
+                oss_service.download_to_temp(oss_key, tmp.name)
+                task.progress = 35
+                await db.commit()
+
+                with open(tmp.name, "rb") as file_obj:
+                    content = file_obj.read()
+
+            result = await MerchantReconciliationService.import_red_sheet(
+                db,
+                content=content,
+                filename=upload_file.original_name,
+                accounting_year=int(upload_file.parsed_year),
+                accounting_month=int(upload_file.parsed_month),
+                operator=operator,
+                org_id=upload_file.org_id,
+            )
+
+            total_rows = result.purchase_rows + result.payment_rows
+            task.status = "success"
+            task.progress = 100
+            task.processed_rows = total_rows
+            task.success_rows = total_rows
+            task.failed_rows = 0
+            task.error_message = None
+            task.result_summary = {
+                "type": "红单",
+                "red_sheet_id": result.red_sheet_id,
+                "total_rows": total_rows,
+                "success_rows": total_rows,
+                "failed_rows": 0,
+                "purchase_rows": result.purchase_rows,
+                "payment_rows": result.payment_rows,
+                "warnings": _json_safe(result.warnings[:50]),
+                "errors": _json_safe(result.errors[:10]),
+            }
+            task.finished_at = datetime.now(timezone.utc)
+            upload_file.status = "success"
+            upload_file.row_count = total_rows
+            upload_file.error_message = None
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            task_result = await db.execute(
+                select(ProcessingTask).where(
+                    ProcessingTask.id == task_id,
+                    ProcessingTask.is_deleted.is_(False),
+                )
+            )
+            task = task_result.scalar_one_or_none()
+            upload_file = None
+            if task is not None:
+                file_result = await db.execute(
+                    select(UploadFile).where(
+                        UploadFile.id == file_id,
+                        UploadFile.is_deleted.is_(False),
+                    )
+                )
+                upload_file = file_result.scalar_one_or_none()
+                _mark_task_failed(task, upload_file, exc, previous_state=previous_result_state)
+            await db.commit()
+            logger.exception("红单任务处理失败 file_id=%s oss_key=%s", file_id, oss_key)
+            raise
+
+
+async def _process_merchant_bank_flow_async(
+    task_instance,
+    *,
+    task_id: int,
+    file_id: int,
+    oss_key: str,
+) -> None:
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.task import ProcessingTask
+    from app.models.upload import UploadFile
+    from app.models.user import User
+    from app.services.merchant_reconciliation_service import MerchantReconciliationService
+    from app.services.oss_service import oss_service
+
+    async with async_session_factory() as db:
+        task_result = await db.execute(
+            select(ProcessingTask).where(
+                ProcessingTask.id == task_id,
+                ProcessingTask.file_id == file_id,
+                ProcessingTask.is_deleted.is_(False),
+            )
+        )
+        task = task_result.scalar_one_or_none()
+        file_result = await db.execute(
+            select(UploadFile).where(
+                UploadFile.id == file_id,
+                UploadFile.is_deleted.is_(False),
+            )
+        )
+        upload_file = file_result.scalar_one_or_none()
+        if task is None or upload_file is None:
+            return
+
+        previous_result_state = _capture_processing_result_state(task, upload_file)
+        task.status = "running"
+        task.progress = 10
+        task.celery_task_id = task_instance.request.id
+        task.started_at = datetime.now(timezone.utc)
+        upload_file.status = "processing"
+        await db.commit()
+
+        try:
+            operator = await db.get(User, upload_file.user_id)
+            if operator is None:
+                raise ValueError("上传用户不存在，无法处理银行流水")
+
+            with tempfile.NamedTemporaryFile(suffix=_infer_temp_suffix(upload_file, oss_key), delete=True) as tmp:
+                oss_service.download_to_temp(oss_key, tmp.name)
+                task.progress = 35
+                await db.commit()
+                result = await MerchantReconciliationService.import_bank_flow(
+                    db,
+                    file_path=tmp.name,
+                    filename=upload_file.original_name,
+                    operator=operator,
+                    org_id=upload_file.org_id,
+                    file_size=upload_file.file_size,
+                    file_hash=upload_file.file_hash,
+                )
+
+            task.status = "success"
+            task.progress = 100
+            task.processed_rows = result.row_count
+            task.success_rows = result.row_count
+            task.failed_rows = 0
+            task.error_message = None
+            task.result_summary = {
+                "type": "银行流水",
+                "bank_flow_file_id": result.bank_flow_file_id,
+                "total_rows": result.row_count,
+                "success_rows": result.row_count,
+                "failed_rows": 0,
+                "matched_row_count": result.matched_row_count,
+                "warnings": _json_safe(result.warnings[:50]),
+                "errors": _json_safe(result.errors[:10]),
+            }
+            task.finished_at = datetime.now(timezone.utc)
+            upload_file.status = "success"
+            upload_file.row_count = result.row_count
+            upload_file.error_message = None
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            task_result = await db.execute(
+                select(ProcessingTask).where(
+                    ProcessingTask.id == task_id,
+                    ProcessingTask.is_deleted.is_(False),
+                )
+            )
+            task = task_result.scalar_one_or_none()
+            upload_file = None
+            if task is not None:
+                file_result = await db.execute(
+                    select(UploadFile).where(
+                        UploadFile.id == file_id,
+                        UploadFile.is_deleted.is_(False),
+                    )
+                )
+                upload_file = file_result.scalar_one_or_none()
+                _mark_task_failed(task, upload_file, exc, previous_state=previous_result_state)
+            await db.commit()
+            logger.exception("银行流水任务处理失败 file_id=%s oss_key=%s", file_id, oss_key)
+            raise
+
+
 def _reset_task_for_requeue(task, upload_file) -> None:
     task.status = "queued"
     task.progress = 0
     task.celery_task_id = None
     task.error_message = None
+    task.processed_rows = 0
+    task.success_rows = 0
+    task.failed_rows = 0
+    task.result_summary = None
     task.started_at = None
     task.finished_at = None
     upload_file.status = "uploaded"
     upload_file.error_message = None
+    upload_file.row_count = 0
 
 
 async def _process_file_platform_async(

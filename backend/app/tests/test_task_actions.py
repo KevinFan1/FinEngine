@@ -4,7 +4,14 @@ from types import SimpleNamespace
 import pytest
 
 import app.api.v1.tasks as tasks_api
-from app.api.v1.tasks import _load_task_with_file, get_task_source_download, is_task_expired
+from app.tasks import celery_app as celery_module
+from app.api.v1.tasks import (
+    _enqueue_task_again,
+    _load_task_with_file,
+    _validate_task_action,
+    get_task_source_download,
+    is_task_expired,
+)
 from app.models.task import ProcessingTask
 
 
@@ -106,3 +113,61 @@ async def test_task_source_download_returns_signed_url_for_superadmin(monkeypatc
     assert signed_calls == [
         {"key": "source-key.xlsx", "expires_seconds": 300, "filename": "原表.xlsx"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_requeue_bank_flow_uses_bank_flow_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    delay_calls: list[dict[str, object]] = []
+
+    class FakeAsyncResult:
+        id = "bank-flow-celery-id"
+
+    def fake_delay(**kwargs):
+        delay_calls.append(kwargs)
+        return FakeAsyncResult()
+
+    monkeypatch.setattr(celery_module.process_merchant_bank_flow, "delay", fake_delay)
+
+    class DB:
+        async def commit(self):
+            return None
+
+        async def refresh(self, _obj):
+            return None
+
+    task = ProcessingTask(id=7, file_id=9, org_id=2, user_id=3, status="failed")
+    upload_file = SimpleNamespace(
+        id=9,
+        parsed_type="银行流水",
+        oss_key="bank-flow.xlsx",
+        status="failed",
+        error_message="旧错误",
+        row_count=12,
+    )
+
+    await _enqueue_task_again(task, upload_file, DB())  # type: ignore[arg-type]
+
+    assert delay_calls == [{"task_id": 7, "file_id": 9, "oss_key": "bank-flow.xlsx"}]
+    assert task.celery_task_id == "bank-flow-celery-id"
+
+
+@pytest.mark.asyncio
+async def test_bank_flow_retry_allows_success_task() -> None:
+    task = ProcessingTask(
+        id=8,
+        file_id=10,
+        org_id=2,
+        user_id=3,
+        status="success",
+        created_at=datetime.now(timezone.utc),
+    )
+    upload_file = SimpleNamespace(parsed_type="银行流水")
+
+    message = await _validate_task_action(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        task=task,
+        upload_file=upload_file,  # type: ignore[arg-type]
+        action="retry",
+    )
+
+    assert message is None

@@ -20,6 +20,9 @@ from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.services.upload_period_service import resolve_upload_period_header
 
+MERCHANT_RED_SHEET_TYPE = "红单"
+MERCHANT_BANK_FLOW_TYPE = "银行流水"
+
 
 def _format_file_size(bytes_size: int) -> str:
     if bytes_size <= 0:
@@ -30,6 +33,14 @@ def _format_file_size(bytes_size: int) -> str:
     value = bytes_size / (1024 ** index)
     decimals = 0 if index == 0 else 2
     return f"{value:.{decimals}f} {units[index]}"
+
+
+def _is_merchant_red_sheet_type(type_code: str | None) -> bool:
+    return (type_code or "").strip().lower() == MERCHANT_RED_SHEET_TYPE.lower()
+
+
+def _is_merchant_bank_flow_type(type_code: str | None) -> bool:
+    return (type_code or "").strip().lower() == MERCHANT_BANK_FLOW_TYPE.lower()
 
 
 class UploadService:
@@ -144,12 +155,19 @@ class UploadService:
         elif data.detected_platform:
             platform_profile = await resolve_platform_profile(db, data.detected_platform)
 
+        is_red_sheet = _is_merchant_red_sheet_type(data.parsed_type)
+        is_bank_flow = _is_merchant_bank_flow_type(data.parsed_type)
+
         if data.parsed_month is not None and (data.parsed_month < 1 or data.parsed_month > 12):
             raise ValueError("所属月份不正确")
-        if not await resolve_upload_period_header(
-            db,
-            platform_profile.source_platform_code if platform_profile else data.detected_platform,
-            data.parsed_type,
+        if (
+            not is_red_sheet
+            and not is_bank_flow
+            and not await resolve_upload_period_header(
+                db,
+                platform_profile.source_platform_code if platform_profile else data.detected_platform,
+                data.parsed_type,
+            )
         ):
             raise ValueError(f"未配置所属时间规则：平台 [{data.detected_platform or '-'}]，类别 [{data.parsed_type or '-'}]")
 
@@ -208,36 +226,94 @@ class UploadService:
         await QuotaService.update_storage_usage(db, batch.org_id, data.file_size)
 
         # Dispatch Celery task — use hardcoded platform processor
-        from app.tasks.processors import PLATFORM_PROCESSORS
-
-        processor_code = platform_profile.processor_code if platform_profile else data.detected_platform
-        if data.detected_platform and processor_code in PLATFORM_PROCESSORS:
-            UploadService.dispatch_processing_task_after_commit(
-                db,
-                task=task,
-                upload_file=upload_file,
-                platform_code=data.detected_platform,
-                shop_id=shop.id if shop else None,
-                shop_name=data.parsed_shop or "",
-            )
+        if is_red_sheet:
+            UploadService.dispatch_red_sheet_task_after_commit(db, task=task, upload_file=upload_file)
+        elif is_bank_flow:
+            UploadService.dispatch_bank_flow_task_after_commit(db, task=task, upload_file=upload_file)
         else:
-            # No processor found — mark task as failed
-            task.status = "failed"
-            task.error_message = f"未找到平台 [{data.detected_platform}] 的处理器" if data.detected_platform else "未检测到平台类型，请检查文件名格式"
-            upload_file.status = "failed"
-            upload_file.error_message = task.error_message
+            # Dispatch Celery task — use hardcoded platform processor
+            from app.tasks.processors import PLATFORM_PROCESSORS
 
-        await UploadService.dispatch_independent_tasks(
-            db,
-            upload_file=upload_file,
-            user=user,
-            ip=ip,
-            user_agent=user_agent,
-        )
+            processor_code = platform_profile.processor_code if platform_profile else data.detected_platform
+            if data.detected_platform and processor_code in PLATFORM_PROCESSORS:
+                UploadService.dispatch_processing_task_after_commit(
+                    db,
+                    task=task,
+                    upload_file=upload_file,
+                    platform_code=data.detected_platform,
+                    shop_id=shop.id if shop else None,
+                    shop_name=data.parsed_shop or "",
+                )
+            else:
+                # No processor found — mark task as failed
+                task.status = "failed"
+                task.error_message = f"未找到平台 [{data.detected_platform}] 的处理器" if data.detected_platform else "未检测到平台类型，请检查文件名格式"
+                upload_file.status = "failed"
+                upload_file.error_message = task.error_message
+
+            await UploadService.dispatch_independent_tasks(
+                db,
+                upload_file=upload_file,
+                user=user,
+                ip=ip,
+                user_agent=user_agent,
+            )
 
         await db.flush()
         await db.refresh(upload_file)
         return upload_file
+
+    @staticmethod
+    def dispatch_red_sheet_task_after_commit(
+        db: AsyncSession,
+        *,
+        task: ProcessingTask,
+        upload_file: UploadFile,
+    ) -> None:
+        async def dispatch() -> None:
+            try:
+                from app.tasks.celery_app import process_merchant_red_sheet
+
+                async_result = process_merchant_red_sheet.delay(
+                    task_id=task.id,
+                    file_id=upload_file.id,
+                    oss_key=upload_file.oss_key,
+                )
+                task.celery_task_id = async_result.id
+            except Exception as exc:
+                task.status = "failed"
+                task.error_message = f"红单处理任务投递失败: {exc}"
+                upload_file.status = "failed"
+                upload_file.error_message = task.error_message
+            await db.flush()
+
+        register_after_commit(db, dispatch)
+
+    @staticmethod
+    def dispatch_bank_flow_task_after_commit(
+        db: AsyncSession,
+        *,
+        task: ProcessingTask,
+        upload_file: UploadFile,
+    ) -> None:
+        async def dispatch() -> None:
+            try:
+                from app.tasks.celery_app import process_merchant_bank_flow
+
+                async_result = process_merchant_bank_flow.delay(
+                    task_id=task.id,
+                    file_id=upload_file.id,
+                    oss_key=upload_file.oss_key,
+                )
+                task.celery_task_id = async_result.id
+            except Exception as exc:
+                task.status = "failed"
+                task.error_message = f"银行流水处理任务投递失败: {exc}"
+                upload_file.status = "failed"
+                upload_file.error_message = task.error_message
+            await db.flush()
+
+        register_after_commit(db, dispatch)
 
     @staticmethod
     def dispatch_processing_task_after_commit(

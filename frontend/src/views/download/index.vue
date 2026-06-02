@@ -16,6 +16,7 @@
                         <el-option label="汇总" value="summary" />
                         <el-option label="资金科目核算" value="transaction_accounting" />
                         <el-option label="BIC对账" value="bic_accounting" />
+                        <el-option label="商家对账" value="merchant_reconciliation" />
                     </el-select>
                 </el-form-item>
                 <el-form-item>
@@ -289,6 +290,7 @@ function moduleLabel(module: string) {
         summary: "汇总",
         transaction_accounting: "资金科目核算",
         bic_accounting: "BIC对账",
+        merchant_reconciliation: "商家对账",
     }[module] || module;
 }
 

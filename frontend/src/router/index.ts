@@ -176,6 +176,48 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "BIC源明细", icon: "Document" },
             },
             {
+                path: "merchant-reconciliation",
+                name: "MerchantReconciliation",
+                redirect: "/merchant-reconciliation/tasks",
+                meta: { title: "商家对账", icon: "Money" },
+            },
+            {
+                path: "merchant-reconciliation/upload",
+                name: "MerchantReconciliationUpload",
+                component: () => import("@/views/merchant-reconciliation/upload.vue"),
+                meta: { title: "上传中心", icon: "Upload" },
+            },
+            {
+                path: "merchant-reconciliation/tasks",
+                name: "MerchantReconciliationTasks",
+                component: () => import("@/views/merchant-reconciliation/tasks.vue"),
+                meta: { title: "对账任务", icon: "List" },
+            },
+            {
+                path: "merchant-reconciliation/payments",
+                name: "MerchantReconciliationPayments",
+                component: () => import("@/views/merchant-reconciliation/payments.vue"),
+                meta: { title: "货款明细", icon: "Document" },
+            },
+            {
+                path: "merchant-reconciliation/purchases",
+                name: "MerchantReconciliationPurchases",
+                component: () => import("@/views/merchant-reconciliation/purchases.vue"),
+                meta: { title: "采购明细", icon: "Document" },
+            },
+            {
+                path: "merchant-reconciliation/bank-flows",
+                name: "MerchantReconciliationBankFlows",
+                component: () => import("@/views/merchant-reconciliation/bank-flows.vue"),
+                meta: { title: "银行流水", icon: "Wallet" },
+            },
+            {
+                path: "merchant-reconciliation/summary",
+                name: "MerchantReconciliationSummary",
+                component: () => import("@/views/merchant-reconciliation/summary.vue"),
+                meta: { title: "汇总数据", icon: "DataAnalysis" },
+            },
+            {
                 path: "audit-logs",
                 name: "AuditLogs",
                 component: () => import("@/views/audit/index.vue"),

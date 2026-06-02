@@ -18,10 +18,12 @@ from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
 from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.summary import FinancialSummary
+from app.services.merchant_reconciliation_service import MerchantDerivedFields, MerchantReconciliationService
 from app.services.partition_service import DOUYIN_SOURCE_PARTITION, ensure_month_partition
 from app.services.shop_visibility import active_shop_filter
 from app.tasks.processors.base import parse_datetime
 from app.utils.money import safe_decimal
+from app.utils.product_code import extract_product_code
 
 DONGZHANG_DETAIL_EXPORT_ROW_LIMIT = 1_000_000_000
 DONGZHANG_DETAIL_EXPORT_BATCH_SIZE = 5000
@@ -47,6 +49,7 @@ DONGZHANG_DETAIL_EXPORT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("order_time", "下单时间"),
     ("summary_date", "调年月(系统的业务年月)"),
     ("product_id", "商品ID"),
+    ("product_code", "商品编码"),
     ("product_name", "商品名称"),
     ("author_id", "达人ID"),
     ("author_name", "达人名称"),
@@ -86,6 +89,15 @@ DONGZHANG_DETAIL_EXPORT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("commission_derived", "达人佣金"),
     ("bic", "BIC"),
     ("insurance_fee", "运费险"),
+    ("major_merchant_name", "大商家名称"),
+    ("our_subject", "我方主体"),
+    ("merchant_receipt_subject", "商家收款主体"),
+    ("receipt_merchant", "收款商家"),
+    ("allocated_bic", "分摊BIC"),
+    ("allocated_insurance_fee", "分摊运费险"),
+    ("live_amount", "直播款"),
+    ("merchant_match_status", "商家对账匹配状态"),
+    ("merchant_match_error", "商家对账匹配失败原因"),
 )
 
 MONEY_FIELDS: frozenset[str] = frozenset(
@@ -122,6 +134,9 @@ MONEY_FIELDS: frozenset[str] = frozenset(
         "commission_derived",
         "bic",
         "insurance_fee",
+        "allocated_bic",
+        "allocated_insurance_fee",
+        "live_amount",
     }
 )
 
@@ -159,6 +174,7 @@ class DouyinDongzhangDetailService:
         summary_lookup: dict[tuple[int, int], int],
     ) -> list[DouyinDongzhangDetail]:
         now = datetime.now(timezone.utc)
+        # 分区表写入前先确保月份分区存在，避免新月份数据落不到目标分区。
         await ensure_month_partition(
             db,
             spec=DOUYIN_SOURCE_PARTITION,
@@ -174,6 +190,7 @@ class DouyinDongzhangDetailService:
         existing_rows = (await db.execute(existing_stmt)).scalars().all()
         previous_summary_ids = {int(row.summary_id) for row in existing_rows if row.summary_id is not None}
         for row in existing_rows:
+            # 同店铺同期间重传时，旧明细先整体软删除，确保后续汇总只基于最新文件。
             row.is_deleted = True
             row.deleted_at = now
 
@@ -202,6 +219,7 @@ class DouyinDongzhangDetailService:
         current_summary_ids = {int(row.summary_id) for row in created_rows if row.summary_id is not None}
         stale_summary_ids = previous_summary_ids - current_summary_ids
         if stale_summary_ids:
+            # 新文件不再覆盖到的汇总年月，需要同步清理旧汇总，避免页面展示过期结果。
             stale_stmt = select(FinancialSummary).where(
                 FinancialSummary.id.in_(sorted(stale_summary_ids)),
                 FinancialSummary.org_id == org_id,
@@ -286,10 +304,12 @@ class DouyinDongzhangDetailService:
             DouyinDongzhangDetailService._ensure_row_limit("动账源明细", total)
 
         rows = list((await db.execute(stmt)).scalars().all())
+        derived_map = await MerchantReconciliationService.build_detail_derived_field_map(db, details=rows)
         detail_dicts = [
             DouyinDongzhangDetailService.serialize_detail_row(
                 row,
                 org_name=org_name,
+                derived_fields=derived_map.get(int(row.id)),
             )
             for row in rows
         ]
@@ -326,7 +346,15 @@ class DouyinDongzhangDetailService:
 
         if page is not None and page_size is not None:
             rows = list((await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).scalars().all())
-            detail_dicts = [DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name) for row in rows]
+            derived_map = await MerchantReconciliationService.build_detail_derived_field_map(db, details=rows)
+            detail_dicts = [
+                DouyinDongzhangDetailService.serialize_detail_row(
+                    row,
+                    org_name=org_name,
+                    derived_fields=derived_map.get(int(row.id)),
+                )
+                for row in rows
+            ]
             return summary, DouyinDongzhangDetailService.save_export_workbook(detail_dicts, output_path=output_path)
 
         total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
@@ -349,10 +377,15 @@ class DouyinDongzhangDetailService:
             )
             if not batch:
                 break
+            derived_map = await MerchantReconciliationService.build_detail_derived_field_map(db, details=batch)
             for row in batch:
                 DouyinDongzhangDetailService._append_export_row(
                     ws,
-                    DouyinDongzhangDetailService.serialize_detail_row(row, org_name=org_name),
+                    DouyinDongzhangDetailService.serialize_detail_row(
+                        row,
+                        org_name=org_name,
+                        derived_fields=derived_map.get(int(row.id)),
+                    ),
                 )
                 row_count += 1
             offset += DONGZHANG_DETAIL_EXPORT_BATCH_SIZE
@@ -405,8 +438,16 @@ class DouyinDongzhangDetailService:
             )
         )
         rows = []
-        for detail, org_name in (await db.execute(stmt)).all():
-            rows.append(DouyinDongzhangDetailService.serialize_detail_row(detail, org_name=org_name))
+        result_rows = list((await db.execute(stmt)).all())
+        derived_map = await MerchantReconciliationService.build_detail_derived_field_map(db, details=[detail for detail, _org_name in result_rows])
+        for detail, org_name in result_rows:
+            rows.append(
+                DouyinDongzhangDetailService.serialize_detail_row(
+                    detail,
+                    org_name=org_name,
+                    derived_fields=derived_map.get(int(detail.id)),
+                )
+            )
         return rows
 
     @staticmethod
@@ -464,10 +505,15 @@ class DouyinDongzhangDetailService:
             batch = (await db.execute(stmt.offset(offset).limit(DONGZHANG_DETAIL_EXPORT_BATCH_SIZE))).all()
             if not batch:
                 break
+            derived_map = await MerchantReconciliationService.build_detail_derived_field_map(db, details=[detail for detail, _org_name in batch])
             for detail, org_name in batch:
                 DouyinDongzhangDetailService._append_export_row(
                     ws,
-                    DouyinDongzhangDetailService.serialize_detail_row(detail, org_name=org_name),
+                    DouyinDongzhangDetailService.serialize_detail_row(
+                        detail,
+                        org_name=org_name,
+                        derived_fields=derived_map.get(int(detail.id)),
+                    ),
                 )
                 row_count += 1
             offset += DONGZHANG_DETAIL_EXPORT_BATCH_SIZE
@@ -561,6 +607,7 @@ class DouyinDongzhangDetailService:
         *,
         org_name: str | None = None,
         shop_color: str | None = None,
+        derived_fields: MerchantDerivedFields | None = None,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": row.id,
@@ -590,12 +637,41 @@ class DouyinDongzhangDetailService:
             if field in payload:
                 continue
             value = getattr(row, field, None)
+            if field == "product_code" and not value:
+                value = extract_product_code(getattr(row, "product_name", ""))
             if field in MONEY_FIELDS:
                 payload[field] = float(value or 0)
             elif field in DATETIME_FIELDS:
                 payload[field] = DouyinDongzhangDetailService._format_datetime(value)
             else:
                 payload[field] = value
+        if derived_fields is not None:
+            payload.update(
+                {
+                    "product_code": derived_fields.product_code or payload.get("product_code") or "",
+                    "major_merchant_name": derived_fields.major_merchant_name,
+                    "our_subject": derived_fields.our_subject,
+                    "merchant_receipt_subject": derived_fields.merchant_receipt_subject,
+                    "receipt_merchant": derived_fields.receipt_merchant,
+                    "allocated_bic": float(derived_fields.allocated_bic),
+                    "allocated_insurance_fee": float(derived_fields.allocated_insurance_fee),
+                    "live_amount": float(derived_fields.live_amount),
+                    "merchant_match_status": "已匹配" if derived_fields.match_status == "matched" else "未匹配",
+                    "merchant_match_error": derived_fields.match_error,
+                }
+            )
+        else:
+            for key in (
+                "major_merchant_name",
+                "our_subject",
+                "merchant_receipt_subject",
+                "receipt_merchant",
+                "merchant_match_status",
+                "merchant_match_error",
+            ):
+                payload[key] = payload.get(key) or ""
+            for key in ("allocated_bic", "allocated_insurance_fee", "live_amount"):
+                payload[key] = float(payload.get(key) or 0)
         return payload
 
     @staticmethod
@@ -672,6 +748,8 @@ class DouyinDongzhangDetailService:
                 normalized[key] = int(value or 0)
             else:
                 normalized[key] = DouyinDongzhangDetailService._clean_excel_text_prefix(value)
+        if not normalized.get("product_code"):
+            normalized["product_code"] = extract_product_code(normalized.get("product_name", ""))
         return normalized
 
     @staticmethod

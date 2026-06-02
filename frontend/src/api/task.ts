@@ -5,18 +5,23 @@ export interface Task {
     id: number;
     org_id: number;
     org_name?: string | null;
-    batch_id: number;
-    filename: string;
-    platform: string;
+    file_id?: number;
+    batch_id?: number | null;
+    filename?: string | null;
+    platform?: string | null;
     source_platform_code?: string | null;
     report_platform_code?: string | null;
-    shop_name: string;
+    shop_id?: number | null;
+    shop_name?: string | null;
     shop_color?: string | null;
     parsed_type?: string;
     parsed_year?: number;
     parsed_month?: number;
     status: string;
     progress: number;
+    processed_rows?: number;
+    success_rows?: number;
+    failed_rows?: number;
     result_success?: number;
     result_failed?: number;
     error_message: string | null;
@@ -30,6 +35,7 @@ export interface Task {
     started_at: string | null;
     finished_at: string | null;
     created_at: string;
+    updated_at?: string;
 }
 
 export interface TaskProgress {

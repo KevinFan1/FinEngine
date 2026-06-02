@@ -227,6 +227,7 @@ def build_task_list_out(
         error_reason=error_reason,
         action_expired=action_expired,
         action_expire_reason=_task_expired_message() if action_expired else None,
+        result_summary=task.result_summary,
         started_at=task.started_at,
         finished_at=task.finished_at,
         created_at=task.created_at,
@@ -245,7 +246,7 @@ def is_task_expired(task: ProcessingTask) -> bool:
 
 
 def _task_expired_message() -> str:
-    return f"任务创建时间超过 {TASK_ACTION_EXPIRE_DAYS} 天，已过期，不能重试或重新统计"
+    return f"任务创建时间超过 {TASK_ACTION_EXPIRE_DAYS} 天，已过期，不能重新提交或重新统计"
 
 
 async def _load_task_with_file(
@@ -320,17 +321,24 @@ async def _validate_task_action(
     upload_file: UploadFile,
     action: str,
 ) -> str | None:
+    parsed_type = (upload_file.parsed_type or "").strip()
     if task.status == "expired":
-        return "源文件已过期或不存在，不能重试，请重新上传文件"
+        return "源文件已过期或不存在，不能重新提交，请重新上传文件"
     if is_task_expired(task):
         return _task_expired_message()
-    if action == "retry" and task.status != "failed":
-        return "只有失败任务可以重试"
+    if action == "retry":
+        if parsed_type == "银行流水":
+            if task.status in {"queued", "running"}:
+                return "排队中或运行中的银行流水任务不能重新处理"
+        elif task.status != "failed":
+            return "只有失败任务可以重试"
     if action == "recalculate":
         if task.status in {"queued", "running"}:
             return "排队中或运行中的任务不能重新统计"
+    if parsed_type in {"红单", "银行流水"}:
+        return None
     if not upload_file.detected_platform:
-        return "文件缺少平台信息，无法重试" if action == "retry" else "文件缺少平台信息，无法重新统计"
+        return "文件缺少平台信息，无法重新提交" if action == "retry" else "文件缺少平台信息，无法重新统计"
 
     from app.tasks.processors import PLATFORM_PROCESSORS
 
@@ -345,23 +353,46 @@ async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db:
     task.progress = 0
     task.celery_task_id = None
     task.error_message = None
+    task.processed_rows = 0
+    task.success_rows = 0
+    task.failed_rows = 0
+    task.result_summary = None
     task.started_at = None
     task.finished_at = None
     upload_file.status = "uploaded"
     upload_file.error_message = None
+    upload_file.row_count = 0
     await db.commit()
     await db.refresh(task)
 
-    from app.tasks.celery_app import process_file_platform
+    parsed_type = (upload_file.parsed_type or "").strip()
+    if parsed_type == "红单":
+        from app.tasks.celery_app import process_merchant_red_sheet
 
-    async_result = process_file_platform.delay(
-        file_id=upload_file.id,
-        oss_key=upload_file.oss_key,
-        org_id=task.org_id,
-        platform_code=upload_file.detected_platform,
-        shop_name=upload_file.parsed_shop or "",
-        shop_id=upload_file.shop_id,
-    )
+        async_result = process_merchant_red_sheet.delay(
+            task_id=task.id,
+            file_id=upload_file.id,
+            oss_key=upload_file.oss_key,
+        )
+    elif parsed_type == "银行流水":
+        from app.tasks.celery_app import process_merchant_bank_flow
+
+        async_result = process_merchant_bank_flow.delay(
+            task_id=task.id,
+            file_id=upload_file.id,
+            oss_key=upload_file.oss_key,
+        )
+    else:
+        from app.tasks.celery_app import process_file_platform
+
+        async_result = process_file_platform.delay(
+            file_id=upload_file.id,
+            oss_key=upload_file.oss_key,
+            org_id=task.org_id,
+            platform_code=upload_file.detected_platform,
+            shop_name=upload_file.parsed_shop or "",
+            shop_id=upload_file.shop_id,
+        )
     task.celery_task_id = async_result.id
     await db.commit()
     await db.refresh(task)
@@ -472,7 +503,7 @@ async def batch_retry_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Batch retry failed processing tasks."""
+    """Batch retry failed tasks or rerun bank-flow tasks."""
     return await _batch_task_action(body=body, action="retry", current_user=current_user, db=db)
 
 
@@ -492,7 +523,7 @@ async def retry_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Manually retry a failed processing task."""
+    """Manually retry a failed task or rerun a bank-flow task."""
     loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
     if isinstance(loaded, ApiResponse):
         return loaded

@@ -10,6 +10,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _quote_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 @dataclass(frozen=True)
 class PartitionSpec:
     table_name: str
@@ -99,6 +107,44 @@ async def _is_partitioned(db: AsyncSession, table_name: str) -> bool:
     return bool(result.scalar())
 
 
+async def _copy_parent_comments_to_partition(db: AsyncSession, *, spec: PartitionSpec, partition: str) -> None:
+    table_comment = await db.scalar(
+        text("SELECT obj_description(to_regclass(:table_name), 'pg_class')"),
+        {"table_name": spec.table_name},
+    )
+    if table_comment:
+        await db.execute(
+            text(
+                f"COMMENT ON TABLE {_quote_identifier(partition)} "
+                f"IS {_quote_literal(str(table_comment))}"
+            )
+        )
+
+    result = await db.execute(
+        text(
+            """
+            SELECT a.attname, d.description
+            FROM pg_attribute a
+            JOIN pg_description d
+              ON d.objoid = a.attrelid
+             AND d.objsubid = a.attnum
+            WHERE a.attrelid = to_regclass(:table_name)
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+            ORDER BY a.attnum
+            """
+        ),
+        {"table_name": spec.table_name},
+    )
+    for row in result.mappings():
+        await db.execute(
+            text(
+                f"COMMENT ON COLUMN {_quote_identifier(partition)}.{_quote_identifier(row['attname'])} "
+                f"IS {_quote_literal(row['description'])}"
+            )
+        )
+
+
 async def ensure_month_partition(db: AsyncSession, *, spec: PartitionSpec, period: int) -> None:
     if not await _table_exists(db, spec.table_name):
         return
@@ -118,6 +164,7 @@ async def ensure_month_partition(db: AsyncSession, *, spec: PartitionSpec, perio
             """
         )
     )
+    await _copy_parent_comments_to_partition(db, spec=spec, partition=partition)
 
 
 async def ensure_month_window(

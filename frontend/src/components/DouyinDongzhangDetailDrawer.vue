@@ -231,6 +231,7 @@ const BUSINESS_COLUMN_DEFS: DetailColumnDef[] = [
     { key: "order_time", label: "下单时间", kind: "text", prop: "order_time", width: 170, defaultVisible: true },
     { key: "summary_date", label: "调年月(系统的业务年月)", kind: "text", prop: "summary_date", width: 170, defaultVisible: true },
     { key: "product_id", label: "商品ID", kind: "text", prop: "product_id", width: 120, tooltip: true, defaultVisible: true },
+    { key: "product_code", label: "商品编码", kind: "text", prop: "product_code", width: 140, tooltip: true, defaultVisible: true },
     { key: "product_name", label: "商品名称", kind: "text", prop: "product_name", width: 240, tooltip: true, defaultVisible: true },
     { key: "author_id", label: "达人ID", kind: "text", prop: "author_id", width: 120, tooltip: true, defaultVisible: true },
     { key: "author_name", label: "达人名称", kind: "text", prop: "author_name", width: 150, tooltip: true, defaultVisible: true },
@@ -270,6 +271,14 @@ const BUSINESS_COLUMN_DEFS: DetailColumnDef[] = [
     { key: "commission_derived", label: "达人佣金", kind: "money", prop: "commission_derived", width: 130, defaultVisible: true },
     { key: "bic", label: "BIC", kind: "money", prop: "bic", width: 110, defaultVisible: true },
     { key: "insurance_fee", label: "运费险", kind: "money", prop: "insurance_fee", width: 110, defaultVisible: true },
+    { key: "major_merchant_name", label: "大商家名称", kind: "text", prop: "major_merchant_name", width: 160, tooltip: true, defaultVisible: true },
+    { key: "merchant_receipt_subject", label: "商家收款主体", kind: "text", prop: "merchant_receipt_subject", width: 180, tooltip: true, defaultVisible: true },
+    { key: "receipt_merchant", label: "收款商家", kind: "text", prop: "receipt_merchant", width: 160, tooltip: true, defaultVisible: true },
+    { key: "allocated_bic", label: "分摊BIC", kind: "money", prop: "allocated_bic", width: 120, defaultVisible: true },
+    { key: "allocated_insurance_fee", label: "分摊运费险", kind: "money", prop: "allocated_insurance_fee", width: 130, defaultVisible: true },
+    { key: "live_amount", label: "直播款", kind: "money", prop: "live_amount", width: 130, defaultVisible: true },
+    { key: "merchant_match_status", label: "商家匹配状态", kind: "text", prop: "merchant_match_status", width: 130, defaultVisible: true },
+    { key: "merchant_match_error", label: "商家匹配失败原因", kind: "text", prop: "merchant_match_error", minWidth: 220, tooltip: true, defaultVisible: true },
 ];
 
 const DEFAULT_VISIBLE_COLUMN_KEYS = BUSINESS_COLUMN_DEFS.filter((column) => column.defaultVisible).map((column) => column.key);

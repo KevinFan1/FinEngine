@@ -160,6 +160,15 @@ class SummaryDongzhangDetailOut(BaseModel):
     commission_derived: float = 0
     bic: float = 0
     insurance_fee: float = 0
+    major_merchant_name: str = ""
+    our_subject: str = ""
+    merchant_receipt_subject: str = ""
+    receipt_merchant: str = ""
+    allocated_bic: float = 0
+    allocated_insurance_fee: float = 0
+    live_amount: float = 0
+    merchant_match_status: str = ""
+    merchant_match_error: str = ""
 
     transaction_time: str = ""
     transaction_flow_no: str = ""
@@ -173,6 +182,7 @@ class SummaryDongzhangDetailOut(BaseModel):
     after_sale_no: str = ""
     order_time: str = ""
     product_id: str = ""
+    product_code: str = ""
     product_name: str = ""
     author_id: str = ""
     author_name: str = ""

@@ -13,6 +13,7 @@ from app.tasks.processors.base import (
     safe_str,
 )
 from app.utils.money import ZERO_MONEY, safe_decimal
+from app.utils.product_code import extract_product_code
 from app.utils.text_classifier import classify_text
 
 DOUYIN_DONGZHANG_DETAIL_FIELD_MAP: tuple[tuple[str, str], ...] = (
@@ -386,6 +387,7 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
                 detail_row[field_name] = safe_decimal(raw_value)
             else:
                 detail_row[field_name] = safe_str(raw_value)
+        detail_row["product_code"] = extract_product_code(detail_row.get("product_name"))
         return detail_row
 
     def _compute_detail_logic(

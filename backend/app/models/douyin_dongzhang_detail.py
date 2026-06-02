@@ -46,7 +46,7 @@ class DouyinDongzhangDetail(SoftDeleteMixin, Base):
             "summary_month",
             postgresql_where=text("is_deleted = false"),
         ),
-        {"comment": "Douyin 动账核算源明细表", "postgresql_partition_by": "RANGE (source_period)"},
+        {"comment": "抖音动账核算源明细表", "postgresql_partition_by": "RANGE (source_period)"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
@@ -78,6 +78,7 @@ class DouyinDongzhangDetail(SoftDeleteMixin, Base):
     after_sale_no: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="售后编号")
     order_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="下单时间")
     product_id: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="商品ID")
+    product_code: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="商品编码")
     product_name: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="商品名称")
     author_id: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="达人ID")
     author_name: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="达人名称")
