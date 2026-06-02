@@ -8,6 +8,7 @@ from openpyxl import Workbook, load_workbook
 
 from app.models.merchant_reconciliation import MerchantOpeningBalance, MerchantRedSheetPayment, MerchantRedSheetPurchase
 from app.services.merchant_reconciliation_exporter import MerchantReconciliationExporter
+from app.services.merchant_reconciliation_matcher import MerchantReconciliationMatcher
 from app.services.merchant_reconciliation_summary import MerchantReconciliationSummaryBuilder
 from app.services.merchant_reconciliation_service import (
     PAYMENT_HEADERS,
@@ -62,6 +63,14 @@ def test_summary_builder_allocates_money_by_weight_with_rounding_remainder() -> 
 def test_exporter_formats_money_dates_and_datetimes() -> None:
     assert MerchantReconciliationExporter.format_export_value(Decimal("12.30"), money=True) == 12.3
     assert MerchantReconciliationExporter.format_export_value(datetime(2026, 4, 1, 9, 8, 7)) == "2026-04-01 09:08:07"
+
+
+def test_matcher_split_product_codes_supports_plus_chains() -> None:
+    assert MerchantReconciliationMatcher.split_product_codes("CAN123+CAN456,T20260001") == [
+        "CAN123",
+        "CAN456",
+        "T20260001",
+    ]
 
 
 def test_red_sheet_template_uses_fixed_month_sheet_names_and_headers() -> None:
@@ -233,7 +242,7 @@ def test_parse_payment_sheet_rejects_unknown_settlement_status() -> None:
     worksheet.append(PAYMENT_HEADERS)
     row = [""] * len(PAYMENT_HEADERS)
     row[PAYMENT_HEADERS.index("直播间")] = "直播间A"
-    row[PAYMENT_HEADERS.index("结算状态")] = "未核对"
+    row[PAYMENT_HEADERS.index("结算状态")] = "未知状态"
     worksheet.append(row)
 
     with pytest.raises(ValueError, match="结算状态必须是"):

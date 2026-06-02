@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import io
 import hashlib
+import io
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -34,18 +33,23 @@ from app.schemas.merchant_reconciliation import (
     MerchantBankFlowImportResult,
     MerchantOpeningBalanceBatchResult,
     MerchantOpeningBalanceBatchUpsert,
-    MerchantRedSheetImportResult,
     MerchantReconciliationStatsOut,
+    MerchantRedSheetImportResult,
 )
 from app.services.audit_service import AuditService
 from app.services.merchant_reconciliation_exporter import MerchantReconciliationExporter
+from app.services.merchant_reconciliation_matcher import (
+    MerchantDerivedFields,
+    MerchantReconciliationMatcher,
+    ReconciliationLoadContext,
+    RedSheetContext,
+)
 from app.services.merchant_reconciliation_summary import MerchantReconciliationSummaryBuilder
-from app.services.shop_visibility import active_shop_filter
 from app.services.shop_service import ShopService
+from app.services.shop_visibility import active_shop_filter
 from app.tasks.processors.base import canonical_header, open_tabular_rows, parse_datetime, safe_str
 from app.utils.live_code import extract_live_code
 from app.utils.money import ZERO_MONEY, safe_decimal
-from app.utils.product_code import extract_product_code
 from app.utils.query_filters import resolve_org_ids, split_int_filter_values
 
 PURCHASE_HEADERS = [
@@ -157,7 +161,7 @@ SUMMARY_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
 )
 
 MONEY_QUANT = Decimal("0.01")
-PAYMENT_SETTLEMENT_STATUSES = ("已核算", "已结算", "未结算")
+PAYMENT_SETTLEMENT_STATUSES = ("已核对", "未核对", "已结算", "未结算")
 PAYMENT_SETTLEMENT_STATUS_SET = set(PAYMENT_SETTLEMENT_STATUSES)
 PAYMENT_SUMMARY_SETTLED_STATUS = "已结算"
 MERCHANT_BANK_FLOW_TYPE = "银行流水"
@@ -174,46 +178,15 @@ LIVE_DATE_RANGE_PATTERN = re.compile(
     r"(?P<month>\d{1,2})\s*月\s*(?P<start>\d{1,2})\s*(?:日)?"
     r"\s*(?:[-~至到—－]\s*(?:(?P<end_month>\d{1,2})\s*月\s*)?(?P<end>\d{1,2})\s*日?)?"
 )
-LIVE_DATE_ISO_PATTERN = re.compile(
-    r"(?P<year>\d{4})[-/.年](?P<month>\d{1,2})[-/.月](?P<day>\d{1,2})"
-)
+LIVE_DATE_ISO_PATTERN = re.compile(r"(?P<year>\d{4})[-/.年](?P<month>\d{1,2})[-/.月](?P<day>\d{1,2})")
 SQL_PRODUCT_CODE_EXTRACT_PATTERN = (
     r"(CAN[0-9]+(?:\+CAN[0-9]+)*|T[0-9]{4,}|V[0-9]+(?:-[A-Z0-9]+)?|"
     r"RE[0-9]+(?:-[A-Z0-9]+)?|[A-Z]{1,2}[0-9]{4,}(?:-[A-Z0-9]+)?)"
 )
 
 
-@dataclass(frozen=True)
-class _RedSheetContext:
-    purchases_by_code: dict[str, MerchantRedSheetPurchase]
-    payments_by_key: dict[tuple[str, str, str], MerchantRedSheetPayment]
-
-
-@dataclass(frozen=True)
-class _ReconciliationLoadContext:
-    org_id: int
-    total_gmv: Decimal
-    total_bic: Decimal
-    total_insurance: Decimal
-    red_sheet_context: _RedSheetContext
-
-
-@dataclass(frozen=True)
-class MerchantDerivedFields:
-    product_code: str
-    major_merchant_name: str
-    our_subject: str
-    merchant_receipt_subject: str
-    receipt_merchant: str
-    live_room: str
-    live_date: str
-    live_date_text: str
-    red_sheet_payment_id: int | None
-    allocated_bic: Decimal
-    allocated_insurance_fee: Decimal
-    live_amount: Decimal
-    match_status: str
-    match_error: str
+_RedSheetContext = RedSheetContext
+_ReconciliationLoadContext = ReconciliationLoadContext
 
 
 def _period(year: int, month: int) -> int:
@@ -229,14 +202,7 @@ def _match_text(value: object) -> str:
 
 
 def _entity_match_text(value: object) -> str:
-    return (
-        _normalize_text(value)
-        .replace("（", "(")
-        .replace("）", ")")
-        .replace(" ", "")
-        .replace("　", "")
-        .upper()
-    )
+    return _normalize_text(value).replace("（", "(").replace("）", ")").replace(" ", "").replace("　", "").upper()
 
 
 def _date_text(value: object) -> str:
@@ -262,12 +228,6 @@ def _parse_date(value: object) -> date | None:
 
 def _money(value: object) -> Decimal:
     return safe_decimal(value).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
-
-
-def _allocation_amount(row_gmv: Decimal, total_gmv: Decimal, total_amount: Decimal) -> Decimal:
-    if total_gmv == ZERO_MONEY or total_amount == ZERO_MONEY:
-        return ZERO_MONEY
-    return (row_gmv * total_amount / total_gmv).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
 
 class MerchantReconciliationService:
@@ -386,16 +346,20 @@ class MerchantReconciliationService:
             ),
         )
         existing_rows = (
-            await db.execute(
-                select(MerchantRedSheet).where(
-                    MerchantRedSheet.org_id == import_org_id,
-                    MerchantRedSheet.platform_code == "douyin",
-                    MerchantRedSheet.accounting_period == period,
-                    MerchantRedSheet.is_deleted.is_(False),
-                    overlapping_red_sheet,
+            (
+                await db.execute(
+                    select(MerchantRedSheet).where(
+                        MerchantRedSheet.org_id == import_org_id,
+                        MerchantRedSheet.platform_code == "douyin",
+                        MerchantRedSheet.accounting_period == period,
+                        MerchantRedSheet.is_deleted.is_(False),
+                        overlapping_red_sheet,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         existing_ids: list[int] = []
         for existing in existing_rows:
             # 同期间重新导入时，旧批次与其明细整体软删除，只保留最新红单结果。
@@ -552,15 +516,19 @@ class MerchantReconciliationService:
         period = _period(accounting_year, accounting_month)
         now = datetime.now(timezone.utc)
         existing_rows = (
-            await db.execute(
-                select(MerchantBankFlowFile).where(
-                    MerchantBankFlowFile.org_id == import_org_id,
-                    MerchantBankFlowFile.accounting_period == period,
-                    MerchantBankFlowFile.account_name == account_name,
-                    MerchantBankFlowFile.is_deleted.is_(False),
+            (
+                await db.execute(
+                    select(MerchantBankFlowFile).where(
+                        MerchantBankFlowFile.org_id == import_org_id,
+                        MerchantBankFlowFile.accounting_period == period,
+                        MerchantBankFlowFile.account_name == account_name,
+                        MerchantBankFlowFile.is_deleted.is_(False),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         existing_ids: list[int] = []
         for existing in existing_rows:
             existing_ids.append(existing.id)
@@ -675,17 +643,10 @@ class MerchantReconciliationService:
         operator: User,
         purchases: list[dict[str, object]],
     ) -> dict[str, Shop]:
-        missing_rows = [
-            int(row.get("source_row_number") or 0)
-            for row in purchases
-            if not _normalize_text(row.get("source_shop_name"))
-        ]
+        missing_rows = [int(row.get("source_row_number") or 0) for row in purchases if not _normalize_text(row.get("source_shop_name"))]
         if missing_rows:
             raise ValueError(f"采购 sheet 第 {missing_rows[0]} 行缺少店铺")
-        shop_names = {
-            _normalize_text(row.get("source_shop_name"))
-            for row in purchases
-        }
+        shop_names = {_normalize_text(row.get("source_shop_name")) for row in purchases}
         if not shop_names:
             raise ValueError("采购 sheet 缺少店铺信息，无法识别店铺")
         mappings: dict[str, Shop] = {}
@@ -762,10 +723,7 @@ class MerchantReconciliationService:
         row_number = int(payment_row.get("source_row_number") or 0)
         merchant = _normalize_text(payment_row.get("merchant")) or "-"
         live_room = _normalize_text(payment_row.get("live_room")) or "-"
-        return (
-            f"货款 sheet 第 {row_number} 行未识别到店铺："
-            f"商家 {merchant}，直播间 {live_room}"
-        )
+        return f"货款 sheet 第 {row_number} 行未识别到店铺：商家 {merchant}，直播间 {live_room}"
 
     @staticmethod
     async def list_red_sheets(
@@ -1045,10 +1003,7 @@ class MerchantReconciliationService:
                 .limit(page_size)
             )
         ).all()
-        return [
-            MerchantReconciliationService._bank_flow_row_payload(row, org_name=org_name)
-            for row, org_name in rows
-        ], int(total)
+        return [MerchantReconciliationService._bank_flow_row_payload(row, org_name=org_name) for row, org_name in rows], int(total)
 
     @staticmethod
     async def list_summary(
@@ -1146,10 +1101,7 @@ class MerchantReconciliationService:
         if keyword:
             keyword_text = keyword.strip().lower()
             summary_rows = [
-                row
-                for row in summary_rows
-                if keyword_text in str(row.get("our_subject") or "").lower()
-                or keyword_text in str(row.get("merchant_receipt_subject") or "").lower()
+                row for row in summary_rows if keyword_text in str(row.get("our_subject") or "").lower() or keyword_text in str(row.get("merchant_receipt_subject") or "").lower()
             ]
         summary_rows = MerchantReconciliationService._filter_summary_rows_by_bank_status(summary_rows, bank_status=bank_status)
         return MerchantReconciliationService._sort_summary_rows(summary_rows)
@@ -1239,12 +1191,7 @@ class MerchantReconciliationService:
 
         if keyword:
             keyword_text = keyword.strip().lower()
-            rows = [
-                row
-                for row in rows
-                if keyword_text in str(row.get("our_subject") or "").lower()
-                or keyword_text in str(row.get("receipt_merchant") or "").lower()
-            ]
+            rows = [row for row in rows if keyword_text in str(row.get("our_subject") or "").lower() or keyword_text in str(row.get("receipt_merchant") or "").lower()]
         return sorted(
             rows,
             key=lambda row: (
@@ -1279,19 +1226,20 @@ class MerchantReconciliationService:
 
         org_ids = sorted({key[0] for key in deduped_items})
         existing_rows = (
-            await db.execute(
-                select(MerchantOpeningBalance).where(
-                    MerchantOpeningBalance.org_id.in_(org_ids),
-                    MerchantOpeningBalance.platform_code == platform_code,
-                    MerchantOpeningBalance.accounting_period == accounting_period,
-                    MerchantOpeningBalance.is_deleted.is_(False),
+            (
+                await db.execute(
+                    select(MerchantOpeningBalance).where(
+                        MerchantOpeningBalance.org_id.in_(org_ids),
+                        MerchantOpeningBalance.platform_code == platform_code,
+                        MerchantOpeningBalance.accounting_period == accounting_period,
+                        MerchantOpeningBalance.is_deleted.is_(False),
+                    )
                 )
             )
-        ).scalars().all()
-        existing_by_key = {
-            (int(row.org_id), _normalize_text(row.our_subject), _normalize_text(row.receipt_merchant)): row
-            for row in existing_rows
-        }
+            .scalars()
+            .all()
+        )
+        existing_by_key = {(int(row.org_id), _normalize_text(row.our_subject), _normalize_text(row.receipt_merchant)): row for row in existing_rows}
 
         created_count = 0
         updated_count = 0
@@ -1542,11 +1490,7 @@ class MerchantReconciliationService:
             )
         if org_ids is not None:
             red_sheet_filters.append(MerchantRedSheet.org_id.in_(org_ids))
-        has_red_sheet = (
-            await db.execute(
-                select(exists(select(1).select_from(MerchantRedSheet).where(*red_sheet_filters)))
-            )
-        ).scalar()
+        has_red_sheet = (await db.execute(select(exists(select(1).select_from(MerchantRedSheet).where(*red_sheet_filters))))).scalar()
         if not has_red_sheet:
             return []
 
@@ -1622,9 +1566,7 @@ class MerchantReconciliationService:
             )
             if purchase is None:
                 continue
-            payment = red_sheet_context.payments_by_key.get(
-                (_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room))
-            )
+            payment = red_sheet_context.payments_by_key.get((_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room)))
             if payment is None or not _normalize_text(payment.receipt_merchant):
                 continue
             rows.append(
@@ -1715,9 +1657,7 @@ class MerchantReconciliationService:
         return list(
             (
                 await db.execute(
-                    select(MerchantOpeningBalance, Organization.name.label("org_name"))
-                    .outerjoin(Organization, Organization.id == MerchantOpeningBalance.org_id)
-                    .where(*filters)
+                    select(MerchantOpeningBalance, Organization.name.label("org_name")).outerjoin(Organization, Organization.id == MerchantOpeningBalance.org_id).where(*filters)
                 )
             ).all()
         )
@@ -1787,9 +1727,7 @@ class MerchantReconciliationService:
             filters.append(MerchantBankFlowRow.org_id.in_(org_ids))
         bank_rows = (
             await db.execute(
-                select(MerchantBankFlowRow, Organization.name.label("org_name"))
-                .outerjoin(Organization, Organization.id == MerchantBankFlowRow.org_id)
-                .where(*filters)
+                select(MerchantBankFlowRow, Organization.name.label("org_name")).outerjoin(Organization, Organization.id == MerchantBankFlowRow.org_id).where(*filters)
             )
         ).all()
 
@@ -1799,11 +1737,7 @@ class MerchantReconciliationService:
         ]
         if org_ids is not None:
             payment_filters.append(MerchantRedSheetPayment.org_id.in_(org_ids))
-        payment_rows = (
-            await db.execute(
-                select(MerchantRedSheetPayment).where(*payment_filters).order_by(MerchantRedSheetPayment.id.desc())
-            )
-        ).scalars().all()
+        payment_rows = (await db.execute(select(MerchantRedSheetPayment).where(*payment_filters).order_by(MerchantRedSheetPayment.id.desc()))).scalars().all()
         payments_by_bank_key: dict[tuple[int, str, str, str], MerchantRedSheetPayment] = {}
         for payment in payment_rows:
             key = (
@@ -1988,10 +1922,14 @@ class MerchantReconciliationService:
             stats_source = loaded_rows
         else:
             rows = loaded_rows
-            stats_source = rows if include_all else await MerchantReconciliationService._load_all_payloads_for_stats(
-                db,
-                filters=filters,
-                detail_contexts=detail_contexts,
+            stats_source = (
+                rows
+                if include_all
+                else await MerchantReconciliationService._load_all_payloads_for_stats(
+                    db,
+                    filters=filters,
+                    detail_contexts=detail_contexts,
+                )
             )
         stats = MerchantReconciliationService._build_stats(
             stats_source,
@@ -2223,11 +2161,7 @@ class MerchantReconciliationService:
             filters.append(DouyinDongzhangDetail.source_year == source_year)
         if source_month is not None:
             filters.append(DouyinDongzhangDetail.source_month == source_month)
-        total = (
-            await db.execute(
-                select(func.coalesce(func.sum(DouyinDongzhangDetail.gmv), 0)).where(*filters)
-            )
-        ).scalar()
+        total = (await db.execute(select(func.coalesce(func.sum(DouyinDongzhangDetail.gmv), 0)).where(*filters))).scalar()
         return safe_decimal(total)
 
     @staticmethod
@@ -2275,34 +2209,31 @@ class MerchantReconciliationService:
             return _RedSheetContext(purchases_by_code={}, payments_by_key={})
 
         purchases = (
-            await db.execute(
-                select(MerchantRedSheetPurchase).where(
-                    MerchantRedSheetPurchase.red_sheet_id == latest,
-                    MerchantRedSheetPurchase.shop_id == shop_id,
-                    MerchantRedSheetPurchase.is_deleted.is_(False),
+            (
+                await db.execute(
+                    select(MerchantRedSheetPurchase).where(
+                        MerchantRedSheetPurchase.red_sheet_id == latest,
+                        MerchantRedSheetPurchase.shop_id == shop_id,
+                        MerchantRedSheetPurchase.is_deleted.is_(False),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         payment_filters = [
             MerchantRedSheetPayment.red_sheet_id == latest,
             MerchantRedSheetPayment.is_deleted.is_(False),
         ]
         if payment_settlement_status is not None:
             payment_filters.append(MerchantRedSheetPayment.remark == payment_settlement_status)
-        payments = (
-            await db.execute(
-                select(MerchantRedSheetPayment).where(*payment_filters)
-            )
-        ).scalars().all()
+        payments = (await db.execute(select(MerchantRedSheetPayment).where(*payment_filters))).scalars().all()
         purchases_by_code: dict[str, MerchantRedSheetPurchase] = {}
         for purchase in purchases:
             for code_value in (purchase.normalized_live_code, purchase.live_code):
                 for code in MerchantReconciliationService._split_product_codes(code_value):
                     purchases_by_code.setdefault(code, purchase)
-        purchase_payment_keys = {
-            (_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room))
-            for purchase in purchases
-        }
+        purchase_payment_keys = {(_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room)) for purchase in purchases}
         payments_by_key: dict[tuple[str, str, str], MerchantRedSheetPayment] = {}
         for payment in payments:
             key = (_match_text(payment.merchant), _date_key(payment.live_date), _match_text(payment.live_room))
@@ -2316,46 +2247,10 @@ class MerchantReconciliationService:
         *,
         load_context: _ReconciliationLoadContext,
     ) -> MerchantDerivedFields:
-        product_code = detail.product_code or extract_product_code(detail.product_name)
-        product_codes = MerchantReconciliationService._split_product_codes(product_code)
-        purchase = next(
-            (
-                load_context.red_sheet_context.purchases_by_code.get(code)
-                for code in product_codes
-                if load_context.red_sheet_context.purchases_by_code.get(code)
-            ),
-            None,
-        )
-        payment = None
-        errors: list[str] = []
-        if not product_code:
-            errors.append("商品名称未提取到商品编码")
-        if purchase is None:
-            errors.append("未匹配到红单采购")
-        else:
-            payment = load_context.red_sheet_context.payments_by_key.get(
-                (_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room))
-            )
-            if payment is None:
-                errors.append("未匹配到红单货款")
-
-        gmv = safe_decimal(detail.gmv)
-        live_date = purchase.live_date if purchase is not None else ""
-        return MerchantDerivedFields(
-            product_code=product_code,
-            major_merchant_name=purchase.merchant if purchase is not None else "",
-            our_subject=payment.settlement_subject if payment is not None else "",
-            merchant_receipt_subject=payment.receipt_subject if payment is not None else "",
-            receipt_merchant=payment.receipt_merchant if payment is not None else "",
-            live_room=purchase.live_room if purchase is not None else "",
-            live_date=live_date,
-            live_date_text=_date_key(live_date),
-            red_sheet_payment_id=int(payment.id) if payment is not None and payment.id is not None else None,
-            allocated_bic=_allocation_amount(gmv, load_context.total_gmv, load_context.total_bic),
-            allocated_insurance_fee=_allocation_amount(gmv, load_context.total_gmv, load_context.total_insurance),
-            live_amount=(gmv * Decimal("0.7")).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP),
-            match_status="matched" if not errors else "unmatched",
-            match_error="；".join(errors),
+        return MerchantReconciliationMatcher.build_detail_derived_fields(
+            detail,
+            load_context=load_context,
+            live_date_key_getter=_date_key,
         )
 
     @staticmethod
@@ -2366,68 +2261,22 @@ class MerchantReconciliationService:
         shop_color: str | None,
         load_context: _ReconciliationLoadContext,
     ) -> dict[str, object]:
-        derived = MerchantReconciliationService._build_detail_derived_fields(detail, load_context=load_context)
-        gmv = safe_decimal(detail.gmv)
-        payload: dict[str, object] = {
-            "id": detail.id,
-            "org_id": detail.org_id,
-            "org_name": org_name,
-            "shop_id": detail.shop_id,
-            "shop_name": detail.shop_name,
-            "shop_color": shop_color,
-            "accounting_year": detail.summary_year,
-            "accounting_month": detail.summary_month,
-            "accounting_period": _period(detail.summary_year, detail.summary_month),
-            "accounting_date": f"{int(detail.summary_year):04d}-{int(detail.summary_month):02d}",
-            "platform_code": detail.source_platform_code,
-            "platform_label": "抖音",
-            "source_row_number": detail.source_row_number,
-            "transaction_time": MerchantReconciliationService._format_datetime(detail.transaction_time),
-            "transaction_flow_no": detail.transaction_flow_no,
-            "transaction_direction": detail.transaction_direction,
-            "transaction_amount": safe_decimal(detail.transaction_amount),
-            "transaction_scene": detail.transaction_scene,
-            "sub_order_no": detail.sub_order_no,
-            "order_no": detail.order_no,
-            "order_time": MerchantReconciliationService._format_datetime(detail.order_time),
-            "product_id": detail.product_id,
-            "product_code": derived.product_code,
-            "product_name": detail.product_name,
-            "author_name": detail.author_name,
-            "merchant_name": getattr(detail, "merchant_name", ""),
-            "gmv": gmv,
-            "allocated_bic": derived.allocated_bic,
-            "allocated_insurance_fee": derived.allocated_insurance_fee,
-            "live_amount": derived.live_amount,
-            "major_merchant_name": derived.major_merchant_name,
-            "our_subject": derived.our_subject,
-            "merchant_receipt_subject": derived.merchant_receipt_subject,
-            "receipt_merchant": derived.receipt_merchant,
-            "red_sheet_payment_id": derived.red_sheet_payment_id,
-            "live_room": derived.live_room,
-            "live_date": derived.live_date,
-            "live_date_text": derived.live_date_text,
-            "match_status": derived.match_status,
-            "match_error": derived.match_error,
-        }
-        return payload
+        return MerchantReconciliationMatcher.build_detail_payload(
+            detail,
+            org_name=org_name,
+            shop_color=shop_color,
+            load_context=load_context,
+            period_getter=_period,
+            datetime_formatter=MerchantReconciliationService._format_datetime,
+            live_date_key_getter=_date_key,
+        )
 
     @staticmethod
     def _build_stats(rows: list[dict[str, object]], *, total_bic: Decimal, total_insurance: Decimal) -> MerchantReconciliationStatsOut:
-        matched_rows = sum(1 for row in rows if row.get("match_status") == "matched")
-        total_gmv = sum((safe_decimal(row.get("gmv")) for row in rows), ZERO_MONEY)
-        total_allocated_bic = sum((safe_decimal(row.get("allocated_bic")) for row in rows), ZERO_MONEY)
-        total_allocated_insurance = sum((safe_decimal(row.get("allocated_insurance_fee")) for row in rows), ZERO_MONEY)
-        total_live_amount = sum((safe_decimal(row.get("live_amount")) for row in rows), ZERO_MONEY)
-        return MerchantReconciliationStatsOut(
-            total_gmv=total_gmv,
+        return MerchantReconciliationMatcher.build_stats(
+            rows,
             total_bic=total_bic,
-            total_allocated_bic=total_allocated_bic,
-            total_insurance_fee=total_insurance,
-            total_allocated_insurance_fee=total_allocated_insurance,
-            total_live_amount=total_live_amount,
-            matched_rows=matched_rows,
-            unmatched_rows=len(rows) - matched_rows,
+            total_insurance=total_insurance,
         )
 
     @staticmethod
@@ -2460,9 +2309,7 @@ class MerchantReconciliationService:
             filters.append(MerchantRedSheetPayment.id.in_(payment_id_values))
         rows = (
             await db.execute(
-                select(MerchantRedSheetPayment, Organization.name.label("org_name"))
-                .outerjoin(Organization, Organization.id == MerchantRedSheetPayment.org_id)
-                .where(*filters)
+                select(MerchantRedSheetPayment, Organization.name.label("org_name")).outerjoin(Organization, Organization.id == MerchantRedSheetPayment.org_id).where(*filters)
             )
         ).all()
         adjustments: dict[tuple[str, str, str], dict[str, Decimal]] = {}
@@ -2598,11 +2445,7 @@ class MerchantReconciliationService:
         if header_index is None:
             raise ValueError("银行流水未识别到表头")
         header_row = rows[header_index]
-        header_map = {
-            canonical_header(value): index
-            for index, value in enumerate(header_row)
-            if canonical_header(value)
-        }
+        header_map = {canonical_header(value): index for index, value in enumerate(header_row) if canonical_header(value)}
         bank_name = "中国邮政" if "用途" in header_map and "附言" in header_map else "企业网银"
         account_name = MerchantReconciliationService._extract_bank_flow_account_name(
             rows=rows,
@@ -2686,12 +2529,10 @@ class MerchantReconciliationService:
         purpose = "；".join(part for part in purpose_parts if part)
         summary = MerchantReconciliationService._bank_cell(row_values, header_map, "摘要")
         debit_amount = _money(
-            MerchantReconciliationService._bank_cell(row_values, header_map, "借方发生额（支取）")
-            or MerchantReconciliationService._bank_cell(row_values, header_map, "支出金额")
+            MerchantReconciliationService._bank_cell(row_values, header_map, "借方发生额（支取）") or MerchantReconciliationService._bank_cell(row_values, header_map, "支出金额")
         )
         credit_amount = _money(
-            MerchantReconciliationService._bank_cell(row_values, header_map, "贷方发生额（收入）")
-            or MerchantReconciliationService._bank_cell(row_values, header_map, "收入金额")
+            MerchantReconciliationService._bank_cell(row_values, header_map, "贷方发生额（收入）") or MerchantReconciliationService._bank_cell(row_values, header_map, "收入金额")
         )
         if not counterparty_name and debit_amount == ZERO_MONEY and credit_amount == ZERO_MONEY:
             return None
@@ -2714,8 +2555,7 @@ class MerchantReconciliationService:
             "counterparty_account_no": MerchantReconciliationService._bank_cell(row_values, header_map, "对方账号"),
             "counterparty_name": counterparty_name,
             "counterparty_bank": (
-                MerchantReconciliationService._bank_cell(row_values, header_map, "对方开户机构")
-                or MerchantReconciliationService._bank_cell(row_values, header_map, "对方行名")
+                MerchantReconciliationService._bank_cell(row_values, header_map, "对方开户机构") or MerchantReconciliationService._bank_cell(row_values, header_map, "对方行名")
             ),
             "summary": summary,
             "purpose": purpose,
@@ -2834,13 +2674,7 @@ class MerchantReconciliationService:
 
     @staticmethod
     def _split_product_codes(value: object) -> list[str]:
-        codes: list[str] = []
-        normalized = safe_str(value).replace("，", ",").replace("＋", ",").replace("+", ",")
-        for part in normalized.split(","):
-            part = part.strip().upper()
-            if part:
-                codes.append(part)
-        return codes
+        return MerchantReconciliationMatcher.split_product_codes(value)
 
     @staticmethod
     def _parse_purchase_sheet(worksheet) -> list[dict[str, object]]:
