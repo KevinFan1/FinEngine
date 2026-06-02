@@ -65,6 +65,79 @@ def test_exporter_formats_money_dates_and_datetimes() -> None:
     assert MerchantReconciliationExporter.format_export_value(datetime(2026, 4, 1, 9, 8, 7)) == "2026-04-01 09:08:07"
 
 
+def test_bank_flow_row_payload_formats_transaction_time_as_display_text() -> None:
+    row = SimpleNamespace(
+        id=1,
+        bank_flow_file_id=2,
+        org_id=3,
+        accounting_period=202604,
+        source_row_number=4,
+        bank_name="企业网银",
+        account_no="6222",
+        account_name="账户A",
+        transaction_date=None,
+        transaction_time=datetime(2026, 4, 1, 10, 0, 1),
+        debit_amount=Decimal("10.00"),
+        credit_amount=Decimal("0.00"),
+        flow_amount=Decimal("10.00"),
+        balance=Decimal("100.00"),
+        counterparty_account_no="9555",
+        counterparty_name="对方A",
+        counterparty_bank="银行A",
+        summary="转账",
+        purpose="直播款",
+        remark="",
+        live_date="4月1日",
+        transaction_flow_no="flow-1",
+        created_at=datetime(2026, 4, 1, 10, 0, 2),
+    )
+
+    payload = MerchantReconciliationService._bank_flow_row_payload(row, org_name="组织A")
+
+    assert payload["transaction_time"] == "2026-04-01 10:00:01"
+
+
+def test_detail_export_workbook_keeps_single_receipt_merchant_column() -> None:
+    buffer = MerchantReconciliationService._build_detail_workbook(
+        [
+            {
+                "org_name": "组织A",
+                "shop_name": "店铺A",
+                "transaction_time": "2026-04-01 10:00:00",
+                "transaction_flow_no": "flow-1",
+                "transaction_direction": "入账",
+                "transaction_amount": Decimal("100.00"),
+                "transaction_scene": "订单结算",
+                "sub_order_no": "sub-1",
+                "order_no": "order-1",
+                "order_time": "2026-04-01 09:00:00",
+                "product_id": "prod-1",
+                "product_code": "CAN123",
+                "product_name": "商品A",
+                "author_name": "达人A",
+                "gmv": Decimal("70.00"),
+                "allocated_bic": Decimal("3.00"),
+                "allocated_insurance_fee": Decimal("1.00"),
+                "live_amount": Decimal("49.00"),
+                "major_merchant_name": "大商家A",
+                "receipt_merchant": "收款商家A",
+                "live_room": "直播间A",
+                "live_date_text": "4月1日",
+                "match_status": "matched",
+                "match_error": "",
+            }
+        ]
+    )
+    workbook = load_workbook(buffer, read_only=True)
+    worksheet = workbook["商家对账明细"]
+    headers = [cell for cell in next(worksheet.iter_rows(values_only=True))]
+    values = [cell for cell in next(worksheet.iter_rows(min_row=2, max_row=2, values_only=True))]
+
+    assert "收款商家" in headers
+    assert "商家收款主体" not in headers
+    assert values[headers.index("收款商家")] == "收款商家A"
+
+
 def test_matcher_split_product_codes_supports_plus_chains() -> None:
     assert MerchantReconciliationMatcher.split_product_codes("CAN123+CAN456,T20260001") == [
         "CAN123",

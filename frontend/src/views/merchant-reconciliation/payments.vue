@@ -37,7 +37,9 @@
                     <template #default="{ row }"><ShopBadge :label="row.shop_name" :color="row.shop_color" size="table" /></template>
                 </el-table-column>
                 <el-table-column prop="live_room" label="直播间" width="150" show-overflow-tooltip />
-                <el-table-column prop="live_date" label="直播日期" width="120" />
+                <el-table-column prop="live_date" label="直播日期" width="120">
+                    <template #default="{ row }">{{ formatRawDate(row.live_date) }}</template>
+                </el-table-column>
                 <el-table-column prop="merchant" label="商家" width="150" show-overflow-tooltip />
                 <el-table-column prop="borrow_total_amount" label="借货总金额" width="130" align="right">
                     <template #default="{ row }">{{ formatAmount(row.borrow_total_amount) }}</template>
@@ -54,9 +56,11 @@
                 <el-table-column prop="payable_goods_amount" label="应付货款金额" width="140" align="right">
                     <template #default="{ row }">{{ formatAmount(row.payable_goods_amount) }}</template>
                 </el-table-column>
+                <el-table-column prop="return_rate" label="退货率" width="110" align="right">
+                    <template #default="{ row }">{{ formatPercent(row.return_rate) }}</template>
+                </el-table-column>
                 <el-table-column prop="settlement_subject" label="结算主体" width="160" show-overflow-tooltip />
-                <el-table-column prop="receipt_subject" label="收款主体" width="160" show-overflow-tooltip />
-                <el-table-column prop="receipt_merchant" label="商家收款主体" width="150" show-overflow-tooltip />
+                <el-table-column prop="receipt_merchant" label="收款商家" width="150" show-overflow-tooltip />
                 <el-table-column prop="collection_merchant" label="回款商家" width="150" show-overflow-tooltip />
                 <el-table-column prop="is_settled" label="是否已结款" width="110" />
                 <el-table-column prop="is_collected" label="是否已回款" width="110" />
@@ -89,9 +93,10 @@
 import { onMounted, reactive, ref } from "vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import { listMerchantRedSheetPayments, type MerchantRedSheetPayment } from "@/api/merchantReconciliation";
+import { formatRawDate } from "@/utils/format";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import MerchantFilters from "./components/MerchantFilters.vue";
-import { formatAccountingPeriod, formatAmount } from "./common";
+import { formatAccountingPeriod, formatAmount, formatPercent } from "./common";
 import { useMerchantReconciliationFilters } from "./composables";
 
 defineOptions({ name: "MerchantReconciliationPayments" });

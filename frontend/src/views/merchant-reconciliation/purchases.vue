@@ -38,11 +38,15 @@
                 </el-table-column>
                 <el-table-column prop="live_room" label="直播间" width="150" show-overflow-tooltip />
                 <el-table-column prop="merchant" label="商家" width="150" show-overflow-tooltip />
-                <el-table-column prop="live_date" label="直播日期" width="120" />
+                <el-table-column prop="live_date" label="直播日期" width="120">
+                    <template #default="{ row }">{{ formatRawDate(row.live_date) }}</template>
+                </el-table-column>
                 <el-table-column prop="live_code" label="直播编号" width="150" show-overflow-tooltip />
                 <el-table-column prop="normalized_live_code" label="新直播编码" width="150" show-overflow-tooltip />
                 <el-table-column prop="loan_return_order_no" label="借/退货单号" width="160" show-overflow-tooltip />
-                <el-table-column prop="loan_return_date" label="借/退货日期" width="120" />
+                <el-table-column prop="loan_return_date" label="借/退货日期" width="120">
+                    <template #default="{ row }">{{ formatRawDate(row.loan_return_date) }}</template>
+                </el-table-column>
                 <el-table-column prop="subject" label="主体" width="150" show-overflow-tooltip />
                 <el-table-column prop="summary" label="摘要" width="140" show-overflow-tooltip />
                 <el-table-column prop="product_name" label="货品名称" min-width="220" show-overflow-tooltip />
@@ -67,7 +71,9 @@
                 <el-table-column prop="return_amount" label="退货金额" width="120" align="right">
                     <template #default="{ row }">{{ formatAmount(row.return_amount) }}</template>
                 </el-table-column>
-                <el-table-column prop="estimated_settlement_date" label="预计结款日期" width="130" />
+                <el-table-column prop="estimated_settlement_date" label="预计结款日期" width="130">
+                    <template #default="{ row }">{{ formatRawDate(row.estimated_settlement_date) }}</template>
+                </el-table-column>
                 <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
             </el-table>
 
@@ -91,6 +97,7 @@
 import { onMounted, reactive, ref } from "vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import { listMerchantRedSheetPurchases, type MerchantRedSheetPurchase } from "@/api/merchantReconciliation";
+import { formatRawDate } from "@/utils/format";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import MerchantFilters from "./components/MerchantFilters.vue";
 import { formatAccountingPeriod, formatAmount } from "./common";

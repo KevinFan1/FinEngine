@@ -134,7 +134,6 @@ RECONCILIATION_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("allocated_insurance_fee", "分摊运费险", True),
     ("live_amount", "直播款", True),
     ("major_merchant_name", "大商家名称", False),
-    ("merchant_receipt_subject", "商家收款主体", False),
     ("receipt_merchant", "收款商家", False),
     ("live_room", "直播间", False),
     ("live_date_text", "直播日期", False),
@@ -2867,6 +2866,7 @@ class MerchantReconciliationService:
         payload = dict(item.__dict__)
         payload.pop("_sa_instance_state", None)
         payload["org_name"] = org_name
+        payload["transaction_time"] = MerchantReconciliationExporter.format_export_value(item.transaction_time)
         return payload
 
     @staticmethod

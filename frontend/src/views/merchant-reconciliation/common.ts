@@ -28,6 +28,19 @@ export function formatAmount(value: string | number | null | undefined) {
     });
 }
 
+export function formatPercent(value: string | number | null | undefined) {
+    const rawValue = String(value ?? "").trim();
+    if (!rawValue) return "-";
+    const hasPercentSign = rawValue.includes("%");
+    const numericValue = Number(rawValue.replace(/%/g, "").replace(/,/g, ""));
+    if (!Number.isFinite(numericValue)) return rawValue;
+    const percentValue = hasPercentSign || Math.abs(numericValue) > 1 ? numericValue : numericValue * 100;
+    return `${percentValue.toLocaleString("zh-CN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    })}%`;
+}
+
 export function formatBytes(size: number | null | undefined) {
     const value = Number(size || 0);
     if (value < 1024) return `${value} B`;

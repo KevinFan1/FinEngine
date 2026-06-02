@@ -34,7 +34,9 @@
                 <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="160" show-overflow-tooltip />
                 <el-table-column prop="bank_name" label="银行" width="110" show-overflow-tooltip />
                 <el-table-column prop="account_name" label="账户名称" min-width="210" show-overflow-tooltip />
-                <el-table-column prop="transaction_time" label="交易时间" width="170" />
+                <el-table-column prop="transaction_time" label="交易时间" width="170">
+                    <template #default="{ row }">{{ formatRawDateTime(row.transaction_time) }}</template>
+                </el-table-column>
                 <el-table-column prop="counterparty_name" label="对方户名" min-width="220" show-overflow-tooltip />
                 <el-table-column prop="debit_amount" label="支出金额" width="120" align="right">
                     <template #default="{ row }">{{ formatAmount(row.debit_amount) }}</template>
@@ -47,7 +49,7 @@
                 </el-table-column>
                 <el-table-column prop="live_date" label="直播日期" width="190" show-overflow-tooltip>
                     <template #default="{ row }">
-                        <el-tag v-if="row.live_date" size="small" type="success">{{ row.live_date }}</el-tag>
+                        <el-tag v-if="row.live_date" size="small" type="success">{{ formatRawDate(row.live_date) }}</el-tag>
                         <span v-else class="text-muted">未解析</span>
                     </template>
                 </el-table-column>
@@ -75,6 +77,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import { listMerchantBankFlowRows, type MerchantBankFlowRow } from "@/api/merchantReconciliation";
+import { formatRawDate, formatRawDateTime } from "@/utils/format";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import MerchantFilters from "./components/MerchantFilters.vue";
 import { formatAccountingPeriod, formatAmount, selectedMonthParts } from "./common";

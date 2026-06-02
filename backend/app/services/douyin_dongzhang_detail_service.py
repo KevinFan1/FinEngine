@@ -91,7 +91,6 @@ DONGZHANG_DETAIL_EXPORT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("insurance_fee", "运费险"),
     ("major_merchant_name", "大商家名称"),
     ("our_subject", "我方主体"),
-    ("merchant_receipt_subject", "商家收款主体"),
     ("receipt_merchant", "收款商家"),
     ("allocated_bic", "分摊BIC"),
     ("allocated_insurance_fee", "分摊运费险"),
