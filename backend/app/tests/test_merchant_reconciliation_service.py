@@ -190,6 +190,41 @@ def test_detail_export_workbook_keeps_single_receipt_merchant_column() -> None:
     assert values[headers.index("收款商家")] == "收款商家A"
 
 
+def test_unmatched_export_workbook_includes_product_code_summary() -> None:
+    buffer = MerchantReconciliationService._build_unmatched_workbook(
+        [
+            {
+                "org_name": "组织A",
+                "shop_name": "店铺A",
+                "product_code": "CAN123",
+                "product_name": "商品A",
+                "gmv": Decimal("100.00"),
+                "match_status": "unmatched",
+                "match_error": "未匹配到红单采购",
+            },
+            {
+                "org_name": "组织A",
+                "shop_name": "店铺A",
+                "product_code": "CAN123",
+                "product_name": "商品A-2",
+                "gmv": Decimal("50.00"),
+                "match_status": "unmatched",
+                "match_error": "未匹配到红单采购",
+            },
+        ]
+    )
+
+    workbook = load_workbook(buffer, read_only=True)
+    summary_sheet = workbook["货号汇总"]
+    summary_headers = [cell for cell in next(summary_sheet.iter_rows(values_only=True))]
+    summary_values = [cell for cell in next(summary_sheet.iter_rows(min_row=2, max_row=2, values_only=True))]
+
+    assert workbook.sheetnames == ["未匹配明细", "货号汇总"]
+    assert summary_values[summary_headers.index("商品编码")] == "CAN123"
+    assert summary_values[summary_headers.index("未匹配行数")] == 2
+    assert summary_values[summary_headers.index("实收GMV合计")] == 150
+
+
 def test_export_workbooks_use_chinese_status_labels() -> None:
     detail_buffer = MerchantReconciliationService._build_detail_workbook(
         [

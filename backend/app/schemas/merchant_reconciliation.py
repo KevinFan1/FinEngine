@@ -124,6 +124,14 @@ class MerchantReconciliationDetailPageOut(BaseModel):
     stats: MerchantReconciliationStatsOut
 
 
+class MerchantReconciliationUnmatchedPageOut(BaseModel):
+    items: list[MerchantReconciliationDetailOut]
+    total: int
+    page: int
+    page_size: int
+    stats: MerchantReconciliationStatsOut
+
+
 class MerchantRedSheetPurchaseOut(BaseModel):
     id: int
     red_sheet_id: int

@@ -228,6 +228,16 @@ SUMMARY_BANK_FLOW_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("transaction_flow_no", "流水号", False),
 )
 
+UNMATCHED_PRODUCT_SUMMARY_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
+    ("product_code", "商品编码", False),
+    ("org_name", "组织", False),
+    ("shop_name", "店铺", False),
+    ("product_name", "商品名称示例", False),
+    ("match_error", "未匹配原因", False),
+    ("row_count", "未匹配行数", False),
+    ("gmv", "实收GMV合计", True),
+)
+
 MONEY_QUANT = Decimal("0.01")
 PAYMENT_SETTLEMENT_STATUSES = ("已核对", "未核对", "已结算", "未结算")
 PAYMENT_SETTLEMENT_STATUS_SET = set(PAYMENT_SETTLEMENT_STATUSES)
@@ -2984,6 +2994,64 @@ class MerchantReconciliationService:
         return int(result)
 
     @staticmethod
+    async def list_unmatched_details(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int, MerchantReconciliationStatsOut]:
+        return await MerchantReconciliationService._load_reconciliation_rows(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+            keyword=keyword,
+            match_status="unmatched",
+            ids=None,
+            page=page,
+            page_size=page_size,
+            include_all=False,
+        )
+
+    @staticmethod
+    async def export_unmatched_details(
+        db: AsyncSession,
+        *,
+        user: User,
+        output_path: Path | None = None,
+        accounting_year: int,
+        accounting_month: int,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        keyword: str | None = None,
+    ) -> io.BytesIO | int:
+        rows, _total, _stats = await MerchantReconciliationService._load_reconciliation_rows(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+            keyword=keyword,
+            match_status="unmatched",
+            ids=None,
+            page=1,
+            page_size=100,
+            include_all=True,
+        )
+        if output_path is not None:
+            return MerchantReconciliationService._save_unmatched_workbook(rows, output_path=output_path)
+        return MerchantReconciliationService._build_unmatched_workbook(rows)
+
+    @staticmethod
     async def _load_reconciliation_rows(
         db: AsyncSession,
         *,
@@ -3639,6 +3707,69 @@ class MerchantReconciliationService:
             title="商家对账明细",
             columns=RECONCILIATION_EXPORT_COLUMNS,
         )
+
+    @staticmethod
+    def _build_unmatched_workbook(rows: Iterable[dict[str, object]]) -> io.BytesIO:
+        row_list = list(rows)
+        wb = Workbook(write_only=True)
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            (MerchantReconciliationService._detail_export_row(row) for row in row_list),
+            title="未匹配明细",
+            columns=RECONCILIATION_EXPORT_COLUMNS,
+        )
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            MerchantReconciliationService._build_unmatched_product_summary_rows(row_list),
+            title="货号汇总",
+            columns=UNMATCHED_PRODUCT_SUMMARY_EXPORT_COLUMNS,
+        )
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def _save_unmatched_workbook(rows: Iterable[dict[str, object]], *, output_path: Path) -> int:
+        row_list = list(rows)
+        wb = Workbook(write_only=True)
+        detail_count = MerchantReconciliationExporter.append_sheet(
+            wb,
+            (MerchantReconciliationService._detail_export_row(row) for row in row_list),
+            title="未匹配明细",
+            columns=RECONCILIATION_EXPORT_COLUMNS,
+        )
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            MerchantReconciliationService._build_unmatched_product_summary_rows(row_list),
+            title="货号汇总",
+            columns=UNMATCHED_PRODUCT_SUMMARY_EXPORT_COLUMNS,
+        )
+        wb.save(output_path)
+        return detail_count
+
+    @staticmethod
+    def _build_unmatched_product_summary_rows(rows: Iterable[dict[str, object]]) -> list[dict[str, object]]:
+        summary_by_code: dict[str, dict[str, object]] = {}
+        for row in rows:
+            product_code = _normalize_text(row.get("product_code")) or "(空商品编码)"
+            item = summary_by_code.setdefault(
+                product_code,
+                {
+                    "product_code": product_code,
+                    "org_name": row.get("org_name"),
+                    "shop_name": row.get("shop_name"),
+                    "product_name": row.get("product_name"),
+                    "match_error": row.get("match_error"),
+                    "row_count": 0,
+                    "gmv": ZERO_MONEY,
+                },
+            )
+            item["row_count"] = int(item["row_count"]) + 1
+            item["gmv"] = safe_decimal(item["gmv"]) + safe_decimal(row.get("gmv"))
+            if not item.get("match_error") and row.get("match_error"):
+                item["match_error"] = row.get("match_error")
+        return sorted(summary_by_code.values(), key=lambda item: str(item.get("product_code") or ""))
 
     @staticmethod
     def _append_export_row(ws, row: dict[str, object]) -> None:

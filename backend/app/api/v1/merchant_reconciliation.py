@@ -24,6 +24,7 @@ from app.schemas.merchant_reconciliation import (
     MerchantReconciliationDetailPageOut,
     MerchantReconciliationSummaryOut,
     MerchantReconciliationSummaryPageOut,
+    MerchantReconciliationUnmatchedPageOut,
     MerchantRedSheetImportResult,
     MerchantRedSheetOut,
     MerchantRedSheetPaymentOut,
@@ -290,6 +291,63 @@ async def list_bank_flow_rows(
             page_size=page_size,
         )
     )
+
+
+@router.get("/unmatched-details", response_model=ApiResponse[MerchantReconciliationUnmatchedPageOut])
+async def list_unmatched_details(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    shop_id: int | None = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total, stats = await MerchantReconciliationService.list_unmatched_details(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        shop_id=shop_id,
+        org_id=org_id,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(
+        data=MerchantReconciliationUnmatchedPageOut(
+            items=[MerchantReconciliationDetailOut(**row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+            stats=stats,
+        )
+    )
+
+
+@router.get("/unmatched-details/export")
+async def export_unmatched_details(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    shop_id: int | None = Query(None, ge=1),
+    org_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    buffer = await MerchantReconciliationService.export_unmatched_details(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        shop_id=shop_id,
+        org_id=org_id,
+        keyword=keyword,
+    )
+    filename = f"{accounting_year}{accounting_month:02d}_商家对账未匹配明细.xlsx"
+    return _export_response(buffer, filename)
 
 
 @router.get("/details", response_model=ApiResponse[MerchantReconciliationDetailPageOut])
