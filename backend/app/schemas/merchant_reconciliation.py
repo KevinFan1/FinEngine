@@ -141,6 +141,7 @@ class MerchantRedSheetPurchaseOut(BaseModel):
     loan_return_date: date | None = None
     live_code: str = ""
     normalized_live_code: str = ""
+    product_code: str = ""
     match_status: str = ""
     remark: str = ""
     source_shop_name: str = ""

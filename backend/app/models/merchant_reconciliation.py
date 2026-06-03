@@ -87,6 +87,7 @@ class MerchantRedSheetPurchase(SoftDeleteMixin, Base):
     loan_return_date: Mapped[date | None] = mapped_column(Date, nullable=True, comment="借/退货日期")
     live_code: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="直播编号")
     normalized_live_code: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="新直播编码")
+    product_code: Mapped[str] = mapped_column(String(1000), nullable=False, default="", comment="从货品名称提取的商品编码")
     match_status: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="匹配")
     remark: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="结算状态")
     source_shop_name: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="店铺")

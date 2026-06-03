@@ -53,6 +53,7 @@ from app.services.shop_visibility import active_shop_filter
 from app.tasks.processors.base import canonical_header, open_tabular_rows, parse_datetime, safe_str
 from app.utils.live_code import extract_live_code
 from app.utils.money import ZERO_MONEY, safe_decimal
+from app.utils.product_code import extract_product_code
 from app.utils.query_filters import resolve_org_ids, split_int_filter_values
 
 PURCHASE_HEADERS = [
@@ -198,6 +199,7 @@ SUMMARY_PURCHASE_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("loan_return_order_no", "借/退货单号", False),
     ("live_code", "直播编号", False),
     ("normalized_live_code", "新直播编码", False),
+    ("product_code", "商品编码", False),
     ("product_name", "货品名称", False),
     ("sale_price", "卖价", True),
     ("borrow_quantity", "借货数量", True),
@@ -3414,11 +3416,7 @@ class MerchantReconciliationService:
         if payment_settlement_status is not None:
             payment_filters.append(MerchantRedSheetPayment.remark == payment_settlement_status)
         payments = (await db.execute(select(MerchantRedSheetPayment).where(*payment_filters))).scalars().all()
-        purchases_by_code: dict[str, MerchantRedSheetPurchase] = {}
-        for purchase in purchases:
-            for code_value in (purchase.normalized_live_code, purchase.live_code):
-                for code in MerchantReconciliationService._split_product_codes(code_value):
-                    purchases_by_code.setdefault(code, purchase)
+        purchases_by_code = MerchantReconciliationService._build_purchase_lookup_by_product_code(purchases)
         purchase_payment_keys = {(_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room)) for purchase in purchases}
         payments_by_key: dict[tuple[str, str, str], MerchantRedSheetPayment] = {}
         for payment in payments:
@@ -3426,6 +3424,49 @@ class MerchantReconciliationService:
             if payment.shop_id == shop_id or (payment.shop_id is None and key in purchase_payment_keys):
                 payments_by_key.setdefault(key, payment)
         return _RedSheetContext(purchases_by_code=purchases_by_code, payments_by_key=payments_by_key)
+
+    @staticmethod
+    def _build_purchase_lookup_by_product_code(
+        purchases: Iterable[MerchantRedSheetPurchase],
+    ) -> dict[str, MerchantRedSheetPurchase]:
+        purchases_by_code: dict[str, MerchantRedSheetPurchase] = {}
+        purchase_by_unique_key: dict[tuple[int, int, str, str, str, str], MerchantRedSheetPurchase] = {}
+        for purchase in purchases:
+            code_values = [getattr(purchase, "product_code", "")]
+            if not _normalize_text(code_values[0]):
+                code_values.extend([purchase.normalized_live_code, purchase.live_code])
+            for code_value in code_values:
+                for code in MerchantReconciliationService._split_product_codes(code_value):
+                    unique_key = (
+                        int(purchase.org_id),
+                        int(purchase.accounting_period),
+                        _match_text(purchase.merchant),
+                        _match_text(purchase.live_room),
+                        _date_key(purchase.live_date),
+                        _match_text(purchase.live_code),
+                    )
+                    existing = purchase_by_unique_key.get(unique_key)
+                    if existing is None or MerchantReconciliationService._is_newer_purchase(purchase, existing):
+                        purchase_by_unique_key[unique_key] = purchase
+
+        for purchase in purchase_by_unique_key.values():
+            code_values = [getattr(purchase, "product_code", "")]
+            if not _normalize_text(code_values[0]):
+                code_values.extend([purchase.normalized_live_code, purchase.live_code])
+            for code_value in code_values:
+                for code in MerchantReconciliationService._split_product_codes(code_value):
+                    existing = purchases_by_code.get(code)
+                    if existing is None or MerchantReconciliationService._is_newer_purchase(purchase, existing):
+                        purchases_by_code[code] = purchase
+        return purchases_by_code
+
+    @staticmethod
+    def _is_newer_purchase(candidate: MerchantRedSheetPurchase, existing: MerchantRedSheetPurchase) -> bool:
+        candidate_created_at = getattr(candidate, "created_at", None)
+        existing_created_at = getattr(existing, "created_at", None)
+        if candidate_created_at != existing_created_at:
+            return (candidate_created_at or datetime.min) > (existing_created_at or datetime.min)
+        return int(candidate.id or 0) > int(existing.id or 0)
 
     @staticmethod
     def _build_detail_derived_fields(
@@ -3894,6 +3935,7 @@ class MerchantReconciliationService:
                     "loan_return_date": _parse_date(MerchantReconciliationService._cell(row_values, header_map, "借/退货日期")),
                     "live_code": MerchantReconciliationService._cell(row_values, header_map, "直播编号"),
                     "normalized_live_code": extract_live_code(MerchantReconciliationService._cell(row_values, header_map, "直播编号")),
+                    "product_code": extract_product_code(MerchantReconciliationService._cell(row_values, header_map, "货品名称")),
                     "match_status": MerchantReconciliationService._cell(row_values, header_map, "匹配"),
                     "remark": MerchantReconciliationService._cell(row_values, header_map, "备注"),
                     "source_shop_name": MerchantReconciliationService._cell(row_values, header_map, "店铺"),

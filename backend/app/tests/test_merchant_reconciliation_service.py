@@ -574,6 +574,136 @@ def test_build_detail_payload_matches_red_sheet_and_allocates_amounts() -> None:
     assert payload["live_amount"] == Decimal("70.00")
 
 
+def test_build_detail_payload_matches_purchase_by_product_code() -> None:
+    class Detail:
+        id = 1
+        org_id = 2
+        shop_id = 3
+        shop_name = "抖音旗舰店"
+        source_year = 2026
+        source_month = 5
+        summary_year = 2026
+        summary_month = 4
+        source_platform_code = "douyin"
+        source_row_number = 9
+        transaction_time = None
+        transaction_flow_no = ""
+        transaction_direction = ""
+        transaction_amount = Decimal("0")
+        transaction_scene = ""
+        sub_order_no = ""
+        order_no = ""
+        order_time = None
+        product_id = ""
+        product_code = "CAN123"
+        product_name = "平台商品"
+        author_name = ""
+        merchant_name = "动账商家A"
+        gmv = Decimal("100")
+
+    purchase = MerchantRedSheetPurchase(
+        red_sheet_id=1,
+        org_id=2,
+        shop_id=3,
+        accounting_period=202604,
+        source_row_number=2,
+        live_room="直播间A",
+        merchant="大商家A",
+        live_date="2026-04-01",
+        live_code="直播编号001",
+        normalized_live_code="",
+        product_code="CAN123",
+    )
+    payment = MerchantRedSheetPayment(
+        red_sheet_id=1,
+        org_id=2,
+        shop_id=None,
+        accounting_period=202604,
+        source_row_number=2,
+        live_room="直播间A",
+        live_date="2026-04-01",
+        merchant="大商家A",
+        receipt_subject="收款主体A",
+        receipt_merchant="收款商家A",
+    )
+
+    payload = MerchantReconciliationService._build_detail_payload(
+        Detail(),
+        org_name="组织A",
+        shop_color=None,
+        load_context=_ReconciliationLoadContext(
+            org_id=2,
+            total_gmv=Decimal("100"),
+            total_bic=Decimal("0"),
+            total_insurance=Decimal("0"),
+            red_sheet_context=_RedSheetContext(
+                purchases_by_code={"CAN123": purchase},
+                payments_by_key={("大商家A", "4月1日", "直播间A"): payment},
+            ),
+        ),
+    )
+
+    assert payload["match_status"] == "matched"
+    assert payload["major_merchant_name"] == "大商家A"
+    assert payload["receipt_merchant"] == "收款商家A"
+
+
+def test_build_purchase_lookup_prefers_product_code_over_live_code() -> None:
+    purchase = MerchantRedSheetPurchase(
+        red_sheet_id=1,
+        org_id=2,
+        shop_id=3,
+        accounting_period=202604,
+        source_row_number=2,
+        live_room="直播间A",
+        merchant="大商家A",
+        live_date="2026-04-01",
+        live_code="直播编号001",
+        normalized_live_code="",
+        product_code="CAN123",
+    )
+
+    lookup = MerchantReconciliationService._build_purchase_lookup_by_product_code([purchase])
+
+    assert lookup["CAN123"] is purchase
+    assert "直播编号001" not in lookup
+
+
+def test_build_purchase_lookup_uses_latest_duplicate_purchase() -> None:
+    older = MerchantRedSheetPurchase(
+        id=1,
+        red_sheet_id=1,
+        org_id=2,
+        shop_id=3,
+        accounting_period=202604,
+        source_row_number=2,
+        live_room="直播间A",
+        merchant="大商家A",
+        live_date="2026-04-01",
+        live_code="场次001",
+        product_code="CAN123",
+        created_at=datetime(2026, 4, 1, 10, 0, 0),
+    )
+    newer = MerchantRedSheetPurchase(
+        id=2,
+        red_sheet_id=2,
+        org_id=2,
+        shop_id=3,
+        accounting_period=202604,
+        source_row_number=3,
+        live_room="直播间A",
+        merchant="大商家A",
+        live_date="2026-04-01",
+        live_code="场次001",
+        product_code="CAN123",
+        created_at=datetime(2026, 4, 2, 10, 0, 0),
+    )
+
+    lookup = MerchantReconciliationService._build_purchase_lookup_by_product_code([older, newer])
+
+    assert lookup["CAN123"] is newer
+
+
 def test_build_detail_payload_uses_month_total_gmv_as_allocation_denominator() -> None:
     class Detail:
         id = 1
