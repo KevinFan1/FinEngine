@@ -9,6 +9,9 @@ export interface ParsedFileName {
     shop: string;
 }
 
+const ISO_DATE_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}(?:$|[T\s])/;
+const ISO_DATETIME_PREFIX_PATTERN = /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})/;
+
 /**
  * Parse financial file name.
  * Expected format: {性质}_{店铺名称}.xlsx/.xlsm/.xls/.csv
@@ -90,6 +93,24 @@ export function formatDateTime(date: string | Date | null | undefined): string {
 }
 
 /**
+ * Format a raw API datetime-like value without leaking ISO timezone suffixes.
+ */
+export function formatRawDateTime(value: string | Date | null | undefined): string {
+    if (!value) return "-";
+    if (value instanceof Date) return formatDateTime(value);
+    const text = value.trim();
+    if (!text) return "-";
+    const isoMatch = text.match(ISO_DATETIME_PREFIX_PATTERN);
+    if (isoMatch) {
+        return `${isoMatch[1]} ${isoMatch[2]}`;
+    }
+    if (ISO_DATE_PREFIX_PATTERN.test(text)) {
+        return formatDateTime(text);
+    }
+    return text;
+}
+
+/**
  * Format a date string or Date object to 'YYYY-MM-DD'
  */
 export function formatDate(date: string | Date | null | undefined): string {
@@ -102,6 +123,20 @@ export function formatDate(date: string | Date | null | undefined): string {
     const day = String(d.getDate()).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
+}
+
+/**
+ * Format a raw API date-like value without leaking ISO timezone suffixes.
+ */
+export function formatRawDate(value: string | Date | null | undefined): string {
+    if (!value) return "-";
+    if (value instanceof Date) return formatDate(value);
+    const text = value.trim();
+    if (!text) return "-";
+    if (ISO_DATE_PREFIX_PATTERN.test(text)) {
+        return text.slice(0, 10);
+    }
+    return text;
 }
 
 /**

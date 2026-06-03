@@ -336,6 +336,18 @@ export interface MerchantReconciliationSummaryParams {
     bank_status?: string;
 }
 
+export interface MerchantReconciliationSummaryDrilldownParams {
+    page?: number;
+    page_size?: number;
+    org_id?: number | string;
+    accounting_year: number;
+    accounting_month: number;
+    shop_id?: number;
+    summary_org_id?: number | null;
+    our_subject: string;
+    merchant_receipt_subject: string;
+}
+
 export type MerchantReconciliationExportScope = "all" | "current_page" | "selected";
 
 export function downloadRedSheetTemplate(params: { accounting_year: number; accounting_month: number }) {
@@ -376,6 +388,22 @@ export function listMerchantReconciliationSummary(params: MerchantReconciliation
 
 export function exportMerchantReconciliationSummary(params: MerchantReconciliationSummaryParams) {
     return downloadBlob("/merchant-reconciliation/summary/export", params);
+}
+
+export function listMerchantReconciliationSummaryDetails(params: MerchantReconciliationSummaryDrilldownParams) {
+    return get<PaginatedData<MerchantReconciliationDetail>>("/merchant-reconciliation/summary/details", params);
+}
+
+export function listMerchantReconciliationSummaryPayments(params: MerchantReconciliationSummaryDrilldownParams) {
+    return get<PaginatedData<MerchantRedSheetPayment>>("/merchant-reconciliation/summary/payments", params);
+}
+
+export function listMerchantReconciliationSummaryPurchases(params: MerchantReconciliationSummaryDrilldownParams) {
+    return get<PaginatedData<MerchantRedSheetPurchase>>("/merchant-reconciliation/summary/purchases", params);
+}
+
+export function listMerchantReconciliationSummaryBankFlows(params: MerchantReconciliationSummaryDrilldownParams) {
+    return get<PaginatedData<MerchantBankFlowRow>>("/merchant-reconciliation/summary/bank-flow-rows", params);
 }
 
 export function listMerchantOpeningBalances(params: Omit<MerchantReconciliationSummaryParams, "page" | "page_size" | "bank_status">) {

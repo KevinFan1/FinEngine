@@ -50,6 +50,12 @@ def _parse_ids(raw_ids: str | None) -> list[int] | None:
     return ids
 
 
+def _parse_str_ids(raw_ids: str | None) -> list[str] | None:
+    if raw_ids is None:
+        return None
+    return [raw.strip() for raw in raw_ids.split(",") if raw.strip()]
+
+
 @router.get("/red-sheet-template")
 async def download_red_sheet_template(
     accounting_year: int = Query(..., ge=2000, le=2100),
@@ -433,6 +439,154 @@ async def list_summary(
     )
 
 
+@router.get("/summary/details", response_model=ApiResponse[PageResponse[MerchantReconciliationDetailOut]])
+async def list_summary_drilldown_details(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    our_subject: str = Query(..., min_length=1),
+    merchant_receipt_subject: str = Query(..., min_length=1),
+    summary_org_id: int | None = Query(None, ge=1),
+    shop_id: int | None = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await MerchantReconciliationService.list_summary_drilldown_details(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        summary_org_id=summary_org_id,
+        our_subject=our_subject,
+        merchant_receipt_subject=merchant_receipt_subject,
+        shop_id=shop_id,
+        org_id=org_id,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(
+        data=PageResponse(
+            items=[MerchantReconciliationDetailOut(**row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
+@router.get("/summary/payments", response_model=ApiResponse[PageResponse[MerchantRedSheetPaymentOut]])
+async def list_summary_drilldown_payments(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    our_subject: str = Query(..., min_length=1),
+    merchant_receipt_subject: str = Query(..., min_length=1),
+    summary_org_id: int | None = Query(None, ge=1),
+    shop_id: int | None = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await MerchantReconciliationService.list_summary_drilldown_payments(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        summary_org_id=summary_org_id,
+        our_subject=our_subject,
+        merchant_receipt_subject=merchant_receipt_subject,
+        shop_id=shop_id,
+        org_id=org_id,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(
+        data=PageResponse(
+            items=[MerchantRedSheetPaymentOut(**row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
+@router.get("/summary/purchases", response_model=ApiResponse[PageResponse[MerchantRedSheetPurchaseOut]])
+async def list_summary_drilldown_purchases(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    our_subject: str = Query(..., min_length=1),
+    merchant_receipt_subject: str = Query(..., min_length=1),
+    summary_org_id: int | None = Query(None, ge=1),
+    shop_id: int | None = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await MerchantReconciliationService.list_summary_drilldown_purchases(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        summary_org_id=summary_org_id,
+        our_subject=our_subject,
+        merchant_receipt_subject=merchant_receipt_subject,
+        shop_id=shop_id,
+        org_id=org_id,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(
+        data=PageResponse(
+            items=[MerchantRedSheetPurchaseOut(**row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
+@router.get("/summary/bank-flow-rows", response_model=ApiResponse[PageResponse[MerchantBankFlowRowOut]])
+async def list_summary_drilldown_bank_flow_rows(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    our_subject: str = Query(..., min_length=1),
+    merchant_receipt_subject: str = Query(..., min_length=1),
+    summary_org_id: int | None = Query(None, ge=1),
+    shop_id: int | None = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await MerchantReconciliationService.list_summary_drilldown_bank_flow_rows(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        summary_org_id=summary_org_id,
+        our_subject=our_subject,
+        merchant_receipt_subject=merchant_receipt_subject,
+        shop_id=shop_id,
+        org_id=org_id,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(
+        data=PageResponse(
+            items=[MerchantBankFlowRowOut(**row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
 @router.get("/summary/export")
 async def export_summary(
     accounting_year: int = Query(..., ge=2000, le=2100),
@@ -441,11 +595,16 @@ async def export_summary(
     org_id: str | None = Query(None),
     keyword: str | None = Query(None),
     bank_status: str | None = Query(None, pattern="^(pending|matched|diff)$"),
+    scope: str = Query("all"),
+    ids: str | None = Query(None),
     page: int | None = Query(None, ge=1),
     page_size: int | None = Query(None, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    selected_ids = _parse_str_ids(ids) if scope == "selected" else None
+    export_page = page if scope == "current_page" else None
+    export_page_size = page_size if scope == "current_page" else None
     buffer = await MerchantReconciliationService.export_summary(
         db,
         user=current_user,
@@ -455,8 +614,9 @@ async def export_summary(
         org_id=org_id,
         keyword=keyword,
         bank_status=bank_status,
-        page=page,
-        page_size=page_size,
+        ids=selected_ids,
+        page=export_page,
+        page_size=export_page_size,
     )
     filename = f"{accounting_year}{accounting_month:02d}_商家对账汇总.xlsx"
     return _export_response(buffer, filename)

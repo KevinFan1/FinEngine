@@ -117,10 +117,10 @@ def test_build_export_workbook_header_order_matches_frontend() -> None:
     ]
     assert "调年月(系统的业务年月)" in headers
     assert "商品编码" in headers
-    assert headers[-9:] == [
+    start = headers.index("大商家名称")
+    assert headers[start:] == [
         "大商家名称",
         "我方主体",
-        "商家收款主体",
         "收款商家",
         "分摊BIC",
         "分摊运费险",
@@ -128,6 +128,7 @@ def test_build_export_workbook_header_order_matches_frontend() -> None:
         "商家对账匹配状态",
         "商家对账匹配失败原因",
     ]
+    assert "商家收款主体" not in headers
 
 
 def test_normalize_payload_strips_excel_text_prefix() -> None:

@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>商家对账：货号提取与 Excel 复核指南</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #667085;
+      --line: #d9dee7;
+      --soft: #edf1f7;
+      --accent: #0f766e;
+      --accent-2: #2563eb;
+      --warn: #a16207;
+      --bad: #b42318;
+      --good: #067647;
+      --code-bg: #101828;
+      --code: #eef4ff;
+      --shadow: 0 18px 45px rgba(16, 24, 40, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(15, 118, 110, 0.08), transparent 320px),
+        var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+
+    a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 28px;
+      width: min(1440px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 32px 0 64px;
+    }
+
+    aside {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: var(--shadow);
+    }
+
+    aside h2 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    aside nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    aside a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    aside a:hover {
+      background: var(--soft);
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .hero {
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 900px;
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 920px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .meta {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfe;
+    }
+
+    .meta strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .meta span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    section {
+      margin-top: 22px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 25px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 18px 0 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 12px 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 4px;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 150px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfe;
+    }
+
+    .flow-step .num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .flow-step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .note,
+    .warning,
+    .success {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+    }
+
+    .note {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1e3a8a;
+    }
+
+    .warning {
+      border: 1px solid #fde68a;
+      background: #fffbeb;
+      color: var(--warn);
+    }
+
+    .success {
+      border: 1px solid #bbf7d0;
+      background: #f0fdf4;
+      color: var(--good);
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: var(--soft);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0 18px;
+      padding: 16px;
+      overflow-x: auto;
+      border-radius: var(--radius);
+      background: var(--code-bg);
+      color: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      margin: 12px 0 18px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+      font-weight: 700;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: #fbfcfe;
+    }
+
+    .formula-title {
+      margin-top: 18px;
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .formula-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .formula-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfe;
+    }
+
+    .formula-card h4 {
+      margin-top: 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .bad {
+      color: var(--bad);
+      font-weight: 700;
+    }
+
+    .critical {
+      color: var(--bad);
+      font-weight: 800;
+    }
+
+    .must-box {
+      margin: 18px 0;
+      padding: 18px;
+      border: 2px solid rgba(180, 35, 24, 0.35);
+      border-radius: var(--radius);
+      background: #fff5f5;
+    }
+
+    .must-box h3 {
+      margin-top: 0;
+      color: var(--bad);
+    }
+
+    .must-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .must-list li {
+      padding-left: 14px;
+      border-left: 4px solid var(--bad);
+      color: #7a271a;
+      font-weight: 700;
+    }
+
+    .good {
+      color: var(--good);
+      font-weight: 700;
+    }
+
+    .print-note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 1100px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        position: static;
+      }
+
+      .meta-grid,
+      .flow,
+      .formula-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .layout {
+        width: min(100% - 28px, 1440px);
+        padding-top: 18px;
+      }
+
+      .hero,
+      section {
+        padding: 20px;
+      }
+
+      .meta-grid,
+      .flow,
+      .formula-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      body {
+        background: white;
+      }
+
+      .layout {
+        display: block;
+        width: 100%;
+        padding: 0;
+      }
+
+      aside {
+        display: none;
+      }
+
+      .hero,
+      section {
+        break-inside: avoid;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside aria-label="目录">
+      <h2>目录</h2>
+      <nav>
+        <a href="#overview">整体介绍</a>
+        <a href="#must-read">重点注意事项</a>
+        <a href="#data-model">数据表准备</a>
+        <a href="#step-1">1. 提取货号</a>
+        <a href="#step-2">2. 货号 + 年月 lookup 采购</a>
+        <a href="#step-3">3. 采购匹配货款</a>
+        <a href="#step-4">4. 动账透视汇总</a>
+        <a href="#bank-flow">银行流水校验</a>
+        <a href="#checks">异常检查</a>
+        <a href="#appendix">字段与口径附录</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero" id="overview">
+        <p class="eyebrow">FinEngine 商家对账说明</p>
+        <h1>货号提取、红单匹配、货款关联与 Excel 透视复核指南</h1>
+        <p>
+          本文档把系统里的商家对账逻辑拆成可以在 Excel 中复刻的步骤。核心链路是：
+          从抖音动账商品名称提取货号，用货号和业务年月命中红单采购，再用采购单的商家、直播日期、直播间匹配红单货款，
+          最后基于匹配后的动账明细做透视汇总。
+        </p>
+        <div class="meta-grid">
+          <div class="meta">
+            <strong>主要数据源</strong>
+            <span>抖音动账明细、红单采购、红单货款、银行流水</span>
+          </div>
+          <div class="meta">
+            <strong>核心键</strong>
+            <span>货号、业务年月、商家、直播日期、直播间</span>
+          </div>
+          <div class="meta">
+            <strong>汇总粒度</strong>
+            <span>组织 + 我方主体 + 商家收款主体</span>
+          </div>
+          <div class="meta">
+            <strong>适用场景</strong>
+            <span>财务复核、手工排错、导出报表解释</span>
+          </div>
+        </div>
+      </header>
+
+      <section>
+        <h2>整体流程</h2>
+        <div class="flow" role="list">
+          <div class="flow-step" role="listitem">
+            <span class="num">1</span>
+            <strong>提取货号</strong>
+            <span>从动账商品名称提取商品编码，多个独立货号用逗号分隔，组合货号保留加号。</span>
+          </div>
+          <div class="flow-step" role="listitem">
+            <span class="num">2</span>
+            <strong>lookup 采购</strong>
+            <span>用货号 + 组织 + 店铺 + 业务年月，在最新红单采购中找到直播间、直播日期、大商家。</span>
+          </div>
+          <div class="flow-step" role="listitem">
+            <span class="num">3</span>
+            <strong>匹配货款</strong>
+            <span>用采购单的商家、直播日期、直播间，匹配货款单的结算主体和收款商家。</span>
+          </div>
+          <div class="flow-step" role="listitem">
+            <span class="num">4</span>
+            <strong>透视汇总</strong>
+            <span>用匹配后的动账明细按我方主体、收款商家聚合 GMV、直播款、银行流水差异。</span>
+          </div>
+        </div>
+        <div class="note">
+          系统计算时会先按同组织、同店铺、同业务年月读取最新一版红单。汇总页只纳入能匹配到采购和货款的动账记录；未匹配记录留在明细页用于排错。
+        </div>
+      </section>
+
+      <section id="must-read">
+        <h2>重点注意事项</h2>
+        <div class="must-box">
+          <h3>以下条件不满足时，后续匹配和透视结果都会不准</h3>
+          <ul class="must-list">
+            <li>红单采购里的 <span class="critical">直播编号 / 新直播编码必须有关联货号</span>，并且要能和动账商品名称提取出的货号对上。</li>
+            <li>红单采购和红单货款的 <span class="critical">直播日期必须统一口径</span>，建议统一成 <span class="critical">x月x日</span> 或 <span class="critical">x月x-y日</span>，例如 <code>4月1日</code>、<code>11月11-20日</code>。</li>
+            <li>不要在同一批数据里混用 <span class="critical">2026-04-01、4/1、4.1、11/11-11/20</span> 等不同写法；这些写法看起来一样，但匹配时可能对不上。</li>
+            <li>货款匹配不是直接用货号找货款，而是先用货号找到采购，再用采购的 <span class="critical">商家 + 直播日期 + 直播间</span> 找货款。</li>
+            <li>同一组织、同一店铺、同一业务年月如果上传多版红单，复核时要以 <span class="critical">最新确认版本</span> 为准。</li>
+          </ul>
+        </div>
+        <p>
+          业务复核时建议先检查红单采购的货号和直播日期，再检查红单货款的商家、直播日期、直播间。前面任一环节不统一，后面的收款商家和汇总金额都会跟着错。
+        </p>
+      </section>
+
+      <section id="data-model">
+        <h2>数据表准备</h2>
+        <p>建议把 Excel 工作簿中的四类数据转换成表格，表名固定后公式更稳定。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Excel 表名</th>
+              <th>来源</th>
+              <th>关键字段</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>T_DZ</code></td>
+              <td>抖音动账明细</td>
+              <td>组织、店铺、业务年月、商品名称、商品编码、实收GMV、商户主体名称</td>
+              <td>提取货号并作为最终透视基础表</td>
+            </tr>
+            <tr>
+              <td><code>T_PUR</code></td>
+              <td>红单采购表</td>
+              <td>组织、店铺、业务年月、直播编号、新直播编码、商家、直播日期、直播间</td>
+              <td>用货号找到大商家和直播场次</td>
+            </tr>
+            <tr>
+              <td><code>T_PAY</code></td>
+              <td>红单货款表</td>
+              <td>组织、业务年月、商家、直播日期、直播间、结算主体、收款主体、收款商家、结算状态、已付</td>
+              <td>用采购场次找到收款商家和结算信息</td>
+            </tr>
+            <tr>
+              <td><code>T_BANK</code></td>
+              <td>银行流水</td>
+              <td>组织、业务年月、账户名称、对方户名、直播日期、支出金额、收入金额、流水净额</td>
+              <td>校验银行实际付款流出</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          系统中的业务年月来自动账核算年月或红单导入年月，通常用 <code>YYYY-MM</code> 展示，用 <code>YYYYMM</code> 作为匹配键更方便。
+        </p>
+        <pre><code>=TEXT([@[业务年月]],"yyyymm")
+=YEAR([@[业务年月]])*100+MONTH([@[业务年月]])</code></pre>
+      </section>
+
+      <section id="step-1">
+        <h2>1. 提取货号</h2>
+        <p>
+          系统会先把商品名称统一成大写，再按“字母前缀 + 至少 3 位数字”提取货号。业务复核时可以直接使用系统导出的 <code>商品编码</code> 列，也可以用 Excel 公式辅助检查。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>规则</th>
+              <th>说明</th>
+              <th>示例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>基础货号</td>
+              <td>1 到 16 位字母 + 3 到 16 位数字</td>
+              <td><code>G16591</code>、<code>CAN1400899</code>、<code>ZC00100027</code></td>
+            </tr>
+            <tr>
+              <td>组合货号</td>
+              <td>组合内部保留 <code>+</code>，匹配时会再拆开</td>
+              <td><code>CAN123+CAN456</code></td>
+            </tr>
+            <tr>
+              <td>F/M 尾缀</td>
+              <td>只保留 <code>-F</code> 或 <code>-M</code> 这类尾缀</td>
+              <td><code>V33535-F</code>、<code>V61416-M</code></td>
+            </tr>
+            <tr>
+              <td>尺寸粘连</td>
+              <td>允许 <code>mm/cm</code> 后面直接跟货号</td>
+              <td><code>约33*13mmCAN3110492</code> 提取 <code>CAN3110492</code></td>
+            </tr>
+            <tr>
+              <td>材质黑名单</td>
+              <td>过滤金银材质编码，避免误认为货号</td>
+              <td><code>S925</code>、<code>AU750</code>、<code>PT950</code> 不作为货号</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Excel 公式：辅助提取货号</h3>
+        <p>如果 Excel 可使用 <code>REGEXEXTRACT</code> 提取函数，可以在 <code>T_DZ</code> 增加辅助列 <code>提取货号</code>：</p>
+        <pre><code>=LET(
+  txt, UPPER(ASC([@[商品名称]])),
+  raw, IFERROR(REGEXEXTRACT(txt,"([A-Z]{1,16}\d{3,16}(?:-[FM])?(?:\s*\+\s*[A-Z]{1,16}\d{3,16}(?:-[FM])?)*)"),""),
+  code, SUBSTITUTE(raw," ",""),
+  base, TEXTBEFORE(code&"-","-"),
+  blacklist, {"S925","S990","S999","AG925","AG990","AG999","AU750","AU916","AU999","G750","G999","PT900","PT950","PT990","PT999","K9","K10","K14","K18","K22","K24"},
+  IF(ISNUMBER(XMATCH(base,blacklist)),"",code)
+)</code></pre>
+        <div class="warning">
+          <strong>注意：</strong>上面的公式用于业务复核，不能替代系统最终匹配结果。大量复核时建议优先使用系统导出的 <strong>商品编码</strong> 列。
+        </div>
+
+        <h3>没有提取函数时</h3>
+        <p>
+          如果 Excel 不支持上述函数，建议直接使用系统导出的 <strong>商品编码</strong> 列；少量异常数据可以人工补货号。
+          人工补货号时，必须和红单采购里的 <span class="critical">直播编号 / 新直播编码</span> 保持一致。
+        </p>
+
+        <h3>拆分组合货号</h3>
+        <p>系统匹配采购时会把逗号和加号都拆开。Excel 复核建议增加 <code>货号数组</code> 辅助逻辑：</p>
+        <pre><code>=TEXTSPLIT(SUBSTITUTE(SUBSTITUTE([@[提取货号]],"＋",","),"+",","),",")</code></pre>
+      </section>
+
+      <section id="step-2">
+        <h2>2. 用货号 + 年月 lookup 红单采购单信息</h2>
+        <p>
+          系统先按组织、店铺、业务年月读取最新一版红单，再在红单采购表中建立货号索引。采购索引来源优先使用 <code>新直播编码</code>，
+          同时也会看原始 <code>直播编号</code>。命中后得到大商家、直播间、直播日期等字段。
+        </p>
+        <div class="must-box">
+          <h3>本步骤必须先确认</h3>
+          <ul class="must-list">
+            <li>红单采购的 <span class="critical">直播编号 / 新直播编码</span> 要填写货号，不能只写直播场次备注。</li>
+            <li>动账提取出来的货号，要能在红单采购中找到；否则大商家、直播间、直播日期都会为空。</li>
+            <li>同一个货号如果在同月同店铺出现多次，需要人工确认是否重复或是否属于组合货号。</li>
+          </ul>
+        </div>
+
+        <h3>采购表辅助列</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>辅助列</th>
+              <th>公式</th>
+              <th>作用</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>采购年月</code></td>
+              <td><code>=TEXT([@[业务年月]],"yyyymm")</code></td>
+              <td>让采购和动账按同一账期匹配</td>
+            </tr>
+            <tr>
+              <td><code>采购货号</code></td>
+              <td><code>=UPPER(TRIM(IF([@[新直播编码]]&lt;&gt;"",[@[新直播编码]],[@[直播编号]])))</code></td>
+              <td>优先使用新直播编码；没有时使用直播编号</td>
+            </tr>
+            <tr>
+              <td><code>采购匹配键</code></td>
+              <td><code>=[@组织]&amp;"|"&amp;[@店铺]&amp;"|"&amp;[@采购年月]&amp;"|"&amp;[@采购货号]</code></td>
+              <td>组织、店铺、年月、货号组成唯一查找键</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>动账表 lookup 采购</h3>
+        <p>在 <code>T_DZ</code> 增加 <code>动账年月</code> 和 <code>采购匹配键</code>：</p>
+        <pre><code>=TEXT([@[业务年月]],"yyyymm")
+=[@组织]&amp;"|"&amp;[@店铺]&amp;"|"&amp;[@动账年月]&amp;"|"&amp;[@[提取货号]]</code></pre>
+
+        <p class="formula-title">拉取大商家、直播间、直播日期</p>
+        <pre><code>=XLOOKUP([@[采购匹配键]], T_PUR[采购匹配键], T_PUR[商家], "")
+=XLOOKUP([@[采购匹配键]], T_PUR[采购匹配键], T_PUR[直播间], "")
+=XLOOKUP([@[采购匹配键]], T_PUR[采购匹配键], T_PUR[直播日期], "")</code></pre>
+
+        <div class="note">
+          如果一个商品名称提取出多个货号，系统会按顺序尝试，命中第一个采购货号就停止。Excel 复核时可先展开为多行再 lookup，或者用 <code>TEXTSPLIT</code> + <code>MAP</code> 自定义处理。
+        </div>
+
+        <h3>多货号复核公式</h3>
+        <p>下面公式会把一行动账中的多个货号逐个尝试，返回第一个匹配到的采购商家：</p>
+        <pre><code>=LET(
+  codes, TEXTSPLIT(SUBSTITUTE(SUBSTITUTE([@[提取货号]],"＋",","),"+",","),","),
+  keys, [@组织]&amp;"|"&amp;[@店铺]&amp;"|"&amp;[@动账年月]&amp;"|"&amp;codes,
+  hits, XLOOKUP(keys, T_PUR[采购匹配键], T_PUR[商家], ""),
+  IFERROR(INDEX(FILTER(hits,hits&lt;&gt;""),1),"")
+)</code></pre>
+      </section>
+
+      <section id="step-3">
+        <h2>3. 用采购单的直播间、直播日期、货号匹配货款信息</h2>
+        <p>
+          系统的货款匹配不是直接用货号，而是先通过货号找到采购行，再用采购行上的
+          <code>商家 + 直播日期 + 直播间</code> 去匹配红单货款表。命中后得到结算主体、收款主体、收款商家、已付金额等信息。
+        </p>
+
+        <h3>标准化规则</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>系统处理</th>
+              <th>Excel 建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>商家</td>
+              <td>去首尾空格，转大写</td>
+              <td><code>=UPPER(TRIM([@商家]))</code></td>
+            </tr>
+            <tr>
+              <td>直播日期</td>
+              <td>日期建议统一为 <code>4月1日</code>、<code>11月11-20日</code> 等红单展示口径</td>
+              <td><span class="critical">必须统一红单采购和货款的日期文本</span></td>
+            </tr>
+            <tr>
+              <td>直播间</td>
+              <td>去首尾空格，转大写</td>
+              <td><code>=UPPER(TRIM([@直播间]))</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>货款表辅助列</h3>
+        <pre><code>货款年月 = TEXT([@[业务年月]],"yyyymm")
+货款匹配键 = [@组织]&amp;"|"&amp;[@货款年月]&amp;"|"&amp;UPPER(TRIM([@商家]))&amp;"|"&amp;[@直播日期]&amp;"|"&amp;UPPER(TRIM([@直播间]))</code></pre>
+
+        <h3>动账表匹配货款</h3>
+        <p>动账表先用上一步得到的采购字段生成 <code>货款匹配键</code>：</p>
+        <pre><code>=[@组织]&amp;"|"&amp;[@动账年月]&amp;"|"&amp;UPPER(TRIM([@[大商家]]))&amp;"|"&amp;[@[直播日期]]&amp;"|"&amp;UPPER(TRIM([@[直播间]]))</code></pre>
+
+        <p class="formula-title">拉取货款字段</p>
+        <pre><code>我方主体 = XLOOKUP([@[货款匹配键]], T_PAY[货款匹配键], T_PAY[结算主体], "")
+商家收款主体 = XLOOKUP([@[货款匹配键]], T_PAY[货款匹配键], T_PAY[收款主体], "")
+收款商家 = XLOOKUP([@[货款匹配键]], T_PAY[货款匹配键], T_PAY[收款商家], "")
+已付 = XLOOKUP([@[货款匹配键]], T_PAY[货款匹配键], T_PAY[已付], 0)
+结算状态 = XLOOKUP([@[货款匹配键]], T_PAY[货款匹配键], T_PAY[结算状态], "")</code></pre>
+
+        <div class="warning">
+          <strong>注意：</strong>汇总复核时要重点关注红单货款的 <strong>结算状态</strong>。涉及付款调整时，建议优先复核 <code>已结算</code> 的货款行。
+        </div>
+      </section>
+
+      <section id="step-4">
+        <h2>4. 用匹配的动账信息进行透视</h2>
+        <p>
+          匹配完成后，每行动账都有货号、大商家、直播日期、直播间、收款商家等字段。系统会计算直播款、BIC 分摊和运费险分摊，
+          然后按汇总粒度聚合。
+        </p>
+
+        <h3>动账明细计算列</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>系统口径</th>
+              <th>Excel 公式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>直播款</td>
+              <td><code>实收GMV * 0.7</code>，四舍五入到 2 位小数</td>
+              <td><code>=ROUND([@[实收GMV]]*0.7,2)</code></td>
+            </tr>
+            <tr>
+              <td>分摊 BIC</td>
+              <td>本行 GMV / 当月总 GMV * 当月 BIC</td>
+              <td><code>=ROUND([@[实收GMV]]/SUMIFS(T_DZ[实收GMV],T_DZ[动账年月],[@动账年月])*当月BIC,2)</code></td>
+            </tr>
+            <tr>
+              <td>分摊运费险</td>
+              <td>本行 GMV / 当月总 GMV * 当月运费险</td>
+              <td><code>=ROUND([@[实收GMV]]/SUMIFS(T_DZ[实收GMV],T_DZ[动账年月],[@动账年月])*当月运费险,2)</code></td>
+            </tr>
+            <tr>
+              <td>匹配状态</td>
+              <td>货号、采购、货款都命中为已匹配，否则未匹配</td>
+              <td><code>=IF(AND([@[提取货号]]&lt;&gt;"",[@[大商家]]&lt;&gt;"",[@[收款商家]]&lt;&gt;""),"已匹配","未匹配")</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>透视表配置</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>区域</th>
+              <th>字段</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>筛选器</td>
+              <td>组织、店铺、业务年月、匹配状态</td>
+              <td>建议只看 <code>已匹配</code>，未匹配另做异常表</td>
+            </tr>
+            <tr>
+              <td>行</td>
+              <td>我方主体、商家收款主体</td>
+              <td>系统汇总口径接近 <code>组织 + 我方主体 + 收款商家</code></td>
+            </tr>
+            <tr>
+              <td>值</td>
+              <td>实收GMV、直播款、分摊BIC、分摊运费险、动账行数</td>
+              <td>全部使用求和，动账行数使用计数</td>
+            </tr>
+            <tr>
+              <td>列</td>
+              <td>业务年月或银行流水状态</td>
+              <td>跨月复核时使用</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>不用透视表的 SUMIFS 汇总公式</h3>
+        <p>如果建立了汇总表 <code>T_SUM</code>，每行包含 <code>组织、业务年月、我方主体、商家收款主体</code>，可用公式：</p>
+        <pre><code>实收GMV =
+SUMIFS(T_DZ[实收GMV], T_DZ[组织], [@组织], T_DZ[动账年月], [@业务年月], T_DZ[我方主体], [@我方主体], T_DZ[收款商家], [@商家收款主体], T_DZ[匹配状态], "已匹配")
+
+应付商家净额 =
+SUMIFS(T_DZ[直播款], T_DZ[组织], [@组织], T_DZ[动账年月], [@业务年月], T_DZ[我方主体], [@我方主体], T_DZ[收款商家], [@商家收款主体], T_DZ[匹配状态], "已匹配")</code></pre>
+
+        <h3>汇总金额字段</h3>
+        <pre><code>应付货款余额 = 应付商家净额 + 期初余额 - 冲减业务费用 - 其他冲减金额
+未付流水 = 应付货款余额 - 已付流水
+银行付款差 = 未付流水 - 银行流水汇总
+银行流水状态 = IF(银行流水汇总=0,"待匹配",IF(银行付款差=0,"已匹配","有差异"))</code></pre>
+      </section>
+
+      <section id="bank-flow">
+        <h2>银行流水校验</h2>
+        <p>
+          银行流水不是货号匹配链路的第一步，但会进入最终汇总校验。系统只纳入用途、备注或附言里包含“直播”的流水行，并且只统计 <code>流水净额 &gt; 0</code> 的付款流出。
+        </p>
+
+        <h3>银行流水辅助列</h3>
+        <pre><code>流水净额 = ROUND([@[支出金额]]-[@[收入金额]],2)
+银行匹配键 = [@组织]&amp;"|"&amp;UPPER(TRIM([@[账户名称]]))&amp;"|"&amp;UPPER(TRIM([@[对方户名]]))&amp;"|"&amp;[@直播日期]</code></pre>
+
+        <h3>红单货款银行匹配键</h3>
+        <pre><code>=[@组织]&amp;"|"&amp;UPPER(TRIM([@[结算主体]]))&amp;"|"&amp;UPPER(TRIM([@[收款商家]]))&amp;"|"&amp;[@直播日期]</code></pre>
+
+        <p>
+          能桥接到红单货款时，银行流水会再按该货款行关联到的汇总组 <code>直播款</code> 权重分摊，避免同一笔付款被多个货号重复计入。
+          Excel 手工复核如果不处理分摊，可以先按主体和收款商家粗略校验，再对差异行逐笔追踪。
+        </p>
+      </section>
+
+      <section id="checks">
+        <h2>异常检查</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>检查项</th>
+              <th>Excel 公式或方法</th>
+              <th>处理建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>未提取到货号</td>
+              <td><code>=FILTER(T_DZ,T_DZ[提取货号]="")</code></td>
+              <td>检查商品名称是否缺编码，或编码被写成非系统支持格式</td>
+            </tr>
+            <tr>
+              <td>货号未匹配采购</td>
+              <td><code>=FILTER(T_DZ,(T_DZ[提取货号]&lt;&gt;"")*(T_DZ[大商家]=""))</code></td>
+              <td>检查红单采购是否同年月、同店铺、同组织，直播编号是否填写货号</td>
+            </tr>
+            <tr>
+              <td>采购未匹配货款</td>
+              <td><code>=FILTER(T_DZ,(T_DZ[大商家]&lt;&gt;"")*(T_DZ[收款商家]=""))</code></td>
+              <td>检查商家、直播日期、直播间三项是否和红单货款表一致</td>
+            </tr>
+            <tr>
+              <td>同一采购货号重复</td>
+              <td><code>=COUNTIF(T_PUR[采购匹配键],[@采购匹配键])</code></td>
+              <td>系统会取最新红单内首次出现的采购行，重复时建议人工确认</td>
+            </tr>
+            <tr>
+              <td>银行流水待匹配</td>
+              <td>筛选 <code>银行流水状态 = 待匹配</code></td>
+              <td>检查账户名称、对方户名、直播日期是否能桥接红单货款</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="success">
+          最低交付校验：未提取货号、未匹配采购、未匹配货款三张异常表都要能解释；汇总透视的实收 GMV 和系统汇总页同条件金额应一致。
+        </div>
+      </section>
+
+      <section id="appendix">
+        <h2>字段与口径附录</h2>
+
+        <h3>系统明细导出核心字段</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>含义</th>
+              <th>来源</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>商品编码</td>
+              <td>动账商品名称提取出来的货号</td>
+              <td>系统提取结果</td>
+            </tr>
+            <tr>
+              <td>大商家名称</td>
+              <td>通过货号命中的红单采购商家</td>
+              <td>红单采购</td>
+            </tr>
+            <tr>
+              <td>收款商家</td>
+              <td>通过采购场次命中的红单货款收款商家</td>
+              <td>红单货款</td>
+            </tr>
+            <tr>
+              <td>直播款</td>
+              <td>实收 GMV 的 70%</td>
+              <td>动账计算</td>
+            </tr>
+            <tr>
+              <td>匹配状态</td>
+              <td>货号、采购、货款匹配结果</td>
+              <td>商家对账 matcher</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>系统汇总导出核心字段</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>计算口径</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>实收GMV</td>
+              <td>匹配明细的 GMV 求和</td>
+            </tr>
+            <tr>
+              <td>应付商家净额</td>
+              <td>匹配明细的直播款求和</td>
+            </tr>
+            <tr>
+              <td>应付货款余额</td>
+              <td>应付商家净额 + 期初余额 - 冲减业务费用 - 其他冲减金额</td>
+            </tr>
+            <tr>
+              <td>未付流水</td>
+              <td>应付货款余额 - 已付流水</td>
+            </tr>
+            <tr>
+              <td>银行付款差</td>
+              <td>未付流水 - 银行流水汇总</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>容易混淆的口径</h3>
+        <ul>
+          <li><code>大商家名称</code> 来自红单采购的 <code>商家</code>，用于说明货号归属。</li>
+          <li><code>收款商家</code> 来自红单货款，用于最终收款主体和银行流水校验。</li>
+          <li>系统汇总时的 <code>我方主体</code> 优先使用动账明细里的 <code>商户主体名称</code>，没有时才退回结算主体或店铺名。</li>
+          <li><span class="critical">采购匹配使用货号；货款匹配使用采购行上的 <code>商家 + 直播日期 + 直播间</code>。</span></li>
+          <li>银行流水只纳入付款流出，不把收入或冲正类流水计入银行付款汇总。</li>
+        </ul>
+
+        <p class="print-note">建议保存为 PDF 时使用浏览器打印，纸张方向选择横向，可保留公式和表格宽度。</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

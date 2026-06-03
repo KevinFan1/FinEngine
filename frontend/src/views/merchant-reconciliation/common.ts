@@ -10,6 +10,10 @@ export function selectedMonthParts(month: string | null | undefined) {
     return { accounting_year: year, accounting_month: monthValue };
 }
 
+export function hasMonthSelectionChanged(previousMonth: string | null | undefined, nextMonth: string | null | undefined) {
+    return String(previousMonth || "") !== String(nextMonth || "");
+}
+
 export function formatMonth(year?: number | null, month?: number | null) {
     if (!year || !month) return "-";
     return `${year}-${String(month).padStart(2, "0")}`;
@@ -26,6 +30,19 @@ export function formatAmount(value: string | number | null | undefined) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     });
+}
+
+export function formatPercent(value: string | number | null | undefined) {
+    const rawValue = String(value ?? "").trim();
+    if (!rawValue) return "-";
+    const hasPercentSign = rawValue.includes("%");
+    const numericValue = Number(rawValue.replace(/%/g, "").replace(/,/g, ""));
+    if (!Number.isFinite(numericValue)) return rawValue;
+    const percentValue = hasPercentSign || Math.abs(numericValue) > 1 ? numericValue : numericValue * 100;
+    return `${percentValue.toLocaleString("zh-CN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    })}%`;
 }
 
 export function formatBytes(size: number | null | undefined) {

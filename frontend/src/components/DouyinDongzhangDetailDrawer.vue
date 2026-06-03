@@ -272,7 +272,6 @@ const BUSINESS_COLUMN_DEFS: DetailColumnDef[] = [
     { key: "bic", label: "BIC", kind: "money", prop: "bic", width: 110, defaultVisible: true },
     { key: "insurance_fee", label: "运费险", kind: "money", prop: "insurance_fee", width: 110, defaultVisible: true },
     { key: "major_merchant_name", label: "大商家名称", kind: "text", prop: "major_merchant_name", width: 160, tooltip: true, defaultVisible: true },
-    { key: "merchant_receipt_subject", label: "商家收款主体", kind: "text", prop: "merchant_receipt_subject", width: 180, tooltip: true, defaultVisible: true },
     { key: "receipt_merchant", label: "收款商家", kind: "text", prop: "receipt_merchant", width: 160, tooltip: true, defaultVisible: true },
     { key: "allocated_bic", label: "分摊BIC", kind: "money", prop: "allocated_bic", width: 120, defaultVisible: true },
     { key: "allocated_insurance_fee", label: "分摊运费险", kind: "money", prop: "allocated_insurance_fee", width: 130, defaultVisible: true },

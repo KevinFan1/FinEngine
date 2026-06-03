@@ -259,7 +259,7 @@ class MerchantBankFlowRowOut(BaseModel):
     account_no: str = ""
     account_name: str = ""
     transaction_date: date | None = None
-    transaction_time: datetime | None = None
+    transaction_time: str = ""
     debit_amount: Decimal = Decimal("0")
     credit_amount: Decimal = Decimal("0")
     flow_amount: Decimal = Decimal("0")
@@ -273,6 +273,15 @@ class MerchantBankFlowRowOut(BaseModel):
     live_date: str = ""
     transaction_flow_no: str = ""
     created_at: datetime
+
+    @field_validator("transaction_time", mode="before")
+    @classmethod
+    def validate_transaction_time(cls, value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        return str(value).strip()
 
     class Config:
         from_attributes = True

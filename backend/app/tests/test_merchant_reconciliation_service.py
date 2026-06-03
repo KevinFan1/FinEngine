@@ -7,6 +7,9 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 from app.models.merchant_reconciliation import MerchantOpeningBalance, MerchantRedSheetPayment, MerchantRedSheetPurchase
+from app.services.merchant_reconciliation_exporter import MerchantReconciliationExporter
+from app.services.merchant_reconciliation_matcher import MerchantReconciliationMatcher
+from app.services.merchant_reconciliation_summary import MerchantReconciliationSummaryBuilder
 from app.services.merchant_reconciliation_service import (
     PAYMENT_HEADERS,
     PURCHASE_HEADERS,
@@ -15,6 +18,233 @@ from app.services.merchant_reconciliation_service import (
     _RedSheetContext,
 )
 from app.utils.live_code import extract_live_code
+
+
+def test_summary_builder_refreshes_bank_statuses() -> None:
+    row = MerchantReconciliationSummaryBuilder.empty_summary_row(
+        org_id=2,
+        org_name="组织A",
+        accounting_year=2026,
+        accounting_month=4,
+        our_subject="我方主体",
+        receipt_subject="收款商家",
+        adjustment={"paid_flow_amount": Decimal("70.00")},
+    )
+    row["merchant_payable_net_amount"] = Decimal("100.00")
+    row["opening_balance"] = Decimal("10.00")
+    row["business_fee_deduction"] = Decimal("5.00")
+    row["other_deduction_amount"] = Decimal("2.00")
+    row["bank_flow_amount"] = Decimal("33.00")
+
+    MerchantReconciliationSummaryBuilder.refresh_summary_flow_amounts(row)
+
+    assert row["payable_goods_balance"] == Decimal("103.00")
+    assert row["unpaid_flow_amount"] == Decimal("33.00")
+    assert row["bank_payment_diff"] == Decimal("0.00")
+    assert row["bank_status"] == "matched"
+
+
+def test_summary_builder_allocates_money_by_weight_with_rounding_remainder() -> None:
+    allocations = MerchantReconciliationSummaryBuilder.allocate_money_by_weight(
+        Decimal("100.00"),
+        [
+            (("2", "主体A", "商家A"), Decimal("1")),
+            (("2", "主体B", "商家B"), Decimal("2")),
+            (("2", "主体C", "商家C"), Decimal("3")),
+        ],
+    )
+
+    assert allocations[("2", "主体A", "商家A")] == Decimal("16.67")
+    assert allocations[("2", "主体B", "商家B")] == Decimal("33.33")
+    assert allocations[("2", "主体C", "商家C")] == Decimal("50.00")
+    assert sum(allocations.values(), Decimal("0.00")) == Decimal("100.00")
+
+
+def test_exporter_formats_money_dates_and_datetimes() -> None:
+    assert MerchantReconciliationExporter.format_export_value(Decimal("12.30"), money=True) == 12.3
+    assert MerchantReconciliationExporter.format_export_value(datetime(2026, 4, 1, 9, 8, 7)) == "2026-04-01 09:08:07"
+
+
+def test_bank_flow_row_payload_formats_transaction_time_as_display_text() -> None:
+    row = SimpleNamespace(
+        id=1,
+        bank_flow_file_id=2,
+        org_id=3,
+        accounting_period=202604,
+        source_row_number=4,
+        bank_name="企业网银",
+        account_no="6222",
+        account_name="账户A",
+        transaction_date=None,
+        transaction_time=datetime(2026, 4, 1, 10, 0, 1),
+        debit_amount=Decimal("10.00"),
+        credit_amount=Decimal("0.00"),
+        flow_amount=Decimal("10.00"),
+        balance=Decimal("100.00"),
+        counterparty_account_no="9555",
+        counterparty_name="对方A",
+        counterparty_bank="银行A",
+        summary="转账",
+        purpose="直播款",
+        remark="",
+        live_date="4月1日",
+        transaction_flow_no="flow-1",
+        created_at=datetime(2026, 4, 1, 10, 0, 2),
+    )
+
+    payload = MerchantReconciliationService._bank_flow_row_payload(row, org_name="组织A")
+
+    assert payload["transaction_time"] == "2026-04-01 10:00:01"
+
+
+def test_detail_export_workbook_keeps_single_receipt_merchant_column() -> None:
+    buffer = MerchantReconciliationService._build_detail_workbook(
+        [
+            {
+                "org_name": "组织A",
+                "shop_name": "店铺A",
+                "transaction_time": "2026-04-01 10:00:00",
+                "transaction_flow_no": "flow-1",
+                "transaction_direction": "入账",
+                "transaction_amount": Decimal("100.00"),
+                "transaction_scene": "订单结算",
+                "sub_order_no": "sub-1",
+                "order_no": "order-1",
+                "order_time": "2026-04-01 09:00:00",
+                "product_id": "prod-1",
+                "product_code": "CAN123",
+                "product_name": "商品A",
+                "author_name": "达人A",
+                "gmv": Decimal("70.00"),
+                "allocated_bic": Decimal("3.00"),
+                "allocated_insurance_fee": Decimal("1.00"),
+                "live_amount": Decimal("49.00"),
+                "major_merchant_name": "大商家A",
+                "receipt_merchant": "收款商家A",
+                "live_room": "直播间A",
+                "live_date_text": "4月1日",
+                "match_status": "matched",
+                "match_error": "",
+            }
+        ]
+    )
+    workbook = load_workbook(buffer, read_only=True)
+    worksheet = workbook["商家对账明细"]
+    headers = [cell for cell in next(worksheet.iter_rows(values_only=True))]
+    values = [cell for cell in next(worksheet.iter_rows(min_row=2, max_row=2, values_only=True))]
+
+    assert "收款商家" in headers
+    assert "商家收款主体" not in headers
+    assert values[headers.index("收款商家")] == "收款商家A"
+
+
+def test_export_workbooks_use_chinese_status_labels() -> None:
+    detail_buffer = MerchantReconciliationService._build_detail_workbook(
+        [
+            {
+                "shop_name": "店铺A",
+                "transaction_flow_no": "flow-1",
+                "receipt_merchant": "收款商家A",
+                "match_status": "matched",
+            },
+            {
+                "shop_name": "店铺A",
+                "transaction_flow_no": "flow-2",
+                "receipt_merchant": "收款商家A",
+                "match_status": "unmatched",
+            },
+        ]
+    )
+    detail_workbook = load_workbook(detail_buffer, read_only=True)
+    detail_sheet = detail_workbook["商家对账明细"]
+    detail_headers = [cell for cell in next(detail_sheet.iter_rows(values_only=True))]
+    match_status_index = detail_headers.index("匹配状态")
+    detail_values = [
+        row[match_status_index]
+        for row in detail_sheet.iter_rows(min_row=2, max_row=3, values_only=True)
+    ]
+
+    summary_buffer = MerchantReconciliationService._build_summary_workbook(
+        [
+            {
+                "org_name": "组织A",
+                "accounting_date": "2026-04",
+                "our_subject": "我方主体A",
+                "merchant_receipt_subject": "收款商家A",
+                "bank_status": "diff",
+            },
+            {
+                "org_name": "组织A",
+                "accounting_date": "2026-04",
+                "our_subject": "我方主体B",
+                "merchant_receipt_subject": "收款商家B",
+                "bank_status": "pending",
+            },
+        ]
+    )
+    summary_workbook = load_workbook(summary_buffer, read_only=True)
+    summary_sheet = summary_workbook["商家对账汇总"]
+    summary_headers = [cell for cell in next(summary_sheet.iter_rows(values_only=True))]
+    bank_status_index = summary_headers.index("银行流水状态")
+    summary_values = [
+        row[bank_status_index]
+        for row in summary_sheet.iter_rows(min_row=2, max_row=3, values_only=True)
+    ]
+
+    assert detail_values == ["已匹配", "未匹配"]
+    assert summary_values == ["有差异", "待匹配"]
+
+
+def test_summary_bundle_workbook_includes_related_detail_sheets(tmp_path) -> None:
+    output_path = tmp_path / "merchant-summary.xlsx"
+
+    row_count = MerchantReconciliationService._save_summary_bundle_workbook(
+        [
+            {
+                "org_name": "组织A",
+                "accounting_date": "2026-04",
+                "our_subject": "我方主体A",
+                "merchant_receipt_subject": "收款商家A",
+                "gmv": Decimal("100.00"),
+                "merchant_payable_net_amount": Decimal("70.00"),
+                "opening_balance": Decimal("10.00"),
+                "business_fee_deduction": Decimal("3.00"),
+                "other_deduction_amount": Decimal("2.00"),
+                "payable_goods_balance": Decimal("75.00"),
+                "paid_flow_amount": Decimal("20.00"),
+                "unpaid_flow_amount": Decimal("55.00"),
+                "bank_flow_amount": Decimal("20.00"),
+                "bank_payment_diff": Decimal("0.00"),
+                "bank_status": "matched",
+            }
+        ],
+        output_path=output_path,
+        detail_rows=[
+            {
+                "shop_name": "店铺A",
+                "transaction_flow_no": "flow-1",
+                "receipt_merchant": "收款商家A",
+                "gmv": Decimal("100.00"),
+                "live_amount": Decimal("70.00"),
+            }
+        ],
+        payment_rows=[{"shop_name": "店铺A", "merchant": "商家A", "payable_goods_amount": Decimal("75.00")}],
+        purchase_rows=[{"shop_name": "店铺A", "merchant": "商家A", "borrow_amount": Decimal("100.00")}],
+        bank_flow_rows=[{"bank_name": "企业网银", "flow_amount": Decimal("20.00")}],
+    )
+
+    workbook = load_workbook(output_path, read_only=True)
+
+    assert row_count == 1
+    assert workbook.sheetnames == ["商家对账汇总", "动账明细", "红单货款", "红单采购", "银行流水"]
+
+
+def test_matcher_split_product_codes_supports_plus_chains() -> None:
+    assert MerchantReconciliationMatcher.split_product_codes("CAN123+CAN456,T20260001") == [
+        "CAN123",
+        "CAN456",
+        "T20260001",
+    ]
 
 
 def test_red_sheet_template_uses_fixed_month_sheet_names_and_headers() -> None:
@@ -186,7 +416,7 @@ def test_parse_payment_sheet_rejects_unknown_settlement_status() -> None:
     worksheet.append(PAYMENT_HEADERS)
     row = [""] * len(PAYMENT_HEADERS)
     row[PAYMENT_HEADERS.index("直播间")] = "直播间A"
-    row[PAYMENT_HEADERS.index("结算状态")] = "未核对"
+    row[PAYMENT_HEADERS.index("结算状态")] = "未知状态"
     worksheet.append(row)
 
     with pytest.raises(ValueError, match="结算状态必须是"):
@@ -620,6 +850,67 @@ def test_filter_summary_rows_by_bank_status() -> None:
     filtered = MerchantReconciliationService._filter_summary_rows_by_bank_status(rows, bank_status="matched")
 
     assert filtered == [{"bank_status": "matched", "key": "a"}]
+
+
+def test_summary_drilldown_details_filters_by_summary_group(monkeypatch) -> None:
+    async def fake_load_reconciliation_rows(*_args, **_kwargs):
+        return [
+            {
+                "id": 1,
+                "org_id": 2,
+                "merchant_name": "动账商家A",
+                "receipt_merchant": "收款商家A",
+                "red_sheet_payment_id": 11,
+                "match_status": "matched",
+            },
+            {
+                "id": 2,
+                "org_id": 2,
+                "merchant_name": "动账商家B",
+                "receipt_merchant": "收款商家A",
+                "red_sheet_payment_id": 11,
+                "match_status": "matched",
+            },
+            {
+                "id": 3,
+                "org_id": 2,
+                "merchant_name": "动账商家A",
+                "receipt_merchant": "收款商家A",
+                "red_sheet_payment_id": 11,
+                "match_status": "unmatched",
+            },
+            {
+                "id": 4,
+                "org_id": 2,
+                "merchant_name": "动账商家A",
+                "receipt_merchant": "收款商家A",
+                "red_sheet_payment_id": 99,
+                "match_status": "matched",
+            },
+        ], 3, SimpleNamespace()
+
+    async def fake_load_summary_drilldown_payment_ids(*_args, **_kwargs):
+        return [11]
+
+    monkeypatch.setattr(MerchantReconciliationService, "_load_reconciliation_rows", fake_load_reconciliation_rows)
+    monkeypatch.setattr(MerchantReconciliationService, "_load_summary_drilldown_payment_ids", fake_load_summary_drilldown_payment_ids)
+
+    rows, total = asyncio.run(
+        MerchantReconciliationService.list_summary_drilldown_details(
+            None,
+            user=SimpleNamespace(role="admin", org_id=2),
+            accounting_year=2026,
+            accounting_month=4,
+            summary_org_id=2,
+            our_subject="动账商家A",
+            merchant_receipt_subject="收款商家A",
+            page=1,
+            page_size=20,
+        )
+    )
+
+    assert total == 1
+    assert [row["id"] for row in rows] == [1]
 
 
 def test_allocate_payment_adjustments_by_matched_detail_weight() -> None:
