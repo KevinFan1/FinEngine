@@ -29,6 +29,7 @@ class ReconciliationLoadContext:
     total_bic: Decimal
     total_insurance: Decimal
     red_sheet_context: RedSheetContext
+    net_rate: Decimal = Decimal("0.700000")
 
 
 @dataclass(frozen=True)
@@ -131,7 +132,7 @@ class MerchantReconciliationMatcher:
             red_sheet_payment_id=int(payment.id) if payment is not None and payment.id is not None else None,
             allocated_bic=_allocation_amount(gmv, load_context.total_gmv, load_context.total_bic),
             allocated_insurance_fee=_allocation_amount(gmv, load_context.total_gmv, load_context.total_insurance),
-            live_amount=(gmv * Decimal("0.7")).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP),
+            live_amount=(gmv * safe_decimal(load_context.net_rate)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP),
             match_status="matched" if not errors else "unmatched",
             match_error="；".join(errors),
         )

@@ -318,6 +318,10 @@ class MerchantReconciliationService:
         return percent.normalize()
 
     @staticmethod
+    def _net_amount_from_gmv(gmv: object, net_rate: object) -> Decimal:
+        return (safe_decimal(gmv) * safe_decimal(net_rate)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+    @staticmethod
     def build_red_sheet_template(*, accounting_year: int, accounting_month: int) -> io.BytesIO:
         workbook = Workbook()
         payment_sheet = workbook.active
@@ -2057,7 +2061,6 @@ class MerchantReconciliationService:
                     product_code_expr.label("product_code"),
                     DouyinDongzhangDetail.merchant_name,
                     func.coalesce(func.sum(DouyinDongzhangDetail.gmv), 0).label("gmv"),
-                    func.coalesce(func.sum(func.round(DouyinDongzhangDetail.gmv * Decimal("0.7"), 2)), 0).label("live_amount"),
                     func.count(DouyinDongzhangDetail.id).label("row_count"),
                 )
                 .outerjoin(Organization, Organization.id == DouyinDongzhangDetail.org_id)
@@ -2081,6 +2084,11 @@ class MerchantReconciliationService:
         if not grouped_detail_rows:
             return []
 
+        net_rate_map = await MerchantReconciliationService._load_net_rate_map(
+            db,
+            org_ids=[row.org_id for row in grouped_detail_rows if row.org_id is not None],
+            accounting_period=accounting_period,
+        )
         red_sheet_contexts: dict[tuple[int, int], _RedSheetContext] = {}
         for row in grouped_detail_rows:
             if row.org_id is None or row.shop_id is None:
@@ -2115,6 +2123,7 @@ class MerchantReconciliationService:
             payment = red_sheet_context.payments_by_key.get((_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room)))
             if payment is None or not _normalize_text(payment.receipt_merchant):
                 continue
+            net_rate = net_rate_map.get(int(row.org_id), MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE)
             rows.append(
                 {
                     "org_id": int(row.org_id),
@@ -2125,7 +2134,7 @@ class MerchantReconciliationService:
                     "merchant_receipt_subject": payment.receipt_subject,
                     "receipt_merchant": payment.receipt_merchant,
                     "gmv": safe_decimal(row.gmv),
-                    "live_amount": safe_decimal(row.live_amount),
+                    "live_amount": MerchantReconciliationService._net_amount_from_gmv(row.gmv, net_rate),
                     "row_count": int(row.row_count or 0),
                     "red_sheet_payment_id": int(payment.id) if payment.id is not None else None,
                 }
@@ -3126,6 +3135,11 @@ class MerchantReconciliationService:
 
         contexts: dict[int, _ReconciliationLoadContext] = {}
         accounting_period = _period(accounting_year, accounting_month)
+        net_rate_map = await MerchantReconciliationService._load_net_rate_map(
+            db,
+            org_ids=[row[2] for row in summary_rows if row[2] is not None],
+            accounting_period=accounting_period,
+        )
         for detail_shop_id, total_gmv, detail_org_id in summary_rows:
             if detail_shop_id is None:
                 continue
@@ -3149,6 +3163,7 @@ class MerchantReconciliationService:
                 total_bic=total_bic,
                 total_insurance=total_insurance,
                 red_sheet_context=red_sheet_context,
+                net_rate=net_rate_map.get(resolved_org_id, MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE),
             )
         return contexts
 
@@ -3160,6 +3175,7 @@ class MerchantReconciliationService:
             total_bic=ZERO_MONEY,
             total_insurance=ZERO_MONEY,
             red_sheet_context=_RedSheetContext(purchases_by_code={}, payments_by_key={}),
+            net_rate=MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE,
         )
 
     @staticmethod
@@ -3243,8 +3259,21 @@ class MerchantReconciliationService:
             ).append(detail)
 
         context_by_key: dict[tuple[int, int, int, int, int, int], _ReconciliationLoadContext] = {}
+        net_rate_by_org_period: dict[tuple[int, int], Decimal] = {}
         for (org_id, shop_id, source_year, source_month, accounting_year, accounting_month), group in detail_by_shop_period.items():
             _ = group
+            source_period = _period(source_year, source_month)
+            net_rate_key = (org_id, source_period)
+            if net_rate_key not in net_rate_by_org_period:
+                period_net_rates = await MerchantReconciliationService._load_net_rate_map(
+                    db,
+                    org_ids=[org_id],
+                    accounting_period=source_period,
+                )
+                net_rate_by_org_period[net_rate_key] = period_net_rates.get(
+                    org_id,
+                    MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE,
+                )
             total_gmv = await MerchantReconciliationService._load_douyin_detail_total_gmv(
                 db,
                 org_id=org_id,
@@ -3275,6 +3304,7 @@ class MerchantReconciliationService:
                 total_bic=total_bic,
                 total_insurance=total_insurance,
                 red_sheet_context=red_sheet_context,
+                net_rate=net_rate_by_org_period[net_rate_key],
             )
 
         return {

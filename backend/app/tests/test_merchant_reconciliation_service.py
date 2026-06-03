@@ -67,6 +67,11 @@ def test_net_rate_default_constant_is_70_percent() -> None:
     assert MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE == Decimal("0.700000")
 
 
+def test_net_amount_from_gmv_uses_configured_rate() -> None:
+    assert MerchantReconciliationService._net_amount_from_gmv(Decimal("100.00"), Decimal("0.655000")) == Decimal("65.50")
+    assert MerchantReconciliationService._net_amount_from_gmv(Decimal("33.33"), Decimal("0.700000")) == Decimal("23.33")
+
+
 def test_summary_builder_refreshes_bank_statuses() -> None:
     row = MerchantReconciliationSummaryBuilder.empty_summary_row(
         org_id=2,
