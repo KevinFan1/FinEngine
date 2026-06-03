@@ -94,6 +94,8 @@ export interface MerchantReconciliationDetailPage extends PaginatedData<Merchant
     stats: MerchantReconciliationStats;
 }
 
+export type MerchantReconciliationUnmatchedPage = MerchantReconciliationDetailPage;
+
 export interface MerchantRedSheetPayment {
     id: number;
     red_sheet_id: number;
@@ -156,6 +158,7 @@ export interface MerchantRedSheetPurchase {
     loan_return_date?: string | null;
     live_code: string;
     normalized_live_code: string;
+    product_code: string;
     match_status: string;
     remark: string;
     source_shop_name: string;
@@ -284,6 +287,41 @@ export interface MerchantOpeningBalanceBatchResult {
     total_count: number;
 }
 
+export interface MerchantNetRateSetting {
+    id?: number | null;
+    org_id: number;
+    org_name?: string | null;
+    platform_code: string;
+    shop_id?: number | null;
+    accounting_year: number;
+    accounting_month: number;
+    accounting_period: number;
+    net_rate: string;
+    net_rate_percent: string;
+    remark: string;
+    is_default: boolean;
+    updated_at?: string | null;
+}
+
+export interface MerchantNetRateSettingUpsertItem {
+    org_id: number;
+    net_rate_percent: number | string;
+    remark?: string;
+}
+
+export interface MerchantNetRateSettingBatchUpsert {
+    accounting_year: number;
+    accounting_month: number;
+    platform_code?: string;
+    items: MerchantNetRateSettingUpsertItem[];
+}
+
+export interface MerchantNetRateSettingBatchResult {
+    created_count: number;
+    updated_count: number;
+    total_count: number;
+}
+
 export interface MerchantRedSheetListParams {
     page?: number;
     page_size?: number;
@@ -304,6 +342,16 @@ export interface MerchantReconciliationDetailParams {
     keyword?: string;
     match_status?: string;
     ids?: string;
+}
+
+export interface MerchantReconciliationUnmatchedParams {
+    page?: number;
+    page_size?: number;
+    org_id?: number | string;
+    accounting_year: number;
+    accounting_month: number;
+    shop_id?: number;
+    keyword?: string;
 }
 
 export interface MerchantRedSheetDetailParams {
@@ -374,6 +422,14 @@ export function exportMerchantReconciliationDetails(params: MerchantReconciliati
     return downloadBlob("/merchant-reconciliation/details/export", params);
 }
 
+export function listMerchantReconciliationUnmatchedDetails(params: MerchantReconciliationUnmatchedParams) {
+    return get<MerchantReconciliationUnmatchedPage>("/merchant-reconciliation/unmatched-details", params);
+}
+
+export function exportMerchantReconciliationUnmatchedDetails(params: Omit<MerchantReconciliationUnmatchedParams, "page" | "page_size">) {
+    return downloadBlob("/merchant-reconciliation/unmatched-details/export", params);
+}
+
 export function listMerchantRedSheetPayments(params: MerchantRedSheetDetailParams) {
     return get<PaginatedData<MerchantRedSheetPayment>>("/merchant-reconciliation/payments", params);
 }
@@ -412,4 +468,12 @@ export function listMerchantOpeningBalances(params: Omit<MerchantReconciliationS
 
 export function upsertMerchantOpeningBalances(data: MerchantOpeningBalanceBatchUpsert) {
     return post<MerchantOpeningBalanceBatchResult>("/merchant-reconciliation/summary/opening-balances", data);
+}
+
+export function listMerchantNetRateSettings(params: Omit<MerchantReconciliationSummaryParams, "page" | "page_size" | "shop_id" | "keyword" | "bank_status"> & { platform_code?: string }) {
+    return get<MerchantNetRateSetting[]>("/merchant-reconciliation/net-rate-settings", params);
+}
+
+export function upsertMerchantNetRateSettings(data: MerchantNetRateSettingBatchUpsert) {
+    return post<MerchantNetRateSettingBatchResult>("/merchant-reconciliation/net-rate-settings", data);
 }

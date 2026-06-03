@@ -43,6 +43,7 @@
                 </el-table-column>
                 <el-table-column prop="live_code" label="直播编号" width="150" show-overflow-tooltip />
                 <el-table-column prop="normalized_live_code" label="新直播编码" width="150" show-overflow-tooltip />
+                <el-table-column prop="product_code" label="商品编码" width="150" show-overflow-tooltip />
                 <el-table-column prop="loan_return_order_no" label="借/退货单号" width="160" show-overflow-tooltip />
                 <el-table-column prop="loan_return_date" label="借/退货日期" width="120">
                     <template #default="{ row }">{{ formatRawDate(row.loan_return_date) }}</template>

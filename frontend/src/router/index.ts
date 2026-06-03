@@ -194,6 +194,12 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "对账任务", icon: "List" },
             },
             {
+                path: "merchant-reconciliation/unmatched",
+                name: "MerchantReconciliationUnmatched",
+                component: () => import("@/views/merchant-reconciliation/unmatched.vue"),
+                meta: { title: "未匹配维护", icon: "Warning" },
+            },
+            {
                 path: "merchant-reconciliation/payments",
                 name: "MerchantReconciliationPayments",
                 component: () => import("@/views/merchant-reconciliation/payments.vue"),
@@ -216,6 +222,12 @@ const routes: RouteRecordRaw[] = [
                 name: "MerchantReconciliationSummary",
                 component: () => import("@/views/merchant-reconciliation/summary.vue"),
                 meta: { title: "汇总数据", icon: "DataAnalysis" },
+            },
+            {
+                path: "merchant-reconciliation/net-rates",
+                name: "MerchantReconciliationNetRates",
+                component: () => import("@/views/merchant-reconciliation/net-rates.vue"),
+                meta: { title: "净额比例", icon: "Setting" },
             },
             {
                 path: "audit-logs",
