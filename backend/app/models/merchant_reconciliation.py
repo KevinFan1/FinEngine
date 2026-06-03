@@ -284,3 +284,31 @@ class MerchantOpeningBalance(SoftDeleteMixin, Base):
     updated_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=True, comment="最近修改用户ID")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
+
+
+class MerchantNetRateSetting(SoftDeleteMixin, Base):
+    __tablename__ = "fin_merchant_net_rate_settings"
+    __table_args__ = (
+        Index(
+            "idx_fin_merchant_net_rate_setting_lookup",
+            "org_id",
+            "platform_code",
+            "accounting_period",
+            postgresql_where=text("is_deleted = false"),
+        ),
+        {"comment": "商家对账净额比例维护表"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
+    org_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_organizations.id"), nullable=False, comment="所属组织ID")
+    platform_code: Mapped[str] = mapped_column(String(50), nullable=False, default="douyin", comment="平台编码")
+    shop_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_shops.id"), nullable=True, comment="店铺ID，预留店铺级比例")
+    accounting_year: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="核算年份")
+    accounting_month: Mapped[int] = mapped_column(SmallInteger, nullable=False, comment="核算月份")
+    accounting_period: Mapped[int] = mapped_column(Integer, nullable=False, comment="核算年月 YYYYMM")
+    net_rate: Mapped[Decimal] = mapped_column(NUMERIC(8, 6), nullable=False, default=Decimal("0.700000"), comment="应付商家净额比例，小数形式")
+    remark: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="备注")
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=False, comment="创建用户ID")
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("fin_users.id"), nullable=True, comment="最近修改用户ID")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")

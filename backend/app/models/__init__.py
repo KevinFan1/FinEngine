@@ -8,6 +8,7 @@ from app.models.file_spec import FileSpec
 from app.models.merchant_reconciliation import (
     MerchantBankFlowFile,
     MerchantBankFlowRow,
+    MerchantNetRateSetting,
     MerchantOpeningBalance,
     MerchantRedSheet,
     MerchantRedSheetPayment,
@@ -52,6 +53,7 @@ __all__ = [
     "MerchantBankFlowFile",
     "MerchantBankFlowRow",
     "MerchantOpeningBalance",
+    "MerchantNetRateSetting",
     "Organization",
     "User",
     "UploadBatch",

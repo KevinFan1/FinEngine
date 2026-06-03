@@ -371,3 +371,51 @@ class MerchantOpeningBalanceBatchResult(BaseModel):
     created_count: int = 0
     updated_count: int = 0
     total_count: int = 0
+
+
+class MerchantNetRateSettingOut(BaseModel):
+    id: int | None = None
+    org_id: int
+    org_name: str | None = None
+    platform_code: str = "douyin"
+    shop_id: int | None = None
+    accounting_year: int
+    accounting_month: int
+    accounting_period: int
+    net_rate: Decimal = Decimal("0.700000")
+    net_rate_percent: Decimal = Decimal("70")
+    remark: str = ""
+    is_default: bool = True
+    updated_at: datetime | None = None
+
+
+class MerchantNetRateSettingUpsertItem(BaseModel):
+    org_id: int = Field(..., ge=1)
+    net_rate_percent: Decimal = Field(..., ge=Decimal("0"), le=Decimal("100"))
+    remark: str | None = Field("", max_length=2000)
+
+    @field_validator("remark")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str:
+        return value.strip() if value else ""
+
+
+class MerchantNetRateSettingBatchUpsert(BaseModel):
+    accounting_year: int = Field(..., ge=2000, le=2100)
+    accounting_month: int = Field(..., ge=1, le=12)
+    platform_code: str = Field("douyin", min_length=1, max_length=50)
+    items: list[MerchantNetRateSettingUpsertItem] = Field(default_factory=list)
+
+    @field_validator("platform_code")
+    @classmethod
+    def strip_platform_code(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
+
+
+class MerchantNetRateSettingBatchResult(BaseModel):
+    created_count: int = 0
+    updated_count: int = 0
+    total_count: int = 0

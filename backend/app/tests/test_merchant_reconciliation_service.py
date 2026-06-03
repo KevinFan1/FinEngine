@@ -5,8 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 from openpyxl import Workbook, load_workbook
+from pydantic import ValidationError
 
-from app.models.merchant_reconciliation import MerchantOpeningBalance, MerchantRedSheetPayment, MerchantRedSheetPurchase
+from app.models.merchant_reconciliation import MerchantNetRateSetting, MerchantOpeningBalance, MerchantRedSheetPayment, MerchantRedSheetPurchase
+from app.schemas.merchant_reconciliation import MerchantNetRateSettingBatchUpsert, MerchantNetRateSettingUpsertItem
 from app.services.merchant_reconciliation_exporter import MerchantReconciliationExporter
 from app.services.merchant_reconciliation_matcher import MerchantReconciliationMatcher
 from app.services.merchant_reconciliation_summary import MerchantReconciliationSummaryBuilder
@@ -18,6 +20,41 @@ from app.services.merchant_reconciliation_service import (
     _RedSheetContext,
 )
 from app.utils.live_code import extract_live_code
+
+
+def test_merchant_net_rate_setting_model_uses_fraction_rate() -> None:
+    setting = MerchantNetRateSetting(
+        org_id=2,
+        platform_code="douyin",
+        accounting_year=2026,
+        accounting_month=6,
+        accounting_period=202606,
+        net_rate=Decimal("0.650000"),
+        remark="六月比例",
+        created_by=1,
+    )
+
+    assert setting.org_id == 2
+    assert setting.platform_code == "douyin"
+    assert setting.shop_id is None
+    assert setting.accounting_period == 202606
+    assert setting.net_rate == Decimal("0.650000")
+
+
+def test_net_rate_upsert_schema_accepts_percent_and_rejects_out_of_range() -> None:
+    payload = MerchantNetRateSettingBatchUpsert(
+        accounting_year=2026,
+        accounting_month=6,
+        platform_code=" douyin ",
+        items=[MerchantNetRateSettingUpsertItem(org_id=2, net_rate_percent=Decimal("65"), remark=" 六月 ")],
+    )
+
+    assert payload.platform_code == "douyin"
+    assert payload.items[0].net_rate_percent == Decimal("65")
+    assert payload.items[0].remark == "六月"
+
+    with pytest.raises(ValidationError):
+        MerchantNetRateSettingUpsertItem(org_id=2, net_rate_percent=Decimal("101"))
 
 
 def test_summary_builder_refreshes_bank_statuses() -> None:
