@@ -20,6 +20,7 @@ from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
 from app.models.merchant_reconciliation import (
     MerchantBankFlowFile,
     MerchantBankFlowRow,
+    MerchantNetRateSetting,
     MerchantOpeningBalance,
     MerchantRedSheet,
     MerchantRedSheetPayment,
@@ -31,6 +32,8 @@ from app.models.summary import FinancialSummary
 from app.models.user import User
 from app.schemas.merchant_reconciliation import (
     MerchantBankFlowImportResult,
+    MerchantNetRateSettingBatchResult,
+    MerchantNetRateSettingBatchUpsert,
     MerchantOpeningBalanceBatchResult,
     MerchantOpeningBalanceBatchUpsert,
     MerchantReconciliationStatsOut,
@@ -303,6 +306,17 @@ def _money(value: object) -> Decimal:
 
 
 class MerchantReconciliationService:
+    DEFAULT_MERCHANT_NET_RATE = Decimal("0.700000")
+
+    @staticmethod
+    def _net_rate_from_percent(value: object) -> Decimal:
+        return (safe_decimal(value) / Decimal("100")).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _net_rate_percent(value: object) -> Decimal:
+        percent = (safe_decimal(value) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return percent.normalize()
+
     @staticmethod
     def build_red_sheet_template(*, accounting_year: int, accounting_month: int) -> io.BytesIO:
         workbook = Workbook()
@@ -1369,6 +1383,164 @@ class MerchantReconciliationService:
         )
         await db.flush()
         return MerchantOpeningBalanceBatchResult(
+            created_count=created_count,
+            updated_count=updated_count,
+            total_count=created_count + updated_count,
+        )
+
+    @staticmethod
+    async def list_net_rate_settings(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        org_id: str | int | None = None,
+        platform_code: str = "douyin",
+    ) -> list[dict[str, object]]:
+        MerchantReconciliationService._validate_month(accounting_year, accounting_month)
+        accounting_period = _period(accounting_year, accounting_month)
+        platform_code = _normalize_text(platform_code) or "douyin"
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+
+        org_filters = [Organization.is_deleted.is_(False)]
+        if org_ids is not None:
+            if not org_ids:
+                return []
+            org_filters.append(Organization.id.in_(org_ids))
+        org_rows = (
+            await db.execute(
+                select(Organization)
+                .where(*org_filters)
+                .order_by(Organization.name.asc(), Organization.id.asc())
+            )
+        ).scalars().all()
+        if not org_rows:
+            return []
+
+        setting_rows = (
+            await db.execute(
+                select(MerchantNetRateSetting).where(
+                    MerchantNetRateSetting.org_id.in_([int(org.id) for org in org_rows]),
+                    MerchantNetRateSetting.platform_code == platform_code,
+                    MerchantNetRateSetting.accounting_period == accounting_period,
+                    MerchantNetRateSetting.shop_id.is_(None),
+                    MerchantNetRateSetting.is_deleted.is_(False),
+                )
+            )
+        ).scalars().all()
+        setting_by_org = {int(setting.org_id): setting for setting in setting_rows}
+
+        rows: list[dict[str, object]] = []
+        for org in org_rows:
+            setting = setting_by_org.get(int(org.id))
+            net_rate = safe_decimal(
+                setting.net_rate if setting is not None else MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE
+            )
+            rows.append(
+                {
+                    "id": setting.id if setting is not None else None,
+                    "org_id": int(org.id),
+                    "org_name": org.name,
+                    "platform_code": platform_code,
+                    "shop_id": None,
+                    "accounting_year": accounting_year,
+                    "accounting_month": accounting_month,
+                    "accounting_period": accounting_period,
+                    "net_rate": net_rate,
+                    "net_rate_percent": MerchantReconciliationService._net_rate_percent(net_rate),
+                    "remark": safe_str(setting.remark if setting is not None else ""),
+                    "is_default": setting is None,
+                    "updated_at": setting.updated_at if setting is not None else None,
+                }
+            )
+        return rows
+
+    @staticmethod
+    async def upsert_net_rate_settings(
+        db: AsyncSession,
+        *,
+        data: MerchantNetRateSettingBatchUpsert,
+        operator: User,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> MerchantNetRateSettingBatchResult:
+        MerchantReconciliationService._validate_month(data.accounting_year, data.accounting_month)
+        accounting_period = _period(data.accounting_year, data.accounting_month)
+        platform_code = _normalize_text(data.platform_code) or "douyin"
+        allowed_org_ids = resolve_org_ids(user_role=operator.role, user_org_id=operator.org_id)
+
+        deduped_items: dict[int, object] = {}
+        for item in data.items:
+            if allowed_org_ids is not None and item.org_id not in allowed_org_ids:
+                raise ValueError("不能维护其他组织的净额比例")
+            deduped_items[int(item.org_id)] = item
+        if not deduped_items:
+            return MerchantNetRateSettingBatchResult(created_count=0, updated_count=0, total_count=0)
+
+        existing_rows = (
+            await db.execute(
+                select(MerchantNetRateSetting).where(
+                    MerchantNetRateSetting.org_id.in_(sorted(deduped_items)),
+                    MerchantNetRateSetting.platform_code == platform_code,
+                    MerchantNetRateSetting.accounting_period == accounting_period,
+                    MerchantNetRateSetting.shop_id.is_(None),
+                    MerchantNetRateSetting.is_deleted.is_(False),
+                )
+            )
+        ).scalars().all()
+        existing_by_org = {int(row.org_id): row for row in existing_rows}
+
+        created_count = 0
+        updated_count = 0
+        for item_org_id, item in deduped_items.items():
+            net_rate = MerchantReconciliationService._net_rate_from_percent(item.net_rate_percent)
+            existing = existing_by_org.get(item_org_id)
+            if existing is not None:
+                existing.net_rate = net_rate
+                existing.remark = safe_str(item.remark)
+                existing.updated_by = operator.id
+                updated_count += 1
+                continue
+            db.add(
+                MerchantNetRateSetting(
+                    org_id=item_org_id,
+                    platform_code=platform_code,
+                    shop_id=None,
+                    accounting_year=data.accounting_year,
+                    accounting_month=data.accounting_month,
+                    accounting_period=accounting_period,
+                    net_rate=net_rate,
+                    remark=safe_str(item.remark),
+                    created_by=operator.id,
+                    updated_by=operator.id,
+                )
+            )
+            created_count += 1
+
+        await AuditService.log(
+            db,
+            user_id=operator.id,
+            username=operator.username,
+            display_name=operator.display_name,
+            org_id=operator.org_id,
+            module="merchant_reconciliation",
+            action="upsert_net_rate",
+            description=f"维护商家对账净额比例 {data.accounting_year}-{data.accounting_month:02d}，新增 {created_count} 条，更新 {updated_count} 条",
+            target_type="merchant_net_rate_setting",
+            target_name=f"{data.accounting_year}{data.accounting_month:02d}",
+            ip=ip,
+            user_agent=user_agent,
+            new_value={
+                "platform_code": platform_code,
+                "accounting_year": data.accounting_year,
+                "accounting_month": data.accounting_month,
+                "created_count": created_count,
+                "updated_count": updated_count,
+            },
+        )
+        await db.flush()
+        return MerchantNetRateSettingBatchResult(
             created_count=created_count,
             updated_count=updated_count,
             total_count=created_count + updated_count,
@@ -3022,6 +3194,30 @@ class MerchantReconciliationService:
             )
         ).one()
         return safe_decimal(row[0]), safe_decimal(row[1])
+
+    @staticmethod
+    async def _load_net_rate_map(
+        db: AsyncSession,
+        *,
+        org_ids: Iterable[int],
+        accounting_period: int,
+        platform_code: str = "douyin",
+    ) -> dict[int, Decimal]:
+        org_id_values = sorted({int(org_id) for org_id in org_ids if org_id is not None})
+        if not org_id_values:
+            return {}
+        rows = (
+            await db.execute(
+                select(MerchantNetRateSetting).where(
+                    MerchantNetRateSetting.org_id.in_(org_id_values),
+                    MerchantNetRateSetting.platform_code == platform_code,
+                    MerchantNetRateSetting.accounting_period == accounting_period,
+                    MerchantNetRateSetting.shop_id.is_(None),
+                    MerchantNetRateSetting.is_deleted.is_(False),
+                )
+            )
+        ).scalars().all()
+        return {int(row.org_id): safe_decimal(row.net_rate) for row in rows}
 
     @staticmethod
     async def build_detail_derived_field_map(

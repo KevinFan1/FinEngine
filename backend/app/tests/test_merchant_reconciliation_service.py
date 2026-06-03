@@ -57,6 +57,16 @@ def test_net_rate_upsert_schema_accepts_percent_and_rejects_out_of_range() -> No
         MerchantNetRateSettingUpsertItem(org_id=2, net_rate_percent=Decimal("101"))
 
 
+def test_net_rate_helpers_convert_percent_to_fraction() -> None:
+    assert MerchantReconciliationService._net_rate_from_percent(Decimal("65")) == Decimal("0.650000")
+    assert MerchantReconciliationService._net_rate_percent(Decimal("0.655000")) == Decimal("65.5")
+    assert MerchantReconciliationService._net_rate_percent(Decimal("0.700000")) == Decimal("70")
+
+
+def test_net_rate_default_constant_is_70_percent() -> None:
+    assert MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE == Decimal("0.700000")
+
+
 def test_summary_builder_refreshes_bank_statuses() -> None:
     row = MerchantReconciliationSummaryBuilder.empty_summary_row(
         org_id=2,

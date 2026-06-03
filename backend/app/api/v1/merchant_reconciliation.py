@@ -14,6 +14,9 @@ from app.schemas.merchant_reconciliation import (
     MerchantBankFlowFileOut,
     MerchantBankFlowImportResult,
     MerchantBankFlowRowOut,
+    MerchantNetRateSettingBatchResult,
+    MerchantNetRateSettingBatchUpsert,
+    MerchantNetRateSettingOut,
     MerchantOpeningBalanceBatchResult,
     MerchantOpeningBalanceBatchUpsert,
     MerchantOpeningBalanceOut,
@@ -393,6 +396,46 @@ async def upsert_summary_opening_balances(
 ):
     try:
         result = await MerchantReconciliationService.upsert_opening_balances(
+            db,
+            data=body,
+            operator=current_user,
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=result, message="保存完成")
+
+
+@router.get("/net-rate-settings", response_model=ApiResponse[list[MerchantNetRateSettingOut]])
+async def list_net_rate_settings(
+    accounting_year: int = Query(..., ge=2000, le=2100),
+    accounting_month: int = Query(..., ge=1, le=12),
+    org_id: str | None = Query(None),
+    platform_code: str = Query("douyin"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows = await MerchantReconciliationService.list_net_rate_settings(
+        db,
+        user=current_user,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        org_id=org_id,
+        platform_code=platform_code,
+    )
+    return ApiResponse(data=[MerchantNetRateSettingOut(**row) for row in rows])
+
+
+@router.post("/net-rate-settings", response_model=ApiResponse[MerchantNetRateSettingBatchResult])
+async def upsert_net_rate_settings(
+    body: MerchantNetRateSettingBatchUpsert,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        result = await MerchantReconciliationService.upsert_net_rate_settings(
             db,
             data=body,
             operator=current_user,
