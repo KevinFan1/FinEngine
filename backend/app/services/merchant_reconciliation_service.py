@@ -159,11 +159,84 @@ SUMMARY_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("bank_status", "银行流水状态", False),
 )
 
+SUMMARY_PAYMENT_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
+    ("org_name", "组织", False),
+    ("shop_name", "店铺", False),
+    ("accounting_period", "业务年月", False),
+    ("source_row_number", "源行号", False),
+    ("live_room", "直播间", False),
+    ("live_date", "直播日期", False),
+    ("merchant", "商家", False),
+    ("borrow_total_amount", "借货总金额", True),
+    ("return_total_amount", "退货总金额", True),
+    ("business_fee_deduction", "冲减业务费用", True),
+    ("deduction_amount", "冲减金额", True),
+    ("payable_goods_amount", "应付货款金额", True),
+    ("return_rate", "退货率", False),
+    ("settlement_subject", "结算主体", False),
+    ("receipt_subject", "收款主体", False),
+    ("receipt_merchant", "收款商家", False),
+    ("collection_merchant", "回款商家", False),
+    ("is_settled", "是否已结款", False),
+    ("is_collected", "是否已回款", False),
+    ("settlement_status", "结算状态", False),
+    ("paid_amount", "已付", True),
+    ("borrow_minus_return", "借-退", True),
+)
+
+SUMMARY_PURCHASE_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
+    ("org_name", "组织", False),
+    ("shop_name", "店铺", False),
+    ("accounting_period", "业务年月", False),
+    ("source_row_number", "源行号", False),
+    ("live_room", "直播间", False),
+    ("merchant", "商家", False),
+    ("live_date", "直播日期", False),
+    ("loan_return_order_no", "借/退货单号", False),
+    ("live_code", "直播编号", False),
+    ("normalized_live_code", "新直播编码", False),
+    ("product_name", "货品名称", False),
+    ("sale_price", "卖价", True),
+    ("borrow_quantity", "借货数量", True),
+    ("borrow_weight_g", "借货重量g", True),
+    ("borrow_amount", "借货金额", True),
+    ("return_quantity", "退货数量", True),
+    ("return_weight_g", "退货重量g", True),
+    ("return_amount", "退货金额", True),
+    ("remark", "备注", False),
+)
+
+SUMMARY_BANK_FLOW_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
+    ("org_name", "组织", False),
+    ("accounting_period", "业务年月", False),
+    ("source_row_number", "源行号", False),
+    ("bank_name", "银行", False),
+    ("account_name", "账户名称", False),
+    ("transaction_time", "交易时间", False),
+    ("counterparty_name", "对方户名", False),
+    ("debit_amount", "借方发生额/支出金额", True),
+    ("credit_amount", "贷方发生额/收入金额", True),
+    ("flow_amount", "流水净额", True),
+    ("live_date", "直播日期", False),
+    ("purpose", "用途/备注", False),
+    ("summary", "摘要", False),
+    ("transaction_flow_no", "流水号", False),
+)
+
 MONEY_QUANT = Decimal("0.01")
 PAYMENT_SETTLEMENT_STATUSES = ("已核对", "未核对", "已结算", "未结算")
 PAYMENT_SETTLEMENT_STATUS_SET = set(PAYMENT_SETTLEMENT_STATUSES)
 PAYMENT_SUMMARY_SETTLED_STATUS = "已结算"
 MERCHANT_BANK_FLOW_TYPE = "银行流水"
+RECONCILIATION_MATCH_STATUS_LABELS = {
+    "matched": "已匹配",
+    "unmatched": "未匹配",
+}
+SUMMARY_BANK_STATUS_LABELS = {
+    "matched": "已匹配",
+    "diff": "有差异",
+    "pending": "待匹配",
+}
 MERCHANT_BANK_FLOW_FILENAME_PATTERN = re.compile(
     r"(?P<year>\d{4})(?:\s*年\s*|[-/.])?(?P<month>\d{1,2})(?:\s*月)?[_\-\s]+银行流水",
     re.IGNORECASE,
@@ -1313,10 +1386,11 @@ class MerchantReconciliationService:
         org_id: str | int | None = None,
         keyword: str | None = None,
         bank_status: str | None = None,
+        ids: list[str] | None = None,
         page: int | None = None,
         page_size: int | None = None,
     ) -> io.BytesIO | int:
-        rows, _total = await MerchantReconciliationService.list_summary(
+        rows = await MerchantReconciliationService._load_summary_export_rows(
             db,
             user=user,
             accounting_year=accounting_year,
@@ -1325,8 +1399,9 @@ class MerchantReconciliationService:
             org_id=org_id,
             keyword=keyword,
             bank_status=bank_status,
-            page=page or 1,
-            page_size=page_size or 1000,
+            ids=ids,
+            page=page,
+            page_size=page_size,
         )
         if output_path is not None:
             return MerchantReconciliationService._save_summary_workbook(rows, output_path=output_path)
@@ -1334,6 +1409,14 @@ class MerchantReconciliationService:
 
     @staticmethod
     async def export_summary_to_file(db: AsyncSession, *, user: User, output_path: Path, **kwargs) -> int:
+        include_related_details = bool(kwargs.pop("include_related_details", False))
+        if include_related_details:
+            return await MerchantReconciliationService._export_summary_bundle_to_file(
+                db,
+                user=user,
+                output_path=output_path,
+                **kwargs,
+            )
         result = await MerchantReconciliationService.export_summary(db, user=user, output_path=output_path, **kwargs)
         return int(result)
 
@@ -1367,6 +1450,298 @@ class MerchantReconciliationService:
             include_all=False,
         )
         return rows, total, stats
+
+    @staticmethod
+    async def list_summary_drilldown_details(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int]:
+        target_key = MerchantReconciliationService._summary_drilldown_key(
+            summary_org_id=summary_org_id,
+            org_name=None,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+        )
+        payment_ids = set(
+            await MerchantReconciliationService._load_summary_drilldown_payment_ids(
+                db,
+                user=user,
+                accounting_year=accounting_year,
+                accounting_month=accounting_month,
+                summary_org_id=summary_org_id,
+                our_subject=our_subject,
+                merchant_receipt_subject=merchant_receipt_subject,
+                shop_id=shop_id,
+                org_id=org_id,
+            )
+        )
+        if not payment_ids:
+            return [], 0
+        rows, _total, _stats = await MerchantReconciliationService._load_reconciliation_rows(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+            keyword=None,
+            match_status=None,
+            ids=None,
+            page=1,
+            page_size=page_size,
+            include_all=True,
+        )
+        filtered_rows = [
+            row
+            for row in rows
+            if row.get("match_status") == "matched"
+            and MerchantReconciliationService._summary_group_key_from_detail_row(row) == target_key
+            and MerchantReconciliationService._optional_int(row.get("red_sheet_payment_id")) in payment_ids
+        ]
+        return MerchantReconciliationService._page_rows(filtered_rows, page=page, page_size=page_size), len(filtered_rows)
+
+    @staticmethod
+    async def list_summary_drilldown_payments(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int]:
+        payment_ids = await MerchantReconciliationService._load_summary_drilldown_payment_ids(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            summary_org_id=summary_org_id,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        if not payment_ids:
+            return [], 0
+        filters = MerchantReconciliationService._red_sheet_detail_filters(
+            user=user,
+            model=MerchantRedSheetPayment,
+            org_id=org_id,
+            shop_ids=None,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+        )
+        filters.append(MerchantRedSheetPayment.id.in_(payment_ids))
+        total = (await db.execute(select(func.count()).select_from(MerchantRedSheetPayment).where(*filters))).scalar() or 0
+        rows = (
+            await db.execute(
+                select(
+                    MerchantRedSheetPayment,
+                    Organization.name.label("org_name"),
+                    Shop.shop_color.label("shop_color"),
+                )
+                .outerjoin(Organization, Organization.id == MerchantRedSheetPayment.org_id)
+                .outerjoin(Shop, Shop.id == MerchantRedSheetPayment.shop_id)
+                .where(*filters)
+                .order_by(
+                    MerchantRedSheetPayment.accounting_period.desc(),
+                    MerchantRedSheetPayment.source_row_number.asc(),
+                    MerchantRedSheetPayment.id.asc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).all()
+        return [
+            MerchantReconciliationService._red_sheet_detail_payload(
+                item,
+                org_name=org_name,
+                shop_color=shop_color,
+            )
+            for item, org_name, shop_color in rows
+        ], int(total)
+
+    @staticmethod
+    async def list_summary_drilldown_purchases(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int]:
+        payment_rows = await MerchantReconciliationService._load_summary_drilldown_payment_rows(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            summary_org_id=summary_org_id,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        payment_keys = {
+            (int(payment.red_sheet_id), _match_text(payment.merchant), _date_key(payment.live_date), _match_text(payment.live_room))
+            for payment in payment_rows
+            if payment.red_sheet_id is not None
+        }
+        if not payment_keys:
+            return [], 0
+        red_sheet_ids = {key[0] for key in payment_keys}
+        filters = MerchantReconciliationService._red_sheet_detail_filters(
+            user=user,
+            model=MerchantRedSheetPurchase,
+            org_id=org_id,
+            shop_ids=str(shop_id) if shop_id is not None else None,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+        )
+        filters.append(MerchantRedSheetPurchase.red_sheet_id.in_(red_sheet_ids))
+        rows = (
+            await db.execute(
+                select(
+                    MerchantRedSheetPurchase,
+                    Organization.name.label("org_name"),
+                    Shop.shop_color.label("shop_color"),
+                )
+                .outerjoin(Organization, Organization.id == MerchantRedSheetPurchase.org_id)
+                .outerjoin(Shop, Shop.id == MerchantRedSheetPurchase.shop_id)
+                .where(*filters)
+                .order_by(
+                    MerchantRedSheetPurchase.accounting_period.desc(),
+                    MerchantRedSheetPurchase.source_row_number.asc(),
+                    MerchantRedSheetPurchase.id.asc(),
+                )
+            )
+        ).all()
+        filtered_rows = [
+            MerchantReconciliationService._red_sheet_detail_payload(
+                item,
+                org_name=org_name,
+                shop_color=shop_color,
+            )
+            for item, org_name, shop_color in rows
+            if (int(item.red_sheet_id), _match_text(item.merchant), _date_key(item.live_date), _match_text(item.live_room)) in payment_keys
+        ]
+        return MerchantReconciliationService._page_rows(filtered_rows, page=page, page_size=page_size), len(filtered_rows)
+
+    @staticmethod
+    async def list_summary_drilldown_bank_flow_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int]:
+        target_key, payment_group_weights = await MerchantReconciliationService._load_summary_drilldown_weight_context(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            summary_org_id=summary_org_id,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        target_fallback_key = (
+            target_key[0],
+            _entity_match_text(target_key[1]),
+            _entity_match_text(target_key[2]),
+        )
+        accounting_period = _period(accounting_year, accounting_month)
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        payment_filters = [
+            MerchantRedSheetPayment.is_deleted.is_(False),
+            MerchantRedSheetPayment.accounting_period == accounting_period,
+        ]
+        bank_filters = [
+            MerchantBankFlowRow.is_deleted.is_(False),
+            MerchantBankFlowRow.accounting_period == accounting_period,
+            MerchantBankFlowRow.live_date != "",
+            MerchantBankFlowRow.flow_amount > 0,
+        ]
+        if org_ids is not None:
+            payment_filters.append(MerchantRedSheetPayment.org_id.in_(org_ids))
+            bank_filters.append(MerchantBankFlowRow.org_id.in_(org_ids))
+
+        payment_rows = (await db.execute(select(MerchantRedSheetPayment).where(*payment_filters).order_by(MerchantRedSheetPayment.id.desc()))).scalars().all()
+        payments_by_bank_key: dict[tuple[int, str, str, str], MerchantRedSheetPayment] = {}
+        for payment in payment_rows:
+            key = (
+                int(payment.org_id),
+                _entity_match_text(payment.settlement_subject),
+                _entity_match_text(payment.receipt_merchant),
+                _date_key(payment.live_date),
+            )
+            if key[1] and key[2] and key[3]:
+                payments_by_bank_key.setdefault(key, payment)
+
+        rows = (
+            await db.execute(
+                select(MerchantBankFlowRow, Organization.name.label("org_name"))
+                .outerjoin(Organization, Organization.id == MerchantBankFlowRow.org_id)
+                .where(*bank_filters)
+                .order_by(
+                    MerchantBankFlowRow.accounting_period.desc(),
+                    MerchantBankFlowRow.transaction_time.desc().nullslast(),
+                    MerchantBankFlowRow.source_row_number.asc(),
+                    MerchantBankFlowRow.id.asc(),
+                )
+            )
+        ).all()
+        filtered_rows: list[dict[str, object]] = []
+        for bank_row, row_org_name in rows:
+            payment = payments_by_bank_key.get(
+                (
+                    int(bank_row.org_id),
+                    _entity_match_text(bank_row.account_name),
+                    _entity_match_text(bank_row.counterparty_name),
+                    _date_key(bank_row.live_date),
+                )
+            )
+            payment_id = MerchantReconciliationService._optional_int(payment.id if payment is not None else None)
+            weighted_keys = payment_group_weights.get(payment_id or 0) or {}
+            if target_key in weighted_keys:
+                filtered_rows.append(MerchantReconciliationService._bank_flow_row_payload(bank_row, org_name=row_org_name))
+                continue
+            fallback_key = (
+                str(int(bank_row.org_id or 0)),
+                _entity_match_text(bank_row.account_name),
+                _entity_match_text(bank_row.counterparty_name),
+            )
+            if not weighted_keys and fallback_key == target_fallback_key:
+                filtered_rows.append(MerchantReconciliationService._bank_flow_row_payload(bank_row, org_name=row_org_name))
+        return MerchantReconciliationService._page_rows(filtered_rows, page=page, page_size=page_size), len(filtered_rows)
 
     @staticmethod
     def _red_sheet_detail_filters(
@@ -1635,6 +2010,121 @@ class MerchantReconciliationService:
         return MerchantReconciliationSummaryBuilder.sort_summary_rows(rows)
 
     @staticmethod
+    def _summary_drilldown_key(
+        *,
+        summary_org_id: int | None,
+        org_name: object,
+        our_subject: object,
+        merchant_receipt_subject: object,
+    ) -> tuple[str, str, str]:
+        return (
+            str(int(summary_org_id)) if summary_org_id is not None else _normalize_text(org_name),
+            _normalize_text(our_subject),
+            _normalize_text(merchant_receipt_subject),
+        )
+
+    @staticmethod
+    def _page_rows(rows: list[dict[str, object]], *, page: int, page_size: int) -> list[dict[str, object]]:
+        return rows[(page - 1) * page_size : page * page_size]
+
+    @staticmethod
+    async def _load_summary_drilldown_weight_context(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None,
+        org_id: str | int | None,
+    ) -> tuple[tuple[str, str, str], dict[int, dict[tuple[str, str, str], Decimal]]]:
+        target_key = MerchantReconciliationService._summary_drilldown_key(
+            summary_org_id=summary_org_id,
+            org_name=None,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+        )
+        grouped_rows = await MerchantReconciliationService._load_matched_summary_groups(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        _detail_totals, payment_group_weights = MerchantReconciliationService._collect_summary_detail_totals(grouped_rows)
+        return target_key, payment_group_weights
+
+    @staticmethod
+    async def _load_summary_drilldown_payment_ids(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None,
+        org_id: str | int | None,
+    ) -> list[int]:
+        target_key, payment_group_weights = await MerchantReconciliationService._load_summary_drilldown_weight_context(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            summary_org_id=summary_org_id,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        return sorted(
+            payment_id
+            for payment_id, group_weights in payment_group_weights.items()
+            if target_key in group_weights
+        )
+
+    @staticmethod
+    async def _load_summary_drilldown_payment_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        summary_org_id: int | None,
+        our_subject: str,
+        merchant_receipt_subject: str,
+        shop_id: int | None,
+        org_id: str | int | None,
+    ) -> list[MerchantRedSheetPayment]:
+        payment_ids = await MerchantReconciliationService._load_summary_drilldown_payment_ids(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            summary_org_id=summary_org_id,
+            our_subject=our_subject,
+            merchant_receipt_subject=merchant_receipt_subject,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        if not payment_ids:
+            return []
+        filters = MerchantReconciliationService._red_sheet_detail_filters(
+            user=user,
+            model=MerchantRedSheetPayment,
+            org_id=org_id,
+            shop_ids=None,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+        )
+        filters.append(MerchantRedSheetPayment.id.in_(payment_ids))
+        return list((await db.execute(select(MerchantRedSheetPayment).where(*filters))).scalars().all())
+
+    @staticmethod
     async def _load_opening_balance_records(
         db: AsyncSession,
         *,
@@ -1784,9 +2274,42 @@ class MerchantReconciliationService:
         MerchantReconciliationSummaryBuilder.merge_bank_flow_totals(summary_rows, bank_flow_totals)
 
     @staticmethod
+    async def _load_summary_export_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        accounting_year: int,
+        accounting_month: int,
+        shop_id: int | None,
+        org_id: str | int | None,
+        keyword: str | None,
+        bank_status: str | None,
+        ids: list[str] | None,
+        page: int | None,
+        page_size: int | None,
+    ) -> list[dict[str, object]]:
+        summary_rows = await MerchantReconciliationService._load_summary_rows(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+            keyword=keyword,
+            bank_status=bank_status,
+            include_opening_balances=True,
+        )
+        if ids is not None:
+            selected_keys = {str(row_key) for row_key in ids}
+            summary_rows = [row for row in summary_rows if str(row.get("key") or "") in selected_keys]
+        if page is not None and page_size is not None:
+            summary_rows = MerchantReconciliationService._page_rows(summary_rows, page=page, page_size=page_size)
+        return summary_rows
+
+    @staticmethod
     def _build_summary_workbook(rows: Iterable[dict[str, object]]) -> io.BytesIO:
         return MerchantReconciliationExporter.build_workbook(
-            rows,
+            (MerchantReconciliationService._summary_export_row(row) for row in rows),
             title="商家对账汇总",
             columns=SUMMARY_EXPORT_COLUMNS,
         )
@@ -1794,11 +2317,449 @@ class MerchantReconciliationService:
     @staticmethod
     def _save_summary_workbook(rows: Iterable[dict[str, object]], *, output_path: Path) -> int:
         return MerchantReconciliationExporter.save_workbook(
-            rows,
+            (MerchantReconciliationService._summary_export_row(row) for row in rows),
             output_path=output_path,
             title="商家对账汇总",
             columns=SUMMARY_EXPORT_COLUMNS,
         )
+
+    @staticmethod
+    def _save_summary_bundle_workbook(
+        summary_rows: Iterable[dict[str, object]],
+        *,
+        output_path: Path,
+        detail_rows: Iterable[dict[str, object]] = (),
+        payment_rows: Iterable[dict[str, object]] = (),
+        purchase_rows: Iterable[dict[str, object]] = (),
+        bank_flow_rows: Iterable[dict[str, object]] = (),
+    ) -> int:
+        wb = Workbook(write_only=True)
+        summary_count = MerchantReconciliationExporter.append_sheet(
+            wb,
+            (MerchantReconciliationService._summary_export_row(row) for row in summary_rows),
+            title="商家对账汇总",
+            columns=SUMMARY_EXPORT_COLUMNS,
+        )
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            (MerchantReconciliationService._detail_export_row(row) for row in detail_rows),
+            title="动账明细",
+            columns=RECONCILIATION_EXPORT_COLUMNS,
+        )
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            payment_rows,
+            title="红单货款",
+            columns=SUMMARY_PAYMENT_EXPORT_COLUMNS,
+        )
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            purchase_rows,
+            title="红单采购",
+            columns=SUMMARY_PURCHASE_EXPORT_COLUMNS,
+        )
+        MerchantReconciliationExporter.append_sheet(
+            wb,
+            bank_flow_rows,
+            title="银行流水",
+            columns=SUMMARY_BANK_FLOW_EXPORT_COLUMNS,
+        )
+        wb.save(output_path)
+        return summary_count
+
+    @staticmethod
+    async def _export_summary_bundle_to_file(
+        db: AsyncSession,
+        *,
+        user: User,
+        output_path: Path,
+        accounting_year: int,
+        accounting_month: int,
+        shop_id: int | None = None,
+        org_id: str | int | None = None,
+        keyword: str | None = None,
+        bank_status: str | None = None,
+        ids: list[str] | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> int:
+        summary_rows = await MerchantReconciliationService._load_summary_export_rows(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+            keyword=keyword,
+            bank_status=bank_status,
+            ids=ids,
+            page=page,
+            page_size=page_size,
+        )
+        selected_keys = {
+            MerchantReconciliationService._summary_drilldown_key(
+                summary_org_id=MerchantReconciliationService._optional_int(row.get("org_id")),
+                org_name=row.get("org_name"),
+                our_subject=row.get("our_subject"),
+                merchant_receipt_subject=row.get("merchant_receipt_subject") or row.get("receipt_merchant"),
+            )
+            for row in summary_rows
+        }
+
+        grouped_rows = await MerchantReconciliationService._load_matched_summary_groups(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+        _detail_totals, payment_group_weights = MerchantReconciliationService._collect_summary_detail_totals(grouped_rows)
+        selected_payment_ids = {
+            payment_id
+            for payment_id, group_weights in payment_group_weights.items()
+            if any(group_key in selected_keys for group_key in group_weights)
+        }
+
+        wb = Workbook(write_only=True)
+        summary_sheet = wb.create_sheet(title="商家对账汇总")
+        summary_sheet.append(MerchantReconciliationExporter.header_row(summary_sheet, [label for _field, label, _money_flag in SUMMARY_EXPORT_COLUMNS]))
+        summary_count = 0
+        for row in summary_rows:
+            MerchantReconciliationExporter.append_row(summary_sheet, MerchantReconciliationService._summary_export_row(row), columns=SUMMARY_EXPORT_COLUMNS)
+            summary_count += 1
+
+        detail_sheet = wb.create_sheet(title="动账明细")
+        detail_sheet.append(MerchantReconciliationExporter.header_row(detail_sheet, [label for _field, label, _money_flag in RECONCILIATION_EXPORT_COLUMNS]))
+        if selected_keys and selected_payment_ids:
+            await MerchantReconciliationService._append_summary_bundle_detail_rows(
+                db,
+                user=user,
+                ws=detail_sheet,
+                accounting_year=accounting_year,
+                accounting_month=accounting_month,
+                shop_id=shop_id,
+                org_id=org_id,
+                selected_keys=selected_keys,
+                selected_payment_ids=selected_payment_ids,
+                payment_group_weights=payment_group_weights,
+            )
+
+        payment_sheet = wb.create_sheet(title="红单货款")
+        payment_sheet.append(MerchantReconciliationExporter.header_row(payment_sheet, [label for _field, label, _money_flag in SUMMARY_PAYMENT_EXPORT_COLUMNS]))
+        if selected_payment_ids:
+            payment_rows = await MerchantReconciliationService._append_summary_bundle_payment_rows(
+                db,
+                user=user,
+                ws=payment_sheet,
+                accounting_year=accounting_year,
+                accounting_month=accounting_month,
+                org_id=org_id,
+                payment_ids=selected_payment_ids,
+            )
+        else:
+            payment_rows = []
+
+        purchase_sheet = wb.create_sheet(title="红单采购")
+        purchase_sheet.append(MerchantReconciliationExporter.header_row(purchase_sheet, [label for _field, label, _money_flag in SUMMARY_PURCHASE_EXPORT_COLUMNS]))
+        if payment_rows:
+            await MerchantReconciliationService._append_summary_bundle_purchase_rows(
+                db,
+                user=user,
+                ws=purchase_sheet,
+                accounting_year=accounting_year,
+                accounting_month=accounting_month,
+                org_id=org_id,
+                shop_id=shop_id,
+                payment_rows=payment_rows,
+            )
+
+        bank_flow_sheet = wb.create_sheet(title="银行流水")
+        bank_flow_sheet.append(MerchantReconciliationExporter.header_row(bank_flow_sheet, [label for _field, label, _money_flag in SUMMARY_BANK_FLOW_EXPORT_COLUMNS]))
+        if selected_keys:
+            await MerchantReconciliationService._append_summary_bundle_bank_flow_rows(
+                db,
+                user=user,
+                ws=bank_flow_sheet,
+                accounting_year=accounting_year,
+                accounting_month=accounting_month,
+                org_id=org_id,
+                selected_keys=selected_keys,
+                payment_group_weights=payment_group_weights,
+            )
+
+        wb.save(output_path)
+        return summary_count
+
+    @staticmethod
+    async def _append_summary_bundle_detail_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        ws,
+        accounting_year: int,
+        accounting_month: int,
+        shop_id: int | None,
+        org_id: str | int | None,
+        selected_keys: set[tuple[str, str, str]],
+        selected_payment_ids: set[int],
+        payment_group_weights: dict[int, dict[tuple[str, str, str], Decimal]],
+        batch_size: int = 1000,
+    ) -> int:
+        MerchantReconciliationService._validate_month(accounting_year, accounting_month)
+        base_filters = [
+            DouyinDongzhangDetail.is_deleted.is_(False),
+            DouyinDongzhangDetail.source_platform_code == "douyin",
+            DouyinDongzhangDetail.summary_year == accounting_year,
+            DouyinDongzhangDetail.summary_month == accounting_month,
+            active_shop_filter(DouyinDongzhangDetail.shop_id),
+        ]
+        if shop_id is not None:
+            base_filters.append(DouyinDongzhangDetail.shop_id == shop_id)
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        if org_ids is not None:
+            base_filters.append(DouyinDongzhangDetail.org_id.in_(org_ids))
+
+        detail_contexts = await MerchantReconciliationService._build_reconciliation_contexts(
+            db,
+            user=user,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            shop_id=shop_id,
+            org_id=org_id,
+        )
+
+        appended = 0
+        last_id = 0
+        while True:
+            batch = list(
+                (
+                    await db.execute(
+                        select(DouyinDongzhangDetail, Organization.name.label("org_name"), Shop.shop_color.label("shop_color"))
+                        .outerjoin(Organization, Organization.id == DouyinDongzhangDetail.org_id)
+                        .outerjoin(Shop, Shop.id == DouyinDongzhangDetail.shop_id)
+                        .where(*base_filters, DouyinDongzhangDetail.id > last_id)
+                        .order_by(DouyinDongzhangDetail.id.asc())
+                        .limit(batch_size)
+                    )
+                ).all()
+            )
+            if not batch:
+                break
+            for detail, org_name, shop_color in batch:
+                last_id = max(last_id, int(detail.id or last_id))
+                payload = MerchantReconciliationService._build_detail_payload(
+                    detail,
+                    org_name=org_name,
+                    shop_color=shop_color,
+                    load_context=detail_contexts.get(int(detail.shop_id)) or MerchantReconciliationService._empty_load_context(detail),
+                )
+                payment_id = MerchantReconciliationService._optional_int(payload.get("red_sheet_payment_id"))
+                if payload.get("match_status") != "matched" or payment_id not in selected_payment_ids:
+                    continue
+                summary_key = MerchantReconciliationService._summary_group_key_from_detail_row(payload)
+                if summary_key not in selected_keys:
+                    continue
+                if summary_key not in (payment_group_weights.get(payment_id or 0) or {}):
+                    continue
+                MerchantReconciliationExporter.append_row(ws, MerchantReconciliationService._detail_export_row(payload), columns=RECONCILIATION_EXPORT_COLUMNS)
+                appended += 1
+        return appended
+
+    @staticmethod
+    async def _append_summary_bundle_payment_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        ws,
+        accounting_year: int,
+        accounting_month: int,
+        org_id: str | int | None,
+        payment_ids: set[int],
+    ) -> list[MerchantRedSheetPayment]:
+        payment_id_values = sorted(int(payment_id) for payment_id in payment_ids if payment_id is not None)
+        if not payment_id_values:
+            return []
+        filters = MerchantReconciliationService._red_sheet_detail_filters(
+            user=user,
+            model=MerchantRedSheetPayment,
+            org_id=org_id,
+            shop_ids=None,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+        )
+        rows = (
+            await db.execute(
+                select(
+                    MerchantRedSheetPayment,
+                    Organization.name.label("org_name"),
+                    Shop.shop_color.label("shop_color"),
+                )
+                .outerjoin(Organization, Organization.id == MerchantRedSheetPayment.org_id)
+                .outerjoin(Shop, Shop.id == MerchantRedSheetPayment.shop_id)
+                .where(*filters, MerchantRedSheetPayment.id.in_(payment_id_values))
+                .order_by(
+                    MerchantRedSheetPayment.accounting_period.desc(),
+                    MerchantRedSheetPayment.source_row_number.asc(),
+                    MerchantRedSheetPayment.id.asc(),
+                )
+            )
+        ).all()
+        payment_rows: list[MerchantRedSheetPayment] = []
+        for item, org_name, shop_color in rows:
+            payment_rows.append(item)
+            payload = MerchantReconciliationService._red_sheet_detail_payload(
+                item,
+                org_name=org_name,
+                shop_color=shop_color,
+            )
+            MerchantReconciliationExporter.append_row(ws, payload, columns=SUMMARY_PAYMENT_EXPORT_COLUMNS)
+        return payment_rows
+
+    @staticmethod
+    async def _append_summary_bundle_purchase_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        ws,
+        accounting_year: int,
+        accounting_month: int,
+        org_id: str | int | None,
+        shop_id: int | None,
+        payment_rows: list[MerchantRedSheetPayment],
+    ) -> int:
+        payment_keys = {
+            (int(payment.red_sheet_id), _match_text(payment.merchant), _date_key(payment.live_date), _match_text(payment.live_room))
+            for payment in payment_rows
+            if payment.red_sheet_id is not None
+        }
+        if not payment_keys:
+            return 0
+        red_sheet_ids = sorted({key[0] for key in payment_keys})
+        filters = MerchantReconciliationService._red_sheet_detail_filters(
+            user=user,
+            model=MerchantRedSheetPurchase,
+            org_id=org_id,
+            shop_ids=str(shop_id) if shop_id is not None else None,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+        )
+        rows = (
+            await db.execute(
+                select(
+                    MerchantRedSheetPurchase,
+                    Organization.name.label("org_name"),
+                    Shop.shop_color.label("shop_color"),
+                )
+                .outerjoin(Organization, Organization.id == MerchantRedSheetPurchase.org_id)
+                .outerjoin(Shop, Shop.id == MerchantRedSheetPurchase.shop_id)
+                .where(*filters, MerchantRedSheetPurchase.red_sheet_id.in_(red_sheet_ids))
+                .order_by(
+                    MerchantRedSheetPurchase.accounting_period.desc(),
+                    MerchantRedSheetPurchase.source_row_number.asc(),
+                    MerchantRedSheetPurchase.id.asc(),
+                )
+            )
+        ).all()
+        appended = 0
+        for item, org_name, shop_color in rows:
+            key = (int(item.red_sheet_id), _match_text(item.merchant), _date_key(item.live_date), _match_text(item.live_room))
+            if key not in payment_keys:
+                continue
+            payload = MerchantReconciliationService._red_sheet_detail_payload(
+                item,
+                org_name=org_name,
+                shop_color=shop_color,
+            )
+            MerchantReconciliationExporter.append_row(ws, payload, columns=SUMMARY_PURCHASE_EXPORT_COLUMNS)
+            appended += 1
+        return appended
+
+    @staticmethod
+    async def _append_summary_bundle_bank_flow_rows(
+        db: AsyncSession,
+        *,
+        user: User,
+        ws,
+        accounting_year: int,
+        accounting_month: int,
+        org_id: str | int | None,
+        selected_keys: set[tuple[str, str, str]],
+        payment_group_weights: dict[int, dict[tuple[str, str, str], Decimal]],
+        batch_size: int = 1000,
+    ) -> int:
+        accounting_period = _period(accounting_year, accounting_month)
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        payment_filters = [
+            MerchantRedSheetPayment.is_deleted.is_(False),
+            MerchantRedSheetPayment.accounting_period == accounting_period,
+        ]
+        bank_filters = [
+            MerchantBankFlowRow.is_deleted.is_(False),
+            MerchantBankFlowRow.accounting_period == accounting_period,
+            MerchantBankFlowRow.live_date != "",
+            MerchantBankFlowRow.flow_amount > 0,
+        ]
+        if org_ids is not None:
+            payment_filters.append(MerchantRedSheetPayment.org_id.in_(org_ids))
+            bank_filters.append(MerchantBankFlowRow.org_id.in_(org_ids))
+
+        payment_rows = (await db.execute(select(MerchantRedSheetPayment).where(*payment_filters).order_by(MerchantRedSheetPayment.id.desc()))).scalars().all()
+        payments_by_bank_key: dict[tuple[int, str, str, str], MerchantRedSheetPayment] = {}
+        for payment in payment_rows:
+            key = (
+                int(payment.org_id),
+                _entity_match_text(payment.settlement_subject),
+                _entity_match_text(payment.receipt_merchant),
+                _date_key(payment.live_date),
+            )
+            if key[1] and key[2] and key[3]:
+                payments_by_bank_key.setdefault(key, payment)
+
+        selected_fallback_keys = {
+            (key[0], _entity_match_text(key[1]), _entity_match_text(key[2]))
+            for key in selected_keys
+        }
+        appended = 0
+        last_id = 0
+        while True:
+            rows = (
+                await db.execute(
+                    select(MerchantBankFlowRow, Organization.name.label("org_name"))
+                    .outerjoin(Organization, Organization.id == MerchantBankFlowRow.org_id)
+                    .where(*bank_filters, MerchantBankFlowRow.id > last_id)
+                    .order_by(MerchantBankFlowRow.id.asc())
+                    .limit(batch_size)
+                )
+            ).all()
+            if not rows:
+                break
+            for bank_row, row_org_name in rows:
+                last_id = max(last_id, int(bank_row.id or last_id))
+                payment = payments_by_bank_key.get(
+                    (
+                        int(bank_row.org_id),
+                        _entity_match_text(bank_row.account_name),
+                        _entity_match_text(bank_row.counterparty_name),
+                        _date_key(bank_row.live_date),
+                    )
+                )
+                payment_id = MerchantReconciliationService._optional_int(payment.id if payment is not None else None)
+                weighted_keys = payment_group_weights.get(payment_id or 0) or {}
+                should_append = any(group_key in selected_keys for group_key in weighted_keys)
+                if not should_append and not weighted_keys:
+                    fallback_key = (
+                        str(int(bank_row.org_id or 0)),
+                        _entity_match_text(bank_row.account_name),
+                        _entity_match_text(bank_row.counterparty_name),
+                    )
+                    should_append = fallback_key in selected_fallback_keys
+                if not should_append:
+                    continue
+                payload = MerchantReconciliationService._bank_flow_row_payload(bank_row, org_name=row_org_name)
+                MerchantReconciliationExporter.append_row(ws, payload, columns=SUMMARY_BANK_FLOW_EXPORT_COLUMNS)
+                appended += 1
+        return appended
 
     @staticmethod
     async def export_details(
@@ -2398,7 +3359,7 @@ class MerchantReconciliationService:
     @staticmethod
     def _build_detail_workbook(rows: Iterable[dict[str, object]]) -> io.BytesIO:
         return MerchantReconciliationExporter.build_workbook(
-            rows,
+            (MerchantReconciliationService._detail_export_row(row) for row in rows),
             title="商家对账明细",
             columns=RECONCILIATION_EXPORT_COLUMNS,
         )
@@ -2406,7 +3367,7 @@ class MerchantReconciliationService:
     @staticmethod
     def _save_detail_workbook(rows: Iterable[dict[str, object]], *, output_path: Path) -> int:
         return MerchantReconciliationExporter.save_workbook(
-            rows,
+            (MerchantReconciliationService._detail_export_row(row) for row in rows),
             output_path=output_path,
             title="商家对账明细",
             columns=RECONCILIATION_EXPORT_COLUMNS,
@@ -2414,7 +3375,21 @@ class MerchantReconciliationService:
 
     @staticmethod
     def _append_export_row(ws, row: dict[str, object]) -> None:
-        MerchantReconciliationExporter.append_row(ws, row, columns=RECONCILIATION_EXPORT_COLUMNS)
+        MerchantReconciliationExporter.append_row(ws, MerchantReconciliationService._detail_export_row(row), columns=RECONCILIATION_EXPORT_COLUMNS)
+
+    @staticmethod
+    def _summary_export_row(row: dict[str, object]) -> dict[str, object]:
+        payload = dict(row)
+        bank_status = str(payload.get("bank_status") or "")
+        payload["bank_status"] = SUMMARY_BANK_STATUS_LABELS.get(bank_status, bank_status)
+        return payload
+
+    @staticmethod
+    def _detail_export_row(row: dict[str, object]) -> dict[str, object]:
+        payload = dict(row)
+        match_status = str(payload.get("match_status") or "")
+        payload["match_status"] = RECONCILIATION_MATCH_STATUS_LABELS.get(match_status, match_status)
+        return payload
 
     @staticmethod
     def _format_export_value(value: object, *, money: bool = False) -> object:

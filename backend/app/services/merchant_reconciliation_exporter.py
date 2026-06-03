@@ -54,6 +54,22 @@ class MerchantReconciliationExporter:
         return row_count
 
     @staticmethod
+    def append_sheet(
+        wb: Workbook,
+        rows: Iterable[dict[str, object]],
+        *,
+        title: str,
+        columns: tuple[tuple[str, str, bool], ...],
+    ) -> int:
+        ws = wb.create_sheet(title=title)
+        ws.append(MerchantReconciliationExporter.header_row(ws, [label for _field, label, _money_flag in columns]))
+        row_count = 0
+        for row in rows:
+            MerchantReconciliationExporter.append_row(ws, row, columns=columns)
+            row_count += 1
+        return row_count
+
+    @staticmethod
     def header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
         cells: list[WriteOnlyCell] = []
         for label in headers:

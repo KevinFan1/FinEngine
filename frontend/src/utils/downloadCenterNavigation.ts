@@ -1,4 +1,4 @@
-export const DOWNLOAD_CENTER_ROUTE = { name: "DownloadCenter" } as const;
+export const DOWNLOAD_CENTER_ROUTE = { path: "/downloads" } as const;
 
 type DownloadCenterTarget = {
     fullPath: string;

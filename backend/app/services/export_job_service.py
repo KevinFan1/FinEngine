@@ -341,6 +341,7 @@ async def _merchant_reconciliation_detail_export(db: AsyncSession, user: User, p
 
 async def _merchant_reconciliation_summary_export(db: AsyncSession, user: User, params: dict[str, Any]):
     output_path = _new_temp_export_path()
+    scope = str(params.get("scope") or "all")
     try:
         row_count = await MerchantReconciliationService.export_summary_to_file(
             db,
@@ -351,8 +352,11 @@ async def _merchant_reconciliation_summary_export(db: AsyncSession, user: User, 
             accounting_month=int(params["accounting_month"]),
             shop_id=_int_param(params, "shop_id"),
             keyword=params.get("keyword"),
-            page=_int_param(params, "page"),
-            page_size=_int_param(params, "page_size"),
+            bank_status=params.get("bank_status"),
+            ids=_parse_str_ids(params.get("ids")) if scope == "selected" else None,
+            page=_int_param(params, "page") if scope == "current_page" else None,
+            page_size=_int_param(params, "page_size") if scope == "current_page" else None,
+            include_related_details=_bool_param(params, "include_related_details"),
         )
     except Exception:
         output_path.unlink(missing_ok=True)

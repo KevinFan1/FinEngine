@@ -10,6 +10,10 @@ export function selectedMonthParts(month: string | null | undefined) {
     return { accounting_year: year, accounting_month: monthValue };
 }
 
+export function hasMonthSelectionChanged(previousMonth: string | null | undefined, nextMonth: string | null | undefined) {
+    return String(previousMonth || "") !== String(nextMonth || "");
+}
+
 export function formatMonth(year?: number | null, month?: number | null) {
     if (!year || !month) return "-";
     return `${year}-${String(month).padStart(2, "0")}`;

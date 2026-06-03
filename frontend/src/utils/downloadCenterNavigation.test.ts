@@ -47,6 +47,16 @@ test("falls back to location assign when router push resolves but route does not
     assert.equal(assignedHref, "/downloads");
 });
 
+test("uses explicit downloads path as the navigation target", async () => {
+    const state = createRouterState();
+
+    await navigateToDownloadCenter(state.router, {
+        assign: () => {},
+    });
+
+    assert.deepEqual(state.pushedTo, { path: "/downloads" });
+});
+
 test("does not hard redirect after router navigation succeeds", async () => {
     const state = createRouterState();
     let assignedHref = "";
