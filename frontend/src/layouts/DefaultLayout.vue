@@ -543,6 +543,8 @@ interface MenuItem {
     children?: MenuItem[];
 }
 
+const merchantReconciliationMenuEnabled = false;
+
 const menuItems: MenuItem[] = [
     {
         path: "/workspace",
@@ -610,21 +612,23 @@ const menuItems: MenuItem[] = [
             },
         ],
     },
-    {
-        path: "/merchant-reconciliation",
-        title: "商家对账",
-        icon: Money,
-        children: [
-            { path: "/merchant-reconciliation/upload", title: "上传中心", icon: Upload },
-            { path: "/merchant-reconciliation/tasks", title: "对账任务", icon: List },
-            { path: "/merchant-reconciliation/unmatched", title: "未匹配维护", icon: Warning },
-            { path: "/merchant-reconciliation/payments", title: "货款明细", icon: Document },
-            { path: "/merchant-reconciliation/purchases", title: "采购明细", icon: Document },
-            { path: "/merchant-reconciliation/bank-flows", title: "银行流水", icon: Wallet },
-            { path: "/merchant-reconciliation/summary", title: "汇总数据", icon: DataAnalysis },
-            { path: "/merchant-reconciliation/net-rates", title: "净额比例", icon: Setting },
-        ],
-    },
+    ...(merchantReconciliationMenuEnabled
+        ? [{
+            path: "/merchant-reconciliation",
+            title: "商家对账",
+            icon: Money,
+            children: [
+                { path: "/merchant-reconciliation/upload", title: "上传中心", icon: Upload },
+                { path: "/merchant-reconciliation/tasks", title: "对账任务", icon: List },
+                { path: "/merchant-reconciliation/unmatched", title: "未匹配维护", icon: Warning },
+                { path: "/merchant-reconciliation/payments", title: "货款明细", icon: Document },
+                { path: "/merchant-reconciliation/purchases", title: "采购明细", icon: Document },
+                { path: "/merchant-reconciliation/bank-flows", title: "银行流水", icon: Wallet },
+                { path: "/merchant-reconciliation/summary", title: "汇总数据", icon: DataAnalysis },
+                { path: "/merchant-reconciliation/net-rates", title: "净额比例", icon: Setting },
+            ],
+        }]
+        : []),
     {
         path: "/rule-config",
         title: "规则配置",
