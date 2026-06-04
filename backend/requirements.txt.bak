@@ -14,3 +14,5 @@ openpyxl==3.1.5
 asteval==1.0.6
 alembic==1.14.0
 httpx==0.28.1
+numpy==1.26.4
+pandas==2.2.3
