@@ -1,4 +1,4 @@
-"""Tasks API — list, detail, and progress query."""
+"""通用处理任务查询与操作接口。"""
 
 from datetime import datetime, timedelta, timezone
 
@@ -84,7 +84,7 @@ async def list_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List processing tasks with pagination and filters."""
+    """分页查询处理任务列表。"""
     stmt = (
         select(ProcessingTask, UploadFile, Shop.shop_color, Organization.name.label("org_name"))
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
@@ -281,7 +281,7 @@ async def get_task_source_download(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Return a short-lived download URL for the uploaded source file."""
+    """获取任务原始上传文件的临时下载链接。"""
     if current_user.role != "superadmin":
         return ApiResponse(code=403, message="仅超级管理员可下载原表")
 
@@ -445,7 +445,7 @@ async def get_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get task detail."""
+    """获取任务详情。"""
     result = await db.execute(
         select(ProcessingTask, UploadFile, Shop.shop_color, Organization.name.label("org_name"))
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)
@@ -503,7 +503,7 @@ async def batch_retry_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Batch retry failed tasks or rerun bank-flow tasks."""
+    """批量重试失败任务或重跑银行流水任务。"""
     return await _batch_task_action(body=body, action="retry", current_user=current_user, db=db)
 
 
@@ -513,7 +513,7 @@ async def batch_recalculate_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Batch recalculate order-dependent processing tasks."""
+    """批量重新统计任务结果。"""
     return await _batch_task_action(body=body, action="recalculate", current_user=current_user, db=db)
 
 
@@ -523,7 +523,7 @@ async def retry_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Manually retry a failed task or rerun a bank-flow task."""
+    """手动重试单个失败任务或重跑银行流水任务。"""
     loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
     if isinstance(loaded, ApiResponse):
         return loaded
@@ -543,7 +543,7 @@ async def recalculate_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Manually recalculate an order-dependent processing task."""
+    """手动重新统计单个任务。"""
     loaded = await _load_task_with_file(db, task_id=task_id, current_user=current_user)
     if isinstance(loaded, ApiResponse):
         return loaded
@@ -563,10 +563,7 @@ async def get_task_progress(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get lightweight task progress — designed for frontend polling.
-
-    Returns only status, progress percentage, and row counts.
-    """
+    """获取任务进度信息，供前端轮询刷新。"""
     result = await db.execute(
         select(ProcessingTask)
         .join(UploadFile, ProcessingTask.file_id == UploadFile.id)

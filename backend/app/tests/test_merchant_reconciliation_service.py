@@ -72,6 +72,117 @@ def test_net_amount_from_gmv_uses_configured_rate() -> None:
     assert MerchantReconciliationService._net_amount_from_gmv(Decimal("33.33"), Decimal("0.700000")) == Decimal("23.33")
 
 
+def test_detail_context_lookup_separates_business_month_from_source_month() -> None:
+    class Detail:
+        shop_id = 3
+        summary_year = 2026
+        summary_month = 4
+
+    april_context = _ReconciliationLoadContext(
+        org_id=2,
+        total_gmv=Decimal("100"),
+        total_bic=Decimal("0"),
+        total_insurance=Decimal("0"),
+        red_sheet_context=_RedSheetContext(purchases_by_code={}, payments_by_key={}),
+        net_rate=Decimal("0.650000"),
+    )
+    may_context = _ReconciliationLoadContext(
+        org_id=2,
+        total_gmv=Decimal("100"),
+        total_bic=Decimal("0"),
+        total_insurance=Decimal("0"),
+        red_sheet_context=_RedSheetContext(purchases_by_code={}, payments_by_key={}),
+        net_rate=Decimal("0.800000"),
+    )
+
+    context = MerchantReconciliationService._detail_context_for_detail(
+        {
+            (3, 2026, 4): april_context,
+            (3, 2026, 5): may_context,
+        },
+        Detail(),
+    )
+
+    assert context is april_context
+
+
+def test_detail_derived_map_uses_business_month_for_net_rate(monkeypatch) -> None:
+    class Detail:
+        id = 1
+        org_id = 2
+        shop_id = 3
+        source_year = 2026
+        source_month = 5
+        summary_year = 2026
+        summary_month = 4
+        product_code = ""
+        product_name = "商品"
+        gmv = Decimal("100")
+
+    calls: dict[str, object] = {}
+
+    async def fake_load_net_rate_map(_db, *, org_ids, accounting_period, platform_code="douyin"):
+        calls["net_rate"] = (list(org_ids), accounting_period, platform_code)
+        return {2: Decimal("0.650000")}
+
+    async def fake_load_douyin_detail_total_gmv(
+        _db,
+        *,
+        org_id,
+        shop_id,
+        source_year=None,
+        source_month=None,
+        summary_year=None,
+        summary_month=None,
+    ):
+        calls["total_gmv"] = (org_id, shop_id, source_year, source_month, summary_year, summary_month)
+        return Decimal("100")
+
+    async def fake_load_summary_totals(
+        _db,
+        *,
+        org_id,
+        shop_id,
+        source_year=None,
+        source_month=None,
+        summary_year=None,
+        summary_month=None,
+    ):
+        calls["summary_totals"] = (org_id, shop_id, source_year, source_month, summary_year, summary_month)
+        return Decimal("0"), Decimal("0")
+
+    async def fake_load_red_sheet_context(_db, *, org_id, shop_id, accounting_period, payment_settlement_status=None):
+        calls["red_sheet"] = (org_id, shop_id, accounting_period, payment_settlement_status)
+        return _RedSheetContext(purchases_by_code={}, payments_by_key={})
+
+    monkeypatch.setattr(MerchantReconciliationService, "_load_net_rate_map", staticmethod(fake_load_net_rate_map))
+    monkeypatch.setattr(MerchantReconciliationService, "_load_douyin_detail_total_gmv", staticmethod(fake_load_douyin_detail_total_gmv))
+    monkeypatch.setattr(MerchantReconciliationService, "_load_summary_totals", staticmethod(fake_load_summary_totals))
+    monkeypatch.setattr(MerchantReconciliationService, "_load_red_sheet_context", staticmethod(fake_load_red_sheet_context))
+
+    derived_map = asyncio.run(MerchantReconciliationService.build_detail_derived_field_map(object(), details=[Detail()]))
+
+    assert calls["net_rate"] == ([2], 202604, "douyin")
+    assert calls["total_gmv"] == (2, 3, 2026, 5, 2026, 4)
+    assert calls["summary_totals"] == (2, 3, 2026, 5, 2026, 4)
+    assert calls["red_sheet"] == (2, 3, 202604, None)
+    assert derived_map[1].live_amount == Decimal("65.00")
+
+
+def test_douyin_reconciliation_period_filters_use_source_month() -> None:
+    filters = MerchantReconciliationService._douyin_reconciliation_period_filters(2026, 4)
+    compiled_filters = [
+        str(condition.compile(compile_kwargs={"literal_binds": True}))
+        for condition in filters
+    ]
+
+    assert any("source_year = 2026" in condition for condition in compiled_filters)
+    assert any("source_month = 4" in condition for condition in compiled_filters)
+    assert all("summary_period" not in condition for condition in compiled_filters)
+    assert all("summary_year" not in condition for condition in compiled_filters)
+    assert all("summary_month" not in condition for condition in compiled_filters)
+
+
 def test_summary_builder_refreshes_bank_statuses() -> None:
     row = MerchantReconciliationSummaryBuilder.empty_summary_row(
         org_id=2,
@@ -599,6 +710,9 @@ def test_build_detail_payload_matches_red_sheet_and_allocates_amounts() -> None:
     )
 
     assert payload["match_status"] == "matched"
+    assert payload["accounting_year"] == 2026
+    assert payload["accounting_month"] == 5
+    assert payload["accounting_date"] == "2026-05"
     assert payload["merchant_name"] == "动账商家A"
     assert payload["major_merchant_name"] == "商家A"
     assert payload["merchant_receipt_subject"] == "收款主体A"

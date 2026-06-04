@@ -1,4 +1,4 @@
-"""FileSpec API — list and maintain file header specifications."""
+"""文件规格维护接口。"""
 
 from datetime import datetime, timezone
 
@@ -32,7 +32,7 @@ async def list_file_specs(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List all enabled file specs (with platform info) for frontend header matching."""
+    """查询前端可用的启用文件规格。"""
     # Join FileSpec with Platform to get platform code/name
     stmt = (
         select(FileSpec, Platform.code, Platform.name)
@@ -67,7 +67,7 @@ async def list_file_specs_admin(
     _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List file specs for superadmin maintenance."""
+    """分页查询文件规格管理列表。"""
     filters = [FileSpec.is_deleted.is_(False), Platform.is_deleted.is_(False)]
     if platform_id is not None:
         filters.append(FileSpec.platform_id == platform_id)
@@ -108,7 +108,7 @@ async def create_file_spec(
     _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Create a file spec (superadmin only)."""
+    """创建文件规格。"""
     platform = await _get_active_platform(db, body.platform_id)
     if platform is None:
         return ApiResponse(code=404, message="平台不存在")
@@ -140,7 +140,7 @@ async def update_file_spec(
     _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update a file spec (superadmin only)."""
+    """更新文件规格。"""
     result = await db.execute(select(FileSpec).where(FileSpec.id == spec_id, FileSpec.is_deleted.is_(False)))
     spec = result.scalar_one_or_none()
     if spec is None:
@@ -176,7 +176,7 @@ async def delete_file_spec(
     _admin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Soft-delete a file spec (superadmin only)."""
+    """删除文件规格。"""
     result = await db.execute(select(FileSpec).where(FileSpec.id == spec_id, FileSpec.is_deleted.is_(False)))
     spec = result.scalar_one_or_none()
     if spec is None:

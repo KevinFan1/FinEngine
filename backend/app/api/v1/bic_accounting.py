@@ -1,4 +1,4 @@
-"""BIC accounting API."""
+"""BIC 核算接口。"""
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -140,6 +140,7 @@ async def list_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询 BIC 核算任务列表。"""
     rows, total = await BicAccountingService.list_tasks(
         db,
         user=current_user,
@@ -168,6 +169,7 @@ async def get_task_source_download(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """获取 BIC 核算任务原始文件的临时下载链接。"""
     if current_user.role != "superadmin":
         return ApiResponse(code=403, message="仅超级管理员可下载原表")
 
@@ -210,6 +212,7 @@ async def rerun_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """重新运行指定的 BIC 核算任务。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
     try:
@@ -235,6 +238,7 @@ async def batch_recalculate_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """批量重新统计 BIC 核算任务。"""
     task_ids = list(dict.fromkeys(body.task_ids))
     if not task_ids:
         return ApiResponse(code=400, message="请选择任务")
@@ -304,6 +308,7 @@ async def list_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询 BIC 汇总明细。"""
     rows, total = await BicAccountingService.list_details(
         db,
         user=current_user,
@@ -348,6 +353,7 @@ async def export_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出 BIC 汇总明细。"""
     selected_ids = _parse_ids(ids) if ids else []
     if scope == "selected" and not selected_ids:
         raise HTTPException(status_code=400, detail="请选择要导出的汇总")
@@ -398,6 +404,7 @@ async def list_source_rows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询 BIC 源数据行。"""
     rows, total = await BicAccountingService.list_source_rows(
         db,
         user=current_user,
@@ -442,6 +449,7 @@ async def export_source_rows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出 BIC 源数据行。"""
     selected_ids = _parse_ids(ids) if ids else []
     if scope == "selected" and not selected_ids:
         raise HTTPException(status_code=400, detail="请选择要导出的源数据")
@@ -481,6 +489,7 @@ async def list_detail_source_rows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询指定 BIC 明细关联的源数据行。"""
     rows, total = await BicAccountingService.list_source_rows(
         db,
         user=current_user,
@@ -505,6 +514,7 @@ async def export_reconciliation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出 BIC 对账表。"""
     try:
         buffer = await BicAccountingService.export_reconciliation(
             db,

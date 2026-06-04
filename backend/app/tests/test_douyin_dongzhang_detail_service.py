@@ -4,6 +4,22 @@ from decimal import Decimal
 from openpyxl import load_workbook
 
 from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
+from app.services.partition_service import DOUYIN_SOURCE_PARTITION
+from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
+from app.services.upload_period_service import get_upload_period_header
+
+
+def test_douyin_detail_partition_key_uses_source_period_from_upload_period_rule() -> None:
+    table_options = DouyinDongzhangDetail.__table_args__[-1]
+
+    assert table_options["postgresql_partition_by"] == "RANGE (source_period)"
+    assert DOUYIN_SOURCE_PARTITION.partition_column == "source_period"
+    assert DouyinDongzhangDetail.__table__.columns["source_period"].primary_key is True
+    assert "summary_period" not in DouyinDongzhangDetail.__table__.columns
+
+
+def test_douyin_dongzhang_upload_period_rule_uses_transaction_time() -> None:
+    assert get_upload_period_header("douyin", "动账") == "动账时间"
 
 
 def test_serialize_detail_row_formats_money_and_dates() -> None:

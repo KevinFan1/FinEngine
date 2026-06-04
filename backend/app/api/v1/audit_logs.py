@@ -38,11 +38,7 @@ async def list_audit_logs(
     _admin=Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Query operation logs.
-
-    Superadmin can see all logs. Organization admins only see logs in their
-    own organization.
-    """
+    """分页查询操作审计日志。"""
     stmt = (
         select(OperationLog, Organization.name.label("org_name"))
         .outerjoin(Organization, Organization.id == OperationLog.org_id)

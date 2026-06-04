@@ -1,4 +1,4 @@
-"""Async export center API."""
+"""下载中心导出任务接口。"""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -33,6 +33,7 @@ async def create_export_job(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建导出任务并加入下载中心。"""
     try:
         job = await ExportJobService.create_job(db, data=body, user=current_user)
         ExportJobService.dispatch_job_after_commit(db, job)
@@ -53,6 +54,7 @@ async def list_export_jobs(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询当前用户可见的导出任务。"""
     if status and status not in EXPORT_JOB_STATUSES:
         return ApiResponse(code=400, message="导出状态不正确")
     await ExportJobService.dispatch_unsubmitted_jobs(db, user=current_user)
@@ -86,6 +88,7 @@ async def get_export_job(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """获取单个导出任务详情。"""
     job = await ExportJobService.get_job_for_user(db, job_id=job_id, user=current_user)
     if job is None:
         return ApiResponse(code=404, message="导出任务不存在或无权访问")
@@ -103,6 +106,7 @@ async def get_export_download_credential(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """获取导出文件的下载凭证。"""
     job = await ExportJobService.get_job_for_user(db, job_id=job_id, user=current_user)
     if job is None:
         return ApiResponse(code=404, message="导出任务不存在或无权访问")

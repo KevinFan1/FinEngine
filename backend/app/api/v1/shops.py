@@ -24,6 +24,7 @@ async def list_shops(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询店铺列表。"""
     scoped_org_id = current_user.org_id if current_user.role != "superadmin" else org_id
     items, total = await ShopService.list_shops(
         db,
@@ -50,6 +51,7 @@ async def list_shops(
 async def download_shop_import_template(
     current_user: User = Depends(get_current_user),
 ):
+    """下载店铺资料导入模板。"""
     buffer = ShopService.build_import_template()
     filename = "店铺资料导入模板.xlsx"
     return StreamingResponse(
@@ -66,6 +68,7 @@ async def import_shops(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """批量导入店铺资料。"""
     content = await file.read()
     if not content:
         return ApiResponse(code=400, message="导入文件不能为空")
@@ -90,6 +93,7 @@ async def create_shop(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建店铺。"""
     try:
         shop = await ShopService.create_shop(
             db,
@@ -110,6 +114,7 @@ async def get_shop(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """获取店铺详情。"""
     try:
         shop = await ShopService.get_shop(db, shop_id)
         if shop:
@@ -129,6 +134,7 @@ async def update_shop(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新店铺信息。"""
     try:
         shop = await ShopService.update_shop(
             db,
@@ -152,6 +158,7 @@ async def delete_shop(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """删除指定店铺。"""
     ok = await ShopService.delete_shop(
         db,
         shop_id=shop_id,

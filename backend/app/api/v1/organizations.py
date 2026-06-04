@@ -20,7 +20,7 @@ async def list_organizations(
     _superadmin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List organizations (superadmin only)."""
+    """分页查询组织列表。"""
     orgs, total = await OrgService.list_orgs(db, current_user, page=page, page_size=page_size, keyword=keyword)
     return ApiResponse(
         data=PageResponse(
@@ -40,7 +40,7 @@ async def create_organization(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Create a new organization (superadmin only)."""
+    """创建新组织。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -64,7 +64,7 @@ async def get_organization(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get organization detail (superadmin only)."""
+    """获取组织详情。"""
     org = await OrgService.get_org(db, org_id)
     if org is None:
         return ApiResponse(code=404, message="组织不存在")
@@ -80,7 +80,7 @@ async def update_organization(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update organization (superadmin only)."""
+    """更新组织信息。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -109,7 +109,7 @@ async def update_organization_status(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Enable/disable organization (superadmin only)."""
+    """启用或禁用指定组织。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent") if request else None
 

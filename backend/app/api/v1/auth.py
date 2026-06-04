@@ -28,7 +28,7 @@ router = APIRouter()
 @router.get("/captcha", response_model=ApiResponse[CaptchaResponse])
 @limiter.limit("10/minute")  # Limit captcha generation to prevent abuse
 async def get_captcha(request: Request):
-    """Create a login captcha challenge."""
+    """获取登录验证码。"""
     challenge = await captcha_service.generate()
     return ApiResponse(
         data=CaptchaResponse(
@@ -46,7 +46,7 @@ async def login(
     request: Request,
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Login with username or phone + password."""
+    """使用用户名或手机号登录。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -73,7 +73,7 @@ async def logout(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Logout — record audit log."""
+    """退出当前登录会话并记录审计日志。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -102,7 +102,7 @@ async def get_me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get current user info."""
+    """获取当前登录用户信息。"""
     from sqlalchemy import select
 
     from app.models.organization import Organization
@@ -136,6 +136,7 @@ async def update_me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新当前登录用户资料。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -161,6 +162,7 @@ async def change_my_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """修改当前登录用户密码。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -185,6 +187,7 @@ async def get_my_preference(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """获取当前登录用户的指定偏好设置。"""
     preference = await UserPreferenceService.get_preference(
         db,
         user_id=current_user.id,
@@ -207,6 +210,7 @@ async def update_my_preference(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新当前登录用户的指定偏好设置。"""
     preference = await UserPreferenceService.set_preference(
         db,
         user_id=current_user.id,

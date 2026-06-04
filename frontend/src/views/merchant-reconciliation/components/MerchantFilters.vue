@@ -1,7 +1,7 @@
 <template>
     <el-card shadow="never" class="search-card">
         <el-form :model="model" inline class="filter-form">
-            <el-form-item v-if="showMonth" label="业务年月">
+            <el-form-item v-if="showMonth" label="数据年月">
                 <el-date-picker
                     :model-value="model.month"
                     type="month"

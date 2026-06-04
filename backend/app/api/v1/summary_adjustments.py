@@ -1,4 +1,4 @@
-"""Summary adjustment API — report-level manual adjustments."""
+"""汇总报表手工调整接口。"""
 
 from decimal import Decimal
 
@@ -31,6 +31,7 @@ async def list_summary_adjustments(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询指定汇总维度下的调整记录。"""
     org_id = current_user.org_id if current_user.role != "superadmin" else current_user.org_id or 0
     items = await SummaryAdjustmentService.list_adjustments(
         db,
@@ -51,6 +52,7 @@ async def create_summary_adjustment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建汇总调整记录。"""
     adjustment = await SummaryAdjustmentService.create_adjustment(
         db,
         data=body,
@@ -68,6 +70,7 @@ async def update_summary_adjustment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新汇总调整记录。"""
     adjustment = await SummaryAdjustmentService.update_adjustment(
         db,
         adjustment_id=adjustment_id,
@@ -87,6 +90,7 @@ async def delete_summary_adjustment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """删除汇总调整记录。"""
     adjustment = await SummaryAdjustmentService.delete_adjustment(
         db,
         adjustment_id=adjustment_id,

@@ -3,7 +3,7 @@ import { ElMessage } from "element-plus";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import { getShopList, type Shop } from "@/api/shop";
 import { useUserStore } from "@/stores/user";
-import { isDouyinShop, selectedMonthParts } from "./common";
+import { isDouyinShop, merchantReconciliationShopListParams, selectedMonthParts } from "./common";
 
 export interface MerchantFilterState {
     month: string;
@@ -37,12 +37,7 @@ export function useMerchantReconciliationFilters(options: { multipleShops?: bool
     async function fetchShops() {
         shopLoading.value = true;
         try {
-            const result = await getShopList({
-                page: 1,
-                page_size: 1000,
-                org_id: searchForm.orgId,
-                platform_name: "抖音",
-            });
+            const result = await getShopList(merchantReconciliationShopListParams(searchForm.orgId));
             shops.value = result.items || [];
             if (options.autoSelectFirstShop !== false && !options.multipleShops && !searchForm.shopId && douyinShops.value.length) {
                 searchForm.shopId = douyinShops.value[0].id;
@@ -70,7 +65,7 @@ export function useMerchantReconciliationFilters(options: { multipleShops?: bool
         const parts = selectedMonthParts(searchForm.month);
         if (!parts.accounting_year || !parts.accounting_month) {
             if (showMessage) {
-                ElMessage.warning("请选择业务年月");
+                ElMessage.warning("请选择数据年月");
             }
             return null;
         }

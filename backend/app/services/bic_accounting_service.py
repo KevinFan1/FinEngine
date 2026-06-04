@@ -32,7 +32,7 @@ from app.utils.money import safe_decimal
 
 BIC_TARGET_FEE_ITEM = "质检费(通过)"
 BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
-BIC_SOURCE_EXPORT_HEADERS = DOUYIN_BIC_HEADERS
+BIC_SOURCE_EXPORT_HEADERS = ["店铺", *DOUYIN_BIC_HEADERS]
 BIC_RECONCILIATION_SOURCE_EXPORT_HEADERS = ["店铺", *DOUYIN_BIC_HEADERS]
 BIC_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
 BIC_ERROR_SAMPLE_LIMIT = 10
@@ -1068,7 +1068,7 @@ class BicAccountingService:
             rows, _ = await BicAccountingService.list_source_rows(db, page=page or 1, page_size=page_size or 50, **kwargs)
             _ensure_export_row_limit("BIC源明细", len(rows))
             for row in rows:
-                BicAccountingService._append_source_row(worksheet, row)
+                BicAccountingService._append_source_row(worksheet, row, include_shop_name=True)
                 row_count += 1
             workbook.save(output_path)
             return row_count
@@ -1086,7 +1086,7 @@ class BicAccountingService:
             if not rows:
                 break
             for row in rows:
-                BicAccountingService._append_source_row(worksheet, row)
+                BicAccountingService._append_source_row(worksheet, row, include_shop_name=True)
                 row_count += 1
             current_page += 1
         _ensure_export_row_limit("BIC源明细", row_count)
@@ -1331,7 +1331,7 @@ class BicAccountingService:
         worksheet = workbook.create_sheet(title=title[:31] or "Sheet")
         worksheet.append(_write_only_header_row(worksheet, BIC_SOURCE_EXPORT_HEADERS))
         for row in rows:
-            BicAccountingService._append_source_row(worksheet, row)
+            BicAccountingService._append_source_row(worksheet, row, include_shop_name=True)
         buffer = io.BytesIO()
         workbook.save(buffer)
         buffer.seek(0)

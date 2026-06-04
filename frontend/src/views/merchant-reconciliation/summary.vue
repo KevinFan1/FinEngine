@@ -57,7 +57,7 @@
                     <el-icon><Calendar /></el-icon>
                 </div>
                 <div class="summary-empty-content">
-                    <p class="summary-empty-kicker">需要先确定业务年月</p>
+                    <p class="summary-empty-kicker">需要先确定数据年月</p>
                     <h2>选择月份后生成商家应付、冲减和未付流水汇总</h2>
                     <p>汇总会按我方主体与收款商家聚合，适合导出给财务复核。当前不是 0 条数据，而是还没有选定查询口径。</p>
                     <div class="summary-empty-actions">
@@ -494,7 +494,7 @@ const hasSelectedMonth = computed(() => Boolean(searchForm.month));
 const selectedRows = computed(() => Array.from(selectedRowMap.value.values()));
 const selectedCount = computed(() => selectedRowMap.value.size);
 const tableSummaryText = computed(() => {
-    if (!hasSelectedMonth.value) return "待选择业务年月";
+    if (!hasSelectedMonth.value) return "待选择数据年月";
     return `共 ${pagination.total} 条 · 已选 ${selectedCount.value} 条`;
 });
 const drilldownTitle = computed(() => {
@@ -528,7 +528,7 @@ function queryParams(showMessage = true) {
     const [year, month] = String(searchForm.month || "").split("-").map(Number);
     if (!year || !month) {
         if (showMessage) {
-            ElMessage.warning("请选择业务年月");
+            ElMessage.warning("请选择数据年月");
         }
         return null;
     }
@@ -648,7 +648,7 @@ async function handleExport(scope: ExportScope) {
             export_type: "merchant_reconciliation.summary",
             title: "商家对账汇总导出",
             filename: normalizeExportFilename(buildExportFilename([
-                searchForm.month || "全部业务年月",
+                searchForm.month || "全部数据年月",
                 `店铺${summarizeFilenameValues([selectedShop?.shop_name || ""], "全部")}`,
                 "商家对账汇总",
                 includeRelatedDetailsInExport.value ? "附带明细" : null,

@@ -1,4 +1,4 @@
-"""Health check endpoints for monitoring."""
+"""服务健康检查接口。"""
 
 from fastapi import APIRouter, status
 from sqlalchemy import text
@@ -12,13 +12,13 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    """Basic health check - returns 200 if service is running."""
+    """执行基础健康检查。"""
     return ApiResponse(data={"status": "ok", "service": "finengine"})
 
 
 @router.get("/health/detailed", response_model=ApiResponse)
 async def detailed_health_check():
-    """Detailed health check - checks all dependencies."""
+    """执行包含依赖状态的详细健康检查。"""
     checks = {
         "api": "ok",
         "database": "unknown",
@@ -55,7 +55,7 @@ async def detailed_health_check():
 
 @router.get("/health/readiness")
 async def readiness_check():
-    """Kubernetes readiness probe - checks if service can accept traffic."""
+    """执行就绪检查，确认服务是否可对外提供流量。"""
     try:
         # Check database
         async with async_session_factory() as session:
@@ -72,6 +72,6 @@ async def readiness_check():
 
 @router.get("/health/liveness")
 async def liveness_check():
-    """Kubernetes liveness probe - checks if service is alive."""
+    """执行存活检查，确认服务进程仍然可用。"""
     # Simple check - if this endpoint responds, the service is alive
     return ApiResponse(data={"status": "alive"})

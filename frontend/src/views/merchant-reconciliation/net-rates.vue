@@ -117,14 +117,14 @@ const changedRows = computed(() =>
     ),
 );
 const footerText = computed(() => {
-    if (!hasMonth.value) return "请选择业务年月";
+    if (!hasMonth.value) return "请选择数据年月";
     return `共 ${tableData.value.length} 个组织 · 已修改 ${changedRows.value.length} 条`;
 });
 
 function queryParams(showMessage = true) {
     const month = selectedMonthParts(searchForm.month);
     if (!month.accounting_year || !month.accounting_month) {
-        if (showMessage) ElMessage.warning("请选择业务年月");
+        if (showMessage) ElMessage.warning("请选择数据年月");
         return null;
     }
     return {

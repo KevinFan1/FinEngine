@@ -595,6 +595,44 @@ def test_bic_detail_workbook_includes_shop_profile_fields() -> None:
     ]
 
 
+def test_bic_source_workbook_prepends_shop_name_column() -> None:
+    buffer = BicAccountingService._build_source_workbook(
+        [
+            {
+                "shop_name": "示例店铺",
+                "settlement_no": "SETTLE-1",
+                "order_code": "ORDER-1",
+                "related_order_no": "REL-1",
+                "related_waybill_no": "",
+                "fee_item": "质检费(通过)",
+                "service_provider": "服务商A",
+                "qic_warehouse": "华东仓",
+                "settlement_amount": Decimal("123.45"),
+                "billing_params": "金额:123.45(元)",
+                "billing_completed_time": "2026-05-01 10:00:00",
+                "business_node": "质检通过",
+                "business_occurred_time": "2026-05-01 09:59:59",
+                "settled_at": "2026-05-01 10:00:01",
+                "status": "结算成功",
+                "transaction_account": "货款",
+                "transaction_flow_no": "SCP-1",
+                "remark": "",
+                "is_mudaibao": "否",
+                "is_child_order": "否",
+            }
+        ],
+        title="BIC源明细",
+    )
+    workbook = load_workbook(buffer)
+    sheet = workbook.active
+
+    headers = [sheet.cell(row=1, column=index).value for index in range(1, 21)]
+    values = [sheet.cell(row=2, column=index).value for index in range(1, 21)]
+
+    assert headers == BIC_RECONCILIATION_SOURCE_EXPORT_HEADERS
+    assert values[:9] == ["示例店铺", "SETTLE-1", "ORDER-1", "REL-1", None, "质检费(通过)", "服务商A", "华东仓", 123.45]
+
+
 def test_bic_reconciliation_workbook_contains_summary_and_shop_source_sheet() -> None:
     buffer = BicAccountingService._build_reconciliation_workbook(
         [

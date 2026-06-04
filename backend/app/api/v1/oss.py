@@ -1,4 +1,4 @@
-"""OSS API — Alibaba Cloud STS temporary credentials for frontend direct upload."""
+"""阿里云 OSS 临时上传凭证接口。"""
 
 from fastapi import APIRouter, Depends, Query
 from loguru import logger
@@ -43,14 +43,7 @@ async def get_oss_sts(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get Alibaba Cloud OSS temporary credentials for direct frontend upload.
-
-    The frontend uses these credentials with the `ali-oss` JS SDK to upload
-    files directly to OSS without going through the backend.
-
-    Upload path prefix: `{org_id}/{batch_id}/`.
-    Credentials expire after `ALIYUN_STS_EXPIRE_SECONDS` (default 3600s).
-    """
+    """获取前端直传 OSS 所需的临时凭证。"""
     if not settings.ALIYUN_STS_ROLE_ARN or not settings.ALIYUN_ACCESS_KEY_ID:
         return ApiResponse(code=501, message="阿里云 OSS STS 未配置")
 

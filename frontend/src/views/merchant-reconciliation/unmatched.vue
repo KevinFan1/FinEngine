@@ -131,7 +131,7 @@ const hasMonth = computed(() => Boolean(searchForm.month));
 function queryParams(showMessage = true) {
     const month = selectedMonthParts(searchForm.month);
     if (!month.accounting_year || !month.accounting_month) {
-        if (showMessage) ElMessage.warning("请选择业务年月");
+        if (showMessage) ElMessage.warning("请选择数据年月");
         return null;
     }
     return {

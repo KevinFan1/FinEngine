@@ -1,4 +1,4 @@
-"""Merchant reconciliation API."""
+"""商家对账接口。"""
 
 from urllib.parse import quote
 
@@ -66,6 +66,7 @@ async def download_red_sheet_template(
     accounting_month: int = Query(..., ge=1, le=12),
     current_user: User = Depends(get_current_user),
 ):
+    """下载红单导入模板。"""
     _ = current_user
     buffer = MerchantReconciliationService.build_red_sheet_template(
         accounting_year=accounting_year,
@@ -84,6 +85,7 @@ async def import_red_sheet(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导入商家红单数据。"""
     content = await file.read()
     try:
         result = await MerchantReconciliationService.import_red_sheet(
@@ -110,6 +112,7 @@ async def import_bank_flow(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导入银行流水文件。"""
     import tempfile
     from pathlib import Path
 
@@ -148,6 +151,7 @@ async def list_red_sheets(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询红单列表。"""
     rows, total = await MerchantReconciliationService.list_red_sheets(
         db,
         user=current_user,
@@ -180,6 +184,7 @@ async def list_payment_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询红单回款明细。"""
     rows, total = await MerchantReconciliationService.list_payment_details(
         db,
         user=current_user,
@@ -213,6 +218,7 @@ async def list_purchase_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询红单采购明细。"""
     rows, total = await MerchantReconciliationService.list_purchase_details(
         db,
         user=current_user,
@@ -245,6 +251,7 @@ async def list_bank_flow_files(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询银行流水文件列表。"""
     rows, total = await MerchantReconciliationService.list_bank_flow_files(
         db,
         user=current_user,
@@ -273,6 +280,7 @@ async def list_bank_flow_rows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询银行流水明细。"""
     rows, total = await MerchantReconciliationService.list_bank_flow_rows(
         db,
         user=current_user,
@@ -364,6 +372,7 @@ async def list_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询商家对账明细。"""
     rows, total, stats = await MerchantReconciliationService.list_details(
         db,
         user=current_user,
@@ -403,6 +412,7 @@ async def export_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出商家对账明细。"""
     selected_ids = _parse_ids(ids) if scope == "selected" else None
     export_page = page if scope == "current_page" else None
     export_page_size = page_size if scope == "current_page" else None
@@ -433,6 +443,7 @@ async def list_summary_opening_balances(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询商家对账汇总期初余额。"""
     rows = await MerchantReconciliationService.list_opening_balances_for_summary(
         db,
         user=current_user,
@@ -452,6 +463,7 @@ async def upsert_summary_opening_balances(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """批量保存商家对账汇总期初余额。"""
     try:
         result = await MerchantReconciliationService.upsert_opening_balances(
             db,
@@ -518,6 +530,7 @@ async def list_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询商家对账汇总结果。"""
     rows, total = await MerchantReconciliationService.list_summary(
         db,
         user=current_user,
@@ -554,6 +567,7 @@ async def list_summary_drilldown_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询商家对账汇总下钻的对账明细。"""
     rows, total = await MerchantReconciliationService.list_summary_drilldown_details(
         db,
         user=current_user,
@@ -591,6 +605,7 @@ async def list_summary_drilldown_payments(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询商家对账汇总下钻的回款明细。"""
     rows, total = await MerchantReconciliationService.list_summary_drilldown_payments(
         db,
         user=current_user,
@@ -628,6 +643,7 @@ async def list_summary_drilldown_purchases(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询商家对账汇总下钻的采购明细。"""
     rows, total = await MerchantReconciliationService.list_summary_drilldown_purchases(
         db,
         user=current_user,
@@ -665,6 +681,7 @@ async def list_summary_drilldown_bank_flow_rows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询商家对账汇总下钻的银行流水明细。"""
     rows, total = await MerchantReconciliationService.list_summary_drilldown_bank_flow_rows(
         db,
         user=current_user,
@@ -703,6 +720,7 @@ async def export_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出商家对账汇总结果。"""
     selected_ids = _parse_str_ids(ids) if scope == "selected" else None
     export_page = page if scope == "current_page" else None
     export_page_size = page_size if scope == "current_page" else None

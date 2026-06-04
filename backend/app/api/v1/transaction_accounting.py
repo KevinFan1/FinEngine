@@ -1,4 +1,4 @@
-"""Independent transaction-accounting API."""
+"""动账核算接口。"""
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -160,6 +160,7 @@ async def list_major_categories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询动账核算资金大分类列表。"""
     items = await TransactionAccountingService.list_major_categories(db, user=current_user)
     return ApiResponse(data=[TransactionMajorCategoryOut.model_validate(item) for item in items])
 
@@ -172,6 +173,7 @@ async def create_major_category(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建动账核算资金大分类。"""
     ip, ua = _client_info(request)
     try:
         item = await TransactionAccountingService.create_major_category(db, data=body, user=current_user)
@@ -204,6 +206,7 @@ async def update_major_category(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新动账核算资金大分类。"""
     ip, ua = _client_info(request)
     try:
         item = await TransactionAccountingService.update_major_category(
@@ -241,6 +244,7 @@ async def delete_major_category(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """删除动账核算资金大分类。"""
     try:
         ok = await TransactionAccountingService.delete_major_category(
             db,
@@ -259,6 +263,7 @@ async def list_cash_flow_items(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询现金流项目列表。"""
     items = await TransactionAccountingService.list_cash_flow_items(db, user=current_user)
     data = []
     for item in items:
@@ -273,6 +278,7 @@ async def list_subjects(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询动账核算科目列表。"""
     subjects = await TransactionAccountingService.list_subjects(db, user=current_user)
     return ApiResponse(data=[TransactionSubjectOut.model_validate(item) for item in subjects])
 
@@ -285,6 +291,7 @@ async def create_subject(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建动账核算科目。"""
     ip, ua = _client_info(request)
     try:
         subject = await TransactionAccountingService.create_subject(db, data=body, user=current_user)
@@ -317,6 +324,7 @@ async def update_subject(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新动账核算科目。"""
     ip, ua = _client_info(request)
     try:
         subject = await TransactionAccountingService.update_subject(db, subject_id=subject_id, data=body, user=current_user)
@@ -349,6 +357,7 @@ async def delete_subject(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """删除动账核算科目。"""
     try:
         ok = await TransactionAccountingService.delete_subject(db, subject_id=subject_id, user=current_user)
     except ValueError as exc:
@@ -364,6 +373,7 @@ async def list_categories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询动账核算重分类列表。"""
     categories = await TransactionAccountingService.list_categories(db, user=current_user, subject_id=subject_id)
     return ApiResponse(data=[TransactionCategoryOut.model_validate(item) for item in categories])
 
@@ -375,6 +385,7 @@ async def create_category(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建动账核算重分类。"""
     try:
         category = await TransactionAccountingService.create_category(db, data=body, user=current_user)
     except ValueError as exc:
@@ -390,6 +401,7 @@ async def update_category(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新动账核算重分类。"""
     try:
         category = await TransactionAccountingService.update_category(db, category_id=category_id, data=body, user=current_user)
     except ValueError as exc:
@@ -406,6 +418,7 @@ async def delete_category(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """删除动账核算重分类。"""
     try:
         ok = await TransactionAccountingService.delete_category(db, category_id=category_id, user=current_user)
     except ValueError as exc:
@@ -421,6 +434,7 @@ async def list_rules(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询动账核算规则列表。"""
     rows = await TransactionAccountingService.list_rules(db, user=current_user)
     data = []
     for rule, subject_name, category_name in rows:
@@ -440,6 +454,7 @@ async def create_rule(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """创建动账核算规则。"""
     ip, ua = _client_info(request)
     try:
         rule = await TransactionAccountingService.create_rule(db, data=body, user=current_user)
@@ -472,6 +487,7 @@ async def update_rule(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """更新动账核算规则。"""
     ip, ua = _client_info(request)
     try:
         rule = await TransactionAccountingService.update_rule(db, rule_id=rule_id, data=body, user=current_user)
@@ -504,6 +520,7 @@ async def delete_rule(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """删除动账核算规则。"""
     try:
         ok = await TransactionAccountingService.delete_rule(db, rule_id=rule_id, user=current_user)
     except ValueError as exc:
@@ -520,6 +537,7 @@ async def upload_init(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """初始化动账核算文件上传并返回直传凭证。"""
     if not settings.ALIYUN_STS_ROLE_ARN or not settings.ALIYUN_ACCESS_KEY_ID:
         return ApiResponse(code=501, message="阿里云 OSS STS 未配置")
     try:
@@ -560,6 +578,7 @@ async def upload_callback(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """处理动账核算文件上传回调并生成任务。"""
     ip, ua = _client_info(request)
     try:
         task = await TransactionAccountingService.upload_callback(db, data=body, user=current_user, ip=ip, user_agent=ua)
@@ -590,6 +609,7 @@ async def list_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询动账核算任务列表。"""
     rows, total = await TransactionAccountingService.list_tasks(
         db,
         user=current_user,
@@ -621,6 +641,7 @@ async def get_task_source_download(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """获取动账核算任务原始文件的临时下载链接。"""
     task = await db.get(TransactionTask, task_id)
     if task is None or task.is_deleted:
         return ApiResponse(code=404, message="任务不存在")
@@ -660,6 +681,7 @@ async def rerun_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """重新运行指定的动账核算任务。"""
     ip, ua = _client_info(request)
     try:
         task = await TransactionAccountingService.rerun_task(db, task_id=task_id, user=current_user, ip=ip, user_agent=ua)
@@ -678,6 +700,7 @@ async def batch_recalculate_tasks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """批量重新统计动账核算任务。"""
     task_ids = list(dict.fromkeys(body.task_ids))
     if not task_ids:
         return ApiResponse(code=400, message="请选择任务")
@@ -750,6 +773,7 @@ async def list_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询动账核算明细。"""
     rows, total = await TransactionAccountingService.list_details(
         db,
         user=current_user,
@@ -820,6 +844,7 @@ async def export_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出动账核算明细。"""
     try:
         selected_ids = _parse_ids(ids) if scope == "selected" else None
         buffer = await TransactionAccountingService.export_details(
@@ -919,6 +944,7 @@ async def list_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """分页查询动账核算汇总结果。"""
     rows, total = await TransactionAccountingService.list_summaries(
         db,
         user=current_user,
@@ -977,6 +1003,7 @@ async def get_annual_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询动账核算年度汇总。"""
     try:
         report = await TransactionAccountingService.get_annual_summary(
             db,
@@ -1027,6 +1054,7 @@ async def export_annual_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出动账核算年度汇总。"""
     try:
         buffer = await TransactionAccountingService.export_annual_summary(
             db,
@@ -1105,6 +1133,7 @@ async def export_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出动账核算汇总结果。"""
     try:
         selected_ids = _parse_ids(ids) if scope == "selected" else None
         buffer = await TransactionAccountingService.export_summaries(

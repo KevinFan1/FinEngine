@@ -51,7 +51,7 @@ async def list_users(
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List users. Superadmin sees all; org_admin sees own org."""
+    """分页查询用户列表。"""
     users, total = await UserService.list_users(
         db,
         page=page,
@@ -82,7 +82,7 @@ async def create_user(
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Create a new user. Phone must be unique."""
+    """创建新用户。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -107,7 +107,7 @@ async def get_user(
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get user detail."""
+    """获取用户详情。"""
     try:
         user = await UserService.get_user_for_operator(db, user_id, current_user)
     except ValueError as e:
@@ -126,7 +126,7 @@ async def update_user(
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update user info."""
+    """更新用户信息。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -156,7 +156,7 @@ async def update_user_status(
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Enable/disable user."""
+    """启用或禁用指定用户。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent") if request else None
 
@@ -185,7 +185,7 @@ async def reset_user_password(
     _admin: User = Depends(require_org_admin_or_above),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Reset user password."""
+    """重置指定用户密码。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 

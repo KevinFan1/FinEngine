@@ -1,4 +1,4 @@
-import type { Shop } from "@/api/shop";
+import type { Shop, ShopListParams } from "@/api/shop";
 
 export function defaultMonth() {
     const now = new Date();
@@ -55,6 +55,17 @@ export function formatBytes(size: number | null | undefined) {
 export function isDouyinShop(shop: Shop) {
     const platform = String(shop.platform_name || "").trim().toLowerCase();
     return ["抖音", "douyin", "抖店"].includes(platform);
+}
+
+export function merchantReconciliationShopListParams(orgId?: number): ShopListParams {
+    const params: ShopListParams = {
+        page: 1,
+        page_size: 1000,
+    };
+    if (orgId) {
+        params.org_id = orgId;
+    }
+    return params;
 }
 
 export function downloadFile(blob: Blob, filename: string) {

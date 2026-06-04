@@ -120,7 +120,7 @@ PAYMENT_HEADERS = [
 RECONCILIATION_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("platform_label", "平台", False),
     ("shop_name", "店铺", False),
-    ("accounting_date", "业务年月", False),
+    ("accounting_date", "数据年月", False),
     ("transaction_time", "动账时间", False),
     ("transaction_flow_no", "动账流水号", False),
     ("transaction_direction", "动账方向", False),
@@ -147,7 +147,7 @@ RECONCILIATION_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
 
 SUMMARY_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("org_name", "组织", False),
-    ("accounting_date", "业务年月", False),
+    ("accounting_date", "数据年月", False),
     ("our_subject", "我方主体", False),
     ("merchant_receipt_subject", "商家收款主体", False),
     ("gmv", "实收GMV", True),
@@ -166,7 +166,7 @@ SUMMARY_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
 SUMMARY_PAYMENT_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("org_name", "组织", False),
     ("shop_name", "店铺", False),
-    ("accounting_period", "业务年月", False),
+    ("accounting_period", "数据年月", False),
     ("source_row_number", "源行号", False),
     ("live_room", "直播间", False),
     ("live_date", "直播日期", False),
@@ -191,7 +191,7 @@ SUMMARY_PAYMENT_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
 SUMMARY_PURCHASE_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("org_name", "组织", False),
     ("shop_name", "店铺", False),
-    ("accounting_period", "业务年月", False),
+    ("accounting_period", "数据年月", False),
     ("source_row_number", "源行号", False),
     ("live_room", "直播间", False),
     ("merchant", "商家", False),
@@ -213,7 +213,7 @@ SUMMARY_PURCHASE_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
 
 SUMMARY_BANK_FLOW_EXPORT_COLUMNS: tuple[tuple[str, str, bool], ...] = (
     ("org_name", "组织", False),
-    ("accounting_period", "业务年月", False),
+    ("accounting_period", "数据年月", False),
     ("source_row_number", "源行号", False),
     ("bank_name", "银行", False),
     ("account_name", "账户名称", False),
@@ -332,6 +332,13 @@ class MerchantReconciliationService:
     @staticmethod
     def _net_amount_from_gmv(gmv: object, net_rate: object) -> Decimal:
         return (safe_decimal(gmv) * safe_decimal(net_rate)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _douyin_reconciliation_period_filters(accounting_year: int, accounting_month: int) -> list[Any]:
+        return [
+            DouyinDongzhangDetail.source_year == accounting_year,
+            DouyinDongzhangDetail.source_month == accounting_month,
+        ]
 
     @staticmethod
     def build_red_sheet_template(*, accounting_year: int, accounting_month: int) -> io.BytesIO:
@@ -2008,12 +2015,10 @@ class MerchantReconciliationService:
         org_id: str | int | None,
     ) -> list[dict[str, object]]:
         MerchantReconciliationService._validate_month(accounting_year, accounting_month)
-        accounting_period = _period(accounting_year, accounting_month)
         filters = [
             DouyinDongzhangDetail.is_deleted.is_(False),
             DouyinDongzhangDetail.source_platform_code == "douyin",
-            DouyinDongzhangDetail.summary_year == accounting_year,
-            DouyinDongzhangDetail.summary_month == accounting_month,
+            *MerchantReconciliationService._douyin_reconciliation_period_filters(accounting_year, accounting_month),
             active_shop_filter(DouyinDongzhangDetail.shop_id),
         ]
         if shop_id is not None:
@@ -2027,7 +2032,6 @@ class MerchantReconciliationService:
         red_sheet_filters = [
             MerchantRedSheet.is_deleted.is_(False),
             MerchantRedSheet.platform_code == "douyin",
-            MerchantRedSheet.accounting_period == accounting_period,
             active_shop_filter(MerchantRedSheet.shop_id),
         ]
         if shop_id is not None:
@@ -2070,6 +2074,8 @@ class MerchantReconciliationService:
                     DouyinDongzhangDetail.org_id,
                     DouyinDongzhangDetail.shop_id,
                     DouyinDongzhangDetail.shop_name,
+                    DouyinDongzhangDetail.summary_year,
+                    DouyinDongzhangDetail.summary_month,
                     product_code_expr.label("product_code"),
                     DouyinDongzhangDetail.merchant_name,
                     func.coalesce(func.sum(DouyinDongzhangDetail.gmv), 0).label("gmv"),
@@ -2082,6 +2088,8 @@ class MerchantReconciliationService:
                     DouyinDongzhangDetail.org_id,
                     DouyinDongzhangDetail.shop_id,
                     DouyinDongzhangDetail.shop_name,
+                    DouyinDongzhangDetail.summary_year,
+                    DouyinDongzhangDetail.summary_month,
                     product_code_expr,
                     DouyinDongzhangDetail.merchant_name,
                 )
@@ -2096,22 +2104,32 @@ class MerchantReconciliationService:
         if not grouped_detail_rows:
             return []
 
-        net_rate_map = await MerchantReconciliationService._load_net_rate_map(
-            db,
-            org_ids=[row.org_id for row in grouped_detail_rows if row.org_id is not None],
-            accounting_period=accounting_period,
-        )
-        red_sheet_contexts: dict[tuple[int, int], _RedSheetContext] = {}
+        net_rate_maps: dict[int, dict[int, Decimal]] = {}
+        for row in grouped_detail_rows:
+            if row.org_id is None:
+                continue
+            business_period = _period(row.summary_year, row.summary_month)
+            if business_period not in net_rate_maps:
+                net_rate_maps[business_period] = await MerchantReconciliationService._load_net_rate_map(
+                    db,
+                    org_ids=[
+                        rate_row.org_id
+                        for rate_row in grouped_detail_rows
+                        if rate_row.org_id is not None and _period(rate_row.summary_year, rate_row.summary_month) == business_period
+                    ],
+                    accounting_period=business_period,
+                )
+        red_sheet_contexts: dict[tuple[int, int, int], _RedSheetContext] = {}
         for row in grouped_detail_rows:
             if row.org_id is None or row.shop_id is None:
                 continue
-            context_key = (int(row.org_id), int(row.shop_id))
+            context_key = (int(row.org_id), int(row.shop_id), _period(row.summary_year, row.summary_month))
             if context_key not in red_sheet_contexts:
                 red_sheet_contexts[context_key] = await MerchantReconciliationService._load_red_sheet_context(
                     db,
                     org_id=context_key[0],
                     shop_id=context_key[1],
-                    accounting_period=accounting_period,
+                    accounting_period=context_key[2],
                     payment_settlement_status=PAYMENT_SUMMARY_SETTLED_STATUS,
                 )
 
@@ -2119,7 +2137,7 @@ class MerchantReconciliationService:
         for row in grouped_detail_rows:
             if row.org_id is None or row.shop_id is None:
                 continue
-            red_sheet_context = red_sheet_contexts.get((int(row.org_id), int(row.shop_id)))
+            red_sheet_context = red_sheet_contexts.get((int(row.org_id), int(row.shop_id), _period(row.summary_year, row.summary_month)))
             if red_sheet_context is None:
                 continue
             purchase = next(
@@ -2135,7 +2153,8 @@ class MerchantReconciliationService:
             payment = red_sheet_context.payments_by_key.get((_match_text(purchase.merchant), _date_key(purchase.live_date), _match_text(purchase.live_room)))
             if payment is None or not _normalize_text(payment.receipt_merchant):
                 continue
-            net_rate = net_rate_map.get(int(row.org_id), MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE)
+            business_period = _period(row.summary_year, row.summary_month)
+            net_rate = net_rate_maps.get(business_period, {}).get(int(row.org_id), MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE)
             rows.append(
                 {
                     "org_id": int(row.org_id),
@@ -2703,8 +2722,7 @@ class MerchantReconciliationService:
         base_filters = [
             DouyinDongzhangDetail.is_deleted.is_(False),
             DouyinDongzhangDetail.source_platform_code == "douyin",
-            DouyinDongzhangDetail.summary_year == accounting_year,
-            DouyinDongzhangDetail.summary_month == accounting_month,
+            *MerchantReconciliationService._douyin_reconciliation_period_filters(accounting_year, accounting_month),
             active_shop_filter(DouyinDongzhangDetail.shop_id),
         ]
         if shop_id is not None:
@@ -2745,7 +2763,7 @@ class MerchantReconciliationService:
                     detail,
                     org_name=org_name,
                     shop_color=shop_color,
-                    load_context=detail_contexts.get(int(detail.shop_id)) or MerchantReconciliationService._empty_load_context(detail),
+                    load_context=MerchantReconciliationService._detail_context_for_detail(detail_contexts, detail),
                 )
                 payment_id = MerchantReconciliationService._optional_int(payload.get("red_sheet_payment_id"))
                 if payload.get("match_status") != "matched" or payment_id not in selected_payment_ids:
@@ -3071,8 +3089,7 @@ class MerchantReconciliationService:
         base_filters = [
             DouyinDongzhangDetail.is_deleted.is_(False),
             DouyinDongzhangDetail.source_platform_code == "douyin",
-            DouyinDongzhangDetail.summary_year == accounting_year,
-            DouyinDongzhangDetail.summary_month == accounting_month,
+            *MerchantReconciliationService._douyin_reconciliation_period_filters(accounting_year, accounting_month),
             active_shop_filter(DouyinDongzhangDetail.shop_id),
         ]
         if shop_id is not None:
@@ -3122,7 +3139,7 @@ class MerchantReconciliationService:
                 detail,
                 org_name=org_name,
                 shop_color=shop_color,
-                load_context=detail_contexts.get(int(detail.shop_id)) or MerchantReconciliationService._empty_load_context(detail),
+                load_context=MerchantReconciliationService._detail_context_for_detail(detail_contexts, detail),
             )
             for detail, org_name, shop_color in details
         ]
@@ -3154,7 +3171,7 @@ class MerchantReconciliationService:
         db: AsyncSession,
         *,
         filters: list[Any],
-        detail_contexts: dict[int, _ReconciliationLoadContext],
+        detail_contexts: dict[tuple[int, int, int], _ReconciliationLoadContext],
     ) -> list[dict[str, object]]:
         stmt = select(DouyinDongzhangDetail).where(*filters)
         details = list((await db.execute(stmt)).scalars().all())
@@ -3163,7 +3180,7 @@ class MerchantReconciliationService:
                 detail,
                 org_name=None,
                 shop_color=None,
-                load_context=detail_contexts.get(int(detail.shop_id)) or MerchantReconciliationService._empty_load_context(detail),
+                load_context=MerchantReconciliationService._detail_context_for_detail(detail_contexts, detail),
             )
             for detail in details
         ]
@@ -3177,12 +3194,11 @@ class MerchantReconciliationService:
         accounting_month: int,
         shop_id: int | None,
         org_id: str | int | None,
-    ) -> dict[int, _ReconciliationLoadContext]:
+    ) -> dict[tuple[int, int, int], _ReconciliationLoadContext]:
         base_filters = [
             DouyinDongzhangDetail.is_deleted.is_(False),
             DouyinDongzhangDetail.source_platform_code == "douyin",
-            DouyinDongzhangDetail.summary_year == accounting_year,
-            DouyinDongzhangDetail.summary_month == accounting_month,
+            *MerchantReconciliationService._douyin_reconciliation_period_filters(accounting_year, accounting_month),
             active_shop_filter(DouyinDongzhangDetail.shop_id),
         ]
         if shop_id is not None:
@@ -3195,22 +3211,37 @@ class MerchantReconciliationService:
             await db.execute(
                 select(
                     DouyinDongzhangDetail.shop_id,
+                    DouyinDongzhangDetail.summary_year,
+                    DouyinDongzhangDetail.summary_month,
                     func.coalesce(func.sum(DouyinDongzhangDetail.gmv), 0),
                     func.min(DouyinDongzhangDetail.org_id),
                 )
                 .where(*base_filters)
-                .group_by(DouyinDongzhangDetail.shop_id)
+                .group_by(
+                    DouyinDongzhangDetail.shop_id,
+                    DouyinDongzhangDetail.summary_year,
+                    DouyinDongzhangDetail.summary_month,
+                )
             )
         ).all()
 
-        contexts: dict[int, _ReconciliationLoadContext] = {}
-        accounting_period = _period(accounting_year, accounting_month)
-        net_rate_map = await MerchantReconciliationService._load_net_rate_map(
-            db,
-            org_ids=[row[2] for row in summary_rows if row[2] is not None],
-            accounting_period=accounting_period,
-        )
-        for detail_shop_id, total_gmv, detail_org_id in summary_rows:
+        contexts: dict[tuple[int, int, int], _ReconciliationLoadContext] = {}
+        net_rate_maps: dict[int, dict[int, Decimal]] = {}
+        for detail_shop_id, summary_year, summary_month, _total_gmv, detail_org_id in summary_rows:
+            if detail_org_id is None:
+                continue
+            business_period = _period(summary_year, summary_month)
+            if business_period not in net_rate_maps:
+                net_rate_maps[business_period] = await MerchantReconciliationService._load_net_rate_map(
+                    db,
+                    org_ids=[
+                        row[4]
+                        for row in summary_rows
+                        if row[4] is not None and _period(row[1], row[2]) == business_period
+                    ],
+                    accounting_period=business_period,
+                )
+        for detail_shop_id, summary_year, summary_month, total_gmv, detail_org_id in summary_rows:
             if detail_shop_id is None:
                 continue
             resolved_org_id = int(detail_org_id or (user.org_id or 0))
@@ -3218,24 +3249,40 @@ class MerchantReconciliationService:
                 db,
                 org_id=resolved_org_id,
                 shop_id=int(detail_shop_id),
-                accounting_year=accounting_year,
-                accounting_month=accounting_month,
+                summary_year=int(summary_year),
+                summary_month=int(summary_month),
+                source_year=accounting_year,
+                source_month=accounting_month,
             )
             red_sheet_context = await MerchantReconciliationService._load_red_sheet_context(
                 db,
                 org_id=resolved_org_id,
                 shop_id=int(detail_shop_id),
-                accounting_period=accounting_period,
+                accounting_period=_period(summary_year, summary_month),
             )
-            contexts[int(detail_shop_id)] = _ReconciliationLoadContext(
+            business_period = _period(summary_year, summary_month)
+            contexts[(int(detail_shop_id), int(summary_year), int(summary_month))] = _ReconciliationLoadContext(
                 org_id=resolved_org_id,
                 total_gmv=safe_decimal(total_gmv),
                 total_bic=total_bic,
                 total_insurance=total_insurance,
                 red_sheet_context=red_sheet_context,
-                net_rate=net_rate_map.get(resolved_org_id, MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE),
+                net_rate=net_rate_maps.get(business_period, {}).get(resolved_org_id, MerchantReconciliationService.DEFAULT_MERCHANT_NET_RATE),
             )
         return contexts
+
+    @staticmethod
+    def _detail_context_for_detail(
+        detail_contexts: dict[tuple[int, int, int], _ReconciliationLoadContext],
+        detail: DouyinDongzhangDetail,
+    ) -> _ReconciliationLoadContext:
+        return detail_contexts.get(
+            (
+                int(detail.shop_id),
+                int(detail.summary_year),
+                int(detail.summary_month),
+            )
+        ) or MerchantReconciliationService._empty_load_context(detail)
 
     @staticmethod
     def _empty_load_context(detail: DouyinDongzhangDetail) -> _ReconciliationLoadContext:
@@ -3254,23 +3301,25 @@ class MerchantReconciliationService:
         *,
         org_id: int,
         shop_id: int,
-        accounting_year: int,
-        accounting_month: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        summary_year: int | None = None,
+        summary_month: int | None = None,
     ) -> tuple[Decimal, Decimal]:
         filters = [
             FinancialSummary.org_id == org_id,
             FinancialSummary.shop_id == shop_id,
             FinancialSummary.source_platform_code == "douyin",
-            FinancialSummary.summary_year == accounting_year,
-            FinancialSummary.summary_month == accounting_month,
             FinancialSummary.is_deleted.is_(False),
         ]
         if source_year is not None:
             filters.append(FinancialSummary.source_year == source_year)
         if source_month is not None:
             filters.append(FinancialSummary.source_month == source_month)
+        if summary_year is not None:
+            filters.append(FinancialSummary.summary_year == summary_year)
+        if summary_month is not None:
+            filters.append(FinancialSummary.summary_month == summary_month)
         row = (
             await db.execute(
                 select(
@@ -3332,13 +3381,13 @@ class MerchantReconciliationService:
         net_rate_by_org_period: dict[tuple[int, int], Decimal] = {}
         for (org_id, shop_id, source_year, source_month, accounting_year, accounting_month), group in detail_by_shop_period.items():
             _ = group
-            source_period = _period(source_year, source_month)
-            net_rate_key = (org_id, source_period)
+            business_period = _period(accounting_year, accounting_month)
+            net_rate_key = (org_id, business_period)
             if net_rate_key not in net_rate_by_org_period:
                 period_net_rates = await MerchantReconciliationService._load_net_rate_map(
                     db,
                     org_ids=[org_id],
-                    accounting_period=source_period,
+                    accounting_period=business_period,
                 )
                 net_rate_by_org_period[net_rate_key] = period_net_rates.get(
                     org_id,
@@ -3348,17 +3397,17 @@ class MerchantReconciliationService:
                 db,
                 org_id=org_id,
                 shop_id=shop_id,
-                accounting_year=accounting_year,
-                accounting_month=accounting_month,
                 source_year=source_year,
                 source_month=source_month,
+                summary_year=accounting_year,
+                summary_month=accounting_month,
             )
             total_bic, total_insurance = await MerchantReconciliationService._load_summary_totals(
                 db,
                 org_id=org_id,
                 shop_id=shop_id,
-                accounting_year=accounting_year,
-                accounting_month=accounting_month,
+                summary_year=accounting_year,
+                summary_month=accounting_month,
                 source_year=source_year,
                 source_month=source_month,
             )
@@ -3366,7 +3415,7 @@ class MerchantReconciliationService:
                 db,
                 org_id=org_id,
                 shop_id=shop_id,
-                accounting_period=_period(source_year, source_month),
+                accounting_period=_period(accounting_year, accounting_month),
             )
             context_by_key[(org_id, shop_id, source_year, source_month, accounting_year, accounting_month)] = _ReconciliationLoadContext(
                 org_id=org_id,
@@ -3400,23 +3449,25 @@ class MerchantReconciliationService:
         *,
         org_id: int,
         shop_id: int,
-        accounting_year: int,
-        accounting_month: int,
         source_year: int | None = None,
         source_month: int | None = None,
+        summary_year: int | None = None,
+        summary_month: int | None = None,
     ) -> Decimal:
         filters = [
             DouyinDongzhangDetail.org_id == org_id,
             DouyinDongzhangDetail.shop_id == shop_id,
             DouyinDongzhangDetail.source_platform_code == "douyin",
-            DouyinDongzhangDetail.summary_year == accounting_year,
-            DouyinDongzhangDetail.summary_month == accounting_month,
             DouyinDongzhangDetail.is_deleted.is_(False),
         ]
         if source_year is not None:
             filters.append(DouyinDongzhangDetail.source_year == source_year)
         if source_month is not None:
             filters.append(DouyinDongzhangDetail.source_month == source_month)
+        if summary_year is not None:
+            filters.append(DouyinDongzhangDetail.summary_year == summary_year)
+        if summary_month is not None:
+            filters.append(DouyinDongzhangDetail.summary_month == summary_month)
         total = (await db.execute(select(func.coalesce(func.sum(DouyinDongzhangDetail.gmv), 0)).where(*filters))).scalar()
         return safe_decimal(total)
 

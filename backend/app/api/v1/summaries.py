@@ -1,4 +1,4 @@
-"""Summaries API — query and export financial summaries."""
+"""汇总报表查询与导出接口。"""
 
 from urllib.parse import quote
 
@@ -95,7 +95,7 @@ async def list_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Query financial summaries with filters."""
+    """分页查询汇总数据列表。"""
     org_ids = resolve_org_ids(
         user_role=current_user.role,
         user_org_id=current_user.org_id,
@@ -234,7 +234,7 @@ async def list_report_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Query accounting-month aggregated financial reports."""
+    """分页查询按核算月聚合的汇总报表。"""
     org_ids = resolve_org_ids(
         user_role=current_user.role,
         user_org_id=current_user.org_id,
@@ -351,6 +351,7 @@ async def list_summary_dongzhang_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """查询指定汇总记录关联的动账源明细。"""
     org_ids = resolve_org_ids(
         user_role=current_user.role,
         user_org_id=current_user.org_id,
@@ -400,6 +401,7 @@ async def export_summary_dongzhang_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """导出指定汇总记录关联的动账源明细。"""
     org_ids = resolve_org_ids(
         user_role=current_user.role,
         user_org_id=current_user.org_id,
@@ -475,7 +477,7 @@ async def export_report_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Export accounting-month aggregated reports to Excel."""
+    """导出按核算月聚合的汇总报表。"""
     org_ids = resolve_org_ids(
         user_role=current_user.role,
         user_org_id=current_user.org_id,
@@ -605,7 +607,7 @@ async def export_summaries(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Export summaries to Excel. Returns a streaming .xlsx file."""
+    """导出汇总数据列表。"""
     org_ids = resolve_org_ids(
         user_role=current_user.role,
         user_org_id=current_user.org_id,

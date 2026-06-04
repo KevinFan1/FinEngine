@@ -1,4 +1,4 @@
-"""Upload API — batch management and uploaded-file callback."""
+"""上传批次与文件回调接口。"""
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,7 @@ async def create_upload_batch(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Create a new upload batch."""
+    """创建新的上传批次。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -45,7 +45,7 @@ async def upload_file_callback(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Record a completed file upload and auto-create a processing task."""
+    """登记上传完成的文件并自动创建处理任务。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
 
@@ -71,7 +71,7 @@ async def list_upload_batches(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List upload batches. Scoped to current user's org."""
+    """分页查询当前用户可见的上传批次。"""
     org_id = current_user.org_id if current_user.role != "superadmin" else None
     batches, total = await UploadService.list_batches(db, org_id=org_id, page=page, page_size=page_size)
     return ApiResponse(
@@ -90,7 +90,7 @@ async def get_upload_batch_detail(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Get upload batch detail with file list."""
+    """获取上传批次详情及文件列表。"""
     batch = await UploadService.get_batch_detail(db, batch_id, user=current_user)
     if batch is None:
         return ApiResponse(code=404, message="批次不存在")

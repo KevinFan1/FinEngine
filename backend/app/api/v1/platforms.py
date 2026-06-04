@@ -18,7 +18,7 @@ async def list_platforms(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """List all platforms."""
+    """查询全部启用的平台配置。"""
     result = await db.execute(select(Platform).where(Platform.is_deleted.is_(False)).order_by(Platform.sort_order, Platform.id))
     platforms = list(result.scalars().all())
     return ApiResponse(data=[PlatformOut.model_validate(p) for p in platforms])
@@ -33,7 +33,7 @@ async def update_platform(
     _superadmin: User = Depends(require_superadmin),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update platform config (superadmin only)."""
+    """更新平台配置。"""
     result = await db.execute(select(Platform).where(Platform.id == platform_id, Platform.is_deleted.is_(False)))
     platform = result.scalar_one_or_none()
     if platform is None:
