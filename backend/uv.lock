@@ -390,6 +390,7 @@ dependencies = [
     { name = "bcrypt" },
     { name = "celery", extra = ["redis"] },
     { name = "fastapi" },
+    { name = "greenlet" },
     { name = "httpx" },
     { name = "loguru" },
     { name = "openpyxl" },
@@ -403,7 +404,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "redis" },
     { name = "slowapi" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "xlrd" },
 ]
@@ -424,6 +425,7 @@ requires-dist = [
     { name = "bcrypt", specifier = "<5.0.0" },
     { name = "celery", extras = ["redis"], specifier = "==5.4.0" },
     { name = "fastapi", specifier = "==0.115.6" },
+    { name = "greenlet", specifier = "==3.5.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "openpyxl", specifier = "==3.1.5" },
@@ -437,7 +439,7 @@ requires-dist = [
     { name = "python-multipart", specifier = "==0.0.18" },
     { name = "redis", specifier = "==5.2.1" },
     { name = "slowapi", specifier = ">=0.1.9" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.0.36" },
+    { name = "sqlalchemy", specifier = "==2.0.36" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.34.0" },
     { name = "xlrd", specifier = "==2.0.1" },
 ]
@@ -1034,11 +1036,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/60/70e681de02a13c4b27979b7b78da3058c49bacc9858c89ba672e030f03f2/SQLAlchemy-2.0.36-cp312-cp312-win32.whl", hash = "sha256:79d2e78abc26d871875b419e1fd3c0bca31a1cb0043277d0d850014599626c2e", size = 2062709, upload_time = "2024-10-15T20:16:29.946Z" },
     { url = "https://files.pythonhosted.org/packages/b7/ed/f6cd9395e41bfe47dd253d74d2dfc3cab34980d4e20c8878cb1117306085/SQLAlchemy-2.0.36-cp312-cp312-win_amd64.whl", hash = "sha256:b544ad1935a8541d177cb402948b94e871067656b3a0b9e91dbec136b06a2ff5", size = 2088433, upload_time = "2024-10-15T20:16:33.501Z" },
     { url = "https://files.pythonhosted.org/packages/b8/49/21633706dd6feb14cd3f7935fc00b60870ea057686035e1a99ae6d9d9d53/SQLAlchemy-2.0.36-py3-none-any.whl", hash = "sha256:fddbe92b4760c6f5d48162aef14824add991aeda8ddadb3c31d56eb15ca69f8e", size = 1883787, upload_time = "2024-10-15T20:04:30.265Z" },
-]
-
-[package.optional-dependencies]
-asyncio = [
-    { name = "greenlet" },
 ]
 
 [[package]]
