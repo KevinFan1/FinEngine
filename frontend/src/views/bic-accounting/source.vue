@@ -43,7 +43,7 @@
                 <div class="card-header">
                     <div class="summary-title-group">
                         <span class="card-header-title">源数据</span>
-                        <span class="summary-count">共 {{ pagination.total }} 条 · 已选 {{ selectedRows.length }} 条</span>
+                        <span class="summary-count">当前页 {{ tableData.length }} 条 · 已选 {{ selectedRows.length }} 条</span>
                     </div>
                     <div class="card-header-actions">
                         <el-button :disabled="selectedRows.length === 0" @click="clearSelectedRows">清空选中</el-button>
@@ -66,7 +66,7 @@
             />
 
             <div class="pagination-area">
-                <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize" :total="pagination.total" :page-sizes="PAGE_SIZE_OPTIONS" :layout="PAGINATION_LAYOUT" background @size-change="fetchData" @current-change="fetchData" />
+                <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize" :total="paginationDisplayTotal" :page-sizes="PAGE_SIZE_OPTIONS" :layout="LIGHT_PAGINATION_LAYOUT" background @size-change="fetchData" @current-change="fetchData" />
             </div>
         </el-card>
     </div>
@@ -85,7 +85,7 @@ import ShopBadge from "@/components/ShopBadge.vue";
 import { listBicSourceRows, type BicSourceExportScope, type BicSourceRow } from "@/api/bicAccounting";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
+import { DEFAULT_PAGE_SIZE, LIGHT_PAGINATION_LAYOUT, PAGE_SIZE_OPTIONS, visiblePaginationTotal } from "@/utils/pagination";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import {
     buildExportFilename,
@@ -105,7 +105,15 @@ const loading = ref(false);
 const tableRef = ref<SourceRowsTableRef>();
 const tableData = ref<BicSourceRow[]>([]);
 const selectedRows = ref<BicSourceRow[]>([]);
-const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
+const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: null as number | null });
+const paginationDisplayTotal = computed(() =>
+    visiblePaginationTotal(
+        pagination.total,
+        pagination.page,
+        pagination.pageSize,
+        tableData.value.length,
+    ),
+);
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
 const shopOptions = ref<Shop[]>([]);
@@ -183,7 +191,7 @@ async function fetchData() {
     try {
         const data = await listBicSourceRows(queryParams());
         tableData.value = data.items;
-        pagination.total = data.total;
+        pagination.total = data.total ?? null;
     } finally {
         loading.value = false;
     }

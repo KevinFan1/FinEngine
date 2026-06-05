@@ -171,7 +171,7 @@
                     <div class="summary-title-group">
                         <span class="card-header-title">明细数据</span>
                         <span class="summary-count"
-                            >共 {{ pagination.total }} 条 · 已选
+                            >当前页 {{ tableData.length }} 条 · 已选
                             {{ selectedRows.length }} 条</span
                         >
                     </div>
@@ -327,9 +327,9 @@
                 <el-pagination
                     v-model:current-page="pagination.page"
                     v-model:page-size="pagination.pageSize"
-                    :total="pagination.total"
+                    :total="paginationDisplayTotal"
                     :page-sizes="PAGE_SIZE_OPTIONS"
-                    :layout="PAGINATION_LAYOUT"
+                    :layout="LIGHT_PAGINATION_LAYOUT"
                     background
                     @size-change="fetchData"
                     @current-change="fetchData"
@@ -364,8 +364,9 @@ import {
 } from "@/api/transactionAccounting";
 import {
     DEFAULT_PAGE_SIZE,
+    LIGHT_PAGINATION_LAYOUT,
     PAGE_SIZE_OPTIONS,
-    PAGINATION_LAYOUT,
+    visiblePaginationTotal,
 } from "@/utils/pagination";
 import {
     detailSummaryMethod,
@@ -408,7 +409,15 @@ const shopLoading = ref(false);
 const exportAllLoading = ref(false);
 const exportCurrentPageLoading = ref(false);
 const exportSelectedLoading = ref(false);
-const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
+const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: null as number | null });
+const paginationDisplayTotal = computed(() =>
+    visiblePaginationTotal(
+        pagination.total,
+        pagination.page,
+        pagination.pageSize,
+        tableData.value.length,
+    ),
+);
 const searchForm = reactive({
     businessMonthRange: null as string[] | null,
     orgIds: [] as number[],
@@ -554,7 +563,7 @@ async function fetchData() {
     try {
         const data = await listTransactionDetails(queryParams());
         tableData.value = data.items;
-        pagination.total = data.total;
+        pagination.total = data.total ?? null;
     } finally {
         loading.value = false;
     }

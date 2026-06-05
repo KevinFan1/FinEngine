@@ -4,12 +4,14 @@ import pytest
 
 from app.core.database import run_after_commit_callbacks
 from app.models.bic_accounting import BicUploadFile
+from app.models.reconciliation_checklist import ReconciliationChecklistTask, ReconciliationChecklistUploadFile
 from app.models.task import ProcessingTask
 from app.models.transaction_accounting import TransactionTask, TransactionUploadFile
 from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
 from app.services import upload_service as upload_service_module
 from app.services.bic_accounting_service import BicAccountingService
+from app.services.reconciliation_checklist_service import ReconciliationChecklistService
 from app.services.transaction_accounting_service import (
     TransactionAccountingService,
 )
@@ -109,6 +111,22 @@ class _ExistingBicBusinessSession(_CreateOnlySession):
         statement = str(stmt)
         if "WHERE fin_bic_upload_files.org_id" in statement:
             return _ScalarResult(self.existing_upload)
+        return _ScalarResult(None)
+
+
+class _ExistingChecklistSourceSession(_CreateOnlySession):
+    def __init__(self, *, existing_upload: ReconciliationChecklistUploadFile, existing_task: ReconciliationChecklistTask | None = None) -> None:
+        super().__init__()
+        self.existing_upload = existing_upload
+        self.existing_task = existing_task
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        statement = str(stmt)
+        if "WHERE fin_reconciliation_checklist_upload_files.source_upload_file_id" in statement:
+            return _ScalarResult(self.existing_upload)
+        if "WHERE fin_reconciliation_checklist_tasks.file_id" in statement:
+            return _ScalarResult(self.existing_task)
         return _ScalarResult(None)
 
 
@@ -492,6 +510,102 @@ async def test_bic_accounting_marks_task_failed_when_dispatch_fails(
     assert "BIC任务投递失败" in (task.error_message or "")
 
 
+@pytest.mark.asyncio
+async def test_reconciliation_checklist_creates_independent_records_from_shared_upload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _CreateOnlySession()
+    user = make_user(user_id=7, org_id=9)
+    shared_upload = make_shared_upload(upload_id=41, parsed_type="对账清单")
+    shared_upload.parsed_year = None
+    shared_upload.parsed_month = None
+    shared_upload.parsed_shop = ""
+    shared_upload.detected_platform = ""
+    shared_upload.source_platform_code = ""
+    delay_calls: list[int] = []
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+    monkeypatch.setattr(
+        "app.tasks.reconciliation_checklist.run_reconciliation_checklist_task",
+        SimpleNamespace(
+            delay=lambda task_id: delay_calls.append(task_id)
+            or SimpleNamespace(id=f"checklist-{task_id}"),
+        ),
+    )
+
+    task = await ReconciliationChecklistService.create_from_shared_upload(
+        session,  # type: ignore[arg-type]
+        upload_file=shared_upload,
+        user=user,
+    )
+
+    derived_upload = next(
+        item
+        for item in session.added
+        if item.__class__.__name__ == "ReconciliationChecklistUploadFile"
+    )
+    assert derived_upload.source_upload_file_id == shared_upload.id
+    assert derived_upload.oss_key == shared_upload.oss_key
+    assert derived_upload.original_name == shared_upload.original_name
+    assert task.file_id == derived_upload.id
+    assert task.org_id == shared_upload.org_id
+    assert task.celery_task_id is None
+    assert delay_calls == []
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
+    assert task.celery_task_id == f"checklist-{task.id}"
+    assert delay_calls == [task.id]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_checklist_reuses_existing_source_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing_upload = ReconciliationChecklistUploadFile(
+        id=91,
+        org_id=9,
+        user_id=7,
+        source_upload_file_id=41,
+        original_name="对账清单.xlsx",
+        oss_key="old-key.xlsx",
+        status="processed",
+    )
+    existing_task = ReconciliationChecklistTask(
+        id=92,
+        file_id=91,
+        org_id=9,
+        user_id=7,
+        status="success",
+    )
+    session = _ExistingChecklistSourceSession(existing_upload=existing_upload, existing_task=existing_task)
+    user = make_user(user_id=7, org_id=9)
+    shared_upload = make_shared_upload(upload_id=41, parsed_type="对账清单")
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+
+    task = await ReconciliationChecklistService.create_from_shared_upload(
+        session,  # type: ignore[arg-type]
+        upload_file=shared_upload,
+        user=user,
+    )
+
+    assert task is existing_task
+    assert not any(item.__class__.__name__ == "ReconciliationChecklistUploadFile" for item in session.added)
+
+
 class _UploadDispatchSession:
     def __init__(self) -> None:
         self.added = []
@@ -519,12 +633,14 @@ class _UploadDispatchSession:
         "parsed_month",
         "expected_transaction_calls",
         "expected_bic_calls",
+        "expected_checklist_calls",
     ),
     [
-        ("动账", 2026, 2, 1, 0),
-        ("bic", 2026, 2, 0, 1),
-        ("订单", 2026, 2, 0, 0),
-        ("订单", None, None, 0, 0),
+        ("动账", 2026, 2, 1, 0, 0),
+        ("bic", 2026, 2, 0, 1, 0),
+        ("对账清单", None, None, 0, 0, 1),
+        ("订单", 2026, 2, 0, 0, 0),
+        ("订单", None, None, 0, 0, 0),
     ],
 )
 async def test_upload_service_dispatches_shared_upload_to_independent_flows(
@@ -534,12 +650,14 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
     parsed_month: int | None,
     expected_transaction_calls: int,
     expected_bic_calls: int,
+    expected_checklist_calls: int,
 ) -> None:
     session = _UploadDispatchSession()
     user = make_user(user_id=7, org_id=9)
     batch = UploadBatch(id=1, org_id=9, user_id=7, file_count=1)
     transaction_calls: list[int] = []
     bic_calls: list[int] = []
+    checklist_calls: list[int] = []
     audit_descriptions: list[str] = []
 
     async def fake_get_batch_for_user(*args, **kwargs):
@@ -568,6 +686,11 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
         bic_calls.append(upload_file.id)
         return SimpleNamespace(id=601)
 
+    async def fake_checklist_create(*args, **kwargs):
+        upload_file = kwargs["upload_file"]
+        checklist_calls.append(upload_file.id)
+        return SimpleNamespace(id=701)
+
     monkeypatch.setattr(UploadService, "get_batch_for_user", fake_get_batch_for_user)
     monkeypatch.setattr(
         "app.services.upload_service.QuotaService.check_storage_quota",
@@ -585,9 +708,16 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
             order_scope_code="douyin",
         )
 
+    async def fake_resolve_upload_period_header(*args, **kwargs):
+        return "动账时间"
+
     monkeypatch.setattr(
         "app.services.upload_service.resolve_platform_profile",
         fake_resolve_platform_profile,
+    )
+    monkeypatch.setattr(
+        "app.services.upload_service.resolve_upload_period_header",
+        fake_resolve_upload_period_header,
     )
     monkeypatch.setattr(
         "app.services.upload_service.ShopService.get_or_create_shop",
@@ -613,6 +743,12 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
         fake_bic_create,
         raising=False,
     )
+    monkeypatch.setattr(
+        ReconciliationChecklistService,
+        "create_from_shared_upload",
+        fake_checklist_create,
+        raising=False,
+    )
 
     callback_data = upload_service_module.UploadFileCallback(
         batch_id=1,
@@ -627,8 +763,8 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
         parsed_year=parsed_year,
         parsed_month=parsed_month,
         parsed_type=parsed_type,
-        parsed_shop="抖音旗舰店",
-        detected_platform="douyin",
+        parsed_shop="" if parsed_type == "对账清单" else "抖音旗舰店",
+        detected_platform="" if parsed_type == "对账清单" else "douyin",
     )
 
     upload_file = await UploadService.handle_file_callback(
@@ -647,4 +783,5 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
     assert generic_task.file_id == upload_file.id
     assert transaction_calls == [upload_file.id] * expected_transaction_calls
     assert bic_calls == [upload_file.id] * expected_bic_calls
+    assert checklist_calls == [upload_file.id] * expected_checklist_calls
     assert any("大小 4.00 KB" in description for description in audit_descriptions)

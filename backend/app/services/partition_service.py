@@ -1,4 +1,4 @@
-"""Helpers for monthly range partitions used by BIC and Douyin source tables."""
+"""Helpers for monthly range partitions used by source and summary tables."""
 
 from __future__ import annotations
 
@@ -38,6 +38,27 @@ DOUYIN_SOURCE_PARTITION = PartitionSpec(
     partition_column="source_period",
     legacy_table_name="fin_douyin_dongzhang_details_legacy_032",
     prefix="fin_douyin_dongzhang_details_",
+)
+
+RECONCILIATION_CHECKLIST_PARTITION = PartitionSpec(
+    table_name="fin_reconciliation_checklist_details",
+    partition_column="accounting_period",
+    legacy_table_name="fin_reconciliation_checklist_details_legacy",
+    prefix="fin_reconciliation_checklist_details_",
+)
+
+RECONCILIATION_CHECKLIST_SUMMARY_PARTITION = PartitionSpec(
+    table_name="fin_reconciliation_checklist_summary_rows",
+    partition_column="accounting_period",
+    legacy_table_name="fin_reconciliation_checklist_summary_rows_legacy",
+    prefix="fin_reconciliation_checklist_summary_rows_",
+)
+
+RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION = PartitionSpec(
+    table_name="fin_reconciliation_checklist_summary_product_rows",
+    partition_column="accounting_period",
+    legacy_table_name="fin_reconciliation_checklist_summary_product_rows_legacy",
+    prefix="fin_reconciliation_checklist_summary_product_rows_",
 )
 
 
@@ -176,5 +197,22 @@ async def ensure_month_window(
 ) -> None:
     if end_period < start_period:
         return
+    if not await _table_exists(db, spec.table_name):
+        return
+    if not await _is_partitioned(db, spec.table_name):
+        return
     for period in iter_yyyymm_range(start_period, end_period):
-        await ensure_month_partition(db, spec=spec, period=period)
+        if period <= 0:
+            continue
+        partition = partition_name(spec, period)
+        next_period = next_yyyymm(period)
+        await db.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS {partition}
+                PARTITION OF {spec.table_name}
+                FOR VALUES FROM ({period}) TO ({next_period})
+                """
+            )
+        )
+        await _copy_parent_comments_to_partition(db, spec=spec, partition=partition)

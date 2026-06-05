@@ -571,7 +571,7 @@ async function fetchData() {
     try {
         const data = await listTransactionTasks(queryParams());
         tableData.value = data.items;
-        pagination.total = data.total;
+        pagination.total = data.total ?? 0;
         const selectedIds = new Set(selectedRows.value.map((row) => row.id));
         selectedRows.value = tableData.value.filter((row) => selectedIds.has(row.id));
     } finally {

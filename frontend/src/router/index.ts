@@ -176,6 +176,30 @@ const routes: RouteRecordRaw[] = [
                 meta: { title: "BIC源明细", icon: "Document" },
             },
             {
+                path: "reconciliation-checklist",
+                name: "ReconciliationChecklist",
+                redirect: "/reconciliation-checklist/summary",
+                meta: { title: "对账清单", icon: "DataAnalysis" },
+            },
+            {
+                path: "reconciliation-checklist/upload",
+                name: "ReconciliationChecklistUpload",
+                component: () => import("@/views/reconciliation-checklist/upload.vue"),
+                meta: { title: "对账清单上传", icon: "Upload" },
+            },
+            {
+                path: "reconciliation-checklist/tasks",
+                name: "ReconciliationChecklistTasks",
+                component: () => import("@/views/reconciliation-checklist/tasks.vue"),
+                meta: { title: "对账清单任务", icon: "List" },
+            },
+            {
+                path: "reconciliation-checklist/summary",
+                name: "ReconciliationChecklistSummary",
+                component: () => import("@/views/reconciliation-checklist/summary.vue"),
+                meta: { title: "对账清单汇总", icon: "DataAnalysis" },
+            },
+            {
                 path: "merchant-reconciliation",
                 name: "MerchantReconciliation",
                 redirect: "/merchant-reconciliation/tasks",

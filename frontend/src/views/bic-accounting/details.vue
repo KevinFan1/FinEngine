@@ -154,7 +154,7 @@
                 height="calc(100vh - 340px)"
             />
             <div class="pagination-area">
-                <el-pagination v-model:current-page="sourcePagination.page" v-model:page-size="sourcePagination.pageSize" :total="sourcePagination.total" :page-sizes="PAGE_SIZE_OPTIONS" :layout="PAGINATION_LAYOUT" background @size-change="fetchSourceRows" @current-change="fetchSourceRows" />
+                <el-pagination v-model:current-page="sourcePagination.page" v-model:page-size="sourcePagination.pageSize" :total="sourcePaginationDisplayTotal" :page-sizes="PAGE_SIZE_OPTIONS" :layout="LIGHT_PAGINATION_LAYOUT" background @size-change="fetchSourceRows" @current-change="fetchSourceRows" />
             </div>
         </el-drawer>
 
@@ -271,7 +271,7 @@ import { listBicDetails, listBicSourceRows, type BicDetail, type BicExportScope,
 import BicSourceRowsTable from "./BicSourceRowsTable.vue";
 import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
+import { DEFAULT_PAGE_SIZE, LIGHT_PAGINATION_LAYOUT, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT, visiblePaginationTotal } from "@/utils/pagination";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import {
     buildExportFilename,
@@ -307,7 +307,15 @@ const sourceDrawerVisible = ref(false);
 const sourceLoading = ref(false);
 const sourceDetail = ref<BicDetail | null>(null);
 const sourceRows = ref<BicSourceRow[]>([]);
-const sourcePagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
+const sourcePagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: null as number | null });
+const sourcePaginationDisplayTotal = computed(() =>
+    visiblePaginationTotal(
+        sourcePagination.total,
+        sourcePagination.page,
+        sourcePagination.pageSize,
+        sourceRows.value.length,
+    ),
+);
 const reconciliationForm = reactive({
     accountingMonth: "",
     orgIds: [] as number[],
@@ -450,7 +458,7 @@ async function fetchData() {
     try {
         const data = await listBicDetails(queryParams());
         tableData.value = data.items;
-        pagination.total = data.total;
+        pagination.total = data.total ?? 0;
     } finally {
         loading.value = false;
     }
@@ -478,7 +486,7 @@ async function fetchSourceRows() {
             ...splitMonthRange(drawerSearchForm.monthRange),
         });
         sourceRows.value = data.items;
-        sourcePagination.total = data.total;
+        sourcePagination.total = data.total ?? null;
     } finally {
         sourceLoading.value = false;
     }
@@ -814,9 +822,10 @@ async function fetchReconciliationPreview() {
             qic_warehouse: reconciliationForm.qicWarehouse || undefined,
             accounting_year: reconciliationSelectedMonth.value?.accounting_year,
             accounting_month: reconciliationSelectedMonth.value?.accounting_month,
+            include_total: true,
         });
         if (ticket !== reconciliationPreviewTicket) return;
-        reconciliationPreviewTotal.value = data.total;
+        reconciliationPreviewTotal.value = data.total ?? 0;
     } finally {
         if (ticket === reconciliationPreviewTicket) reconciliationPreviewLoading.value = false;
     }

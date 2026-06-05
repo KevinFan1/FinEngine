@@ -1116,14 +1116,15 @@ class BicAccountingService:
         ids: list[int] | None = None,
         page: int | None = 1,
         page_size: int | None = 50,
-    ) -> tuple[list[dict[str, object]], int]:
+        include_total: bool = False,
+    ) -> tuple[list[dict[str, object]], int | None]:
         filters = [BicSourceRow.is_deleted.is_(False), active_shop_filter(BicSourceRow.shop_id)]
         org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         if org_ids is not None:
             filters.append(BicSourceRow.org_id.in_(org_ids))
         if ids is not None:
             if not ids:
-                return [], 0
+                return [], 0 if include_total else None
             filters.append(BicSourceRow.id.in_(ids))
         if detail_id is not None:
             filters.append(BicSourceRow.detail_id == detail_id)
@@ -1230,8 +1231,10 @@ class BicAccountingService:
                 BicSourceRow.source_row_number,
             )
         )
-        count_stmt = select(func.count()).select_from(BicSourceRow).where(*filters)
-        total = (await db.execute(count_stmt)).scalar() or 0
+        total = None
+        if include_total:
+            count_stmt = select(func.count()).select_from(BicSourceRow).where(*filters)
+            total = (await db.execute(count_stmt)).scalar() or 0
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)

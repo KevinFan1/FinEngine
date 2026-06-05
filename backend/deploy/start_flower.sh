@@ -19,31 +19,23 @@ export PYTHONPATH="${BACKEND_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 source "${SCRIPT_DIR}/load_deploy_env.sh"
 load_deploy_env "${BACKEND_DIR}/.env" \
-  CELERY_LOG_LEVEL \
-  CELERY_POOL \
-  CELERY_HOSTNAME \
-  CELERY_QUEUES \
-  CELERY_CONCURRENCY
+  FLOWER_HOST \
+  FLOWER_PORT \
+  FLOWER_BASIC_AUTH
 
-CELERY_LOG_LEVEL="${CELERY_LOG_LEVEL:-INFO}"
-CELERY_POOL="${CELERY_POOL:-solo}"
-CELERY_HOSTNAME="${CELERY_HOSTNAME:-finengine@%h}"
+FLOWER_HOST="${FLOWER_HOST:-127.0.0.1}"
+FLOWER_PORT="${FLOWER_PORT:-5555}"
 
-CELERY_ARGS=(
+FLOWER_ARGS=(
   -m celery
   -A app.tasks.celery_app:celery_app
-  worker
-  --loglevel "${CELERY_LOG_LEVEL}"
-  --pool "${CELERY_POOL}"
-  --hostname "${CELERY_HOSTNAME}"
+  flower
+  --address="${FLOWER_HOST}"
+  --port="${FLOWER_PORT}"
 )
 
-if [[ -n "${CELERY_QUEUES:-}" ]]; then
-  CELERY_ARGS+=(--queues "${CELERY_QUEUES}")
+if [[ -n "${FLOWER_BASIC_AUTH:-}" ]]; then
+  FLOWER_ARGS+=(--basic-auth="${FLOWER_BASIC_AUTH}")
 fi
 
-if [[ -n "${CELERY_CONCURRENCY:-}" ]]; then
-  CELERY_ARGS+=(--concurrency "${CELERY_CONCURRENCY}")
-fi
-
-exec "${PYTHON_BIN}" "${CELERY_ARGS[@]}"
+exec "${PYTHON_BIN}" "${FLOWER_ARGS[@]}"

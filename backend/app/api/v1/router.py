@@ -13,6 +13,7 @@ from app.api.v1 import (
     oss,
     platforms,
     quota,
+    reconciliation_checklist,
     shops,
     summary_adjustments,
     summaries,
@@ -38,6 +39,7 @@ api_router.include_router(summaries.router, prefix="/summaries", tags=["汇总�
 api_router.include_router(summary_adjustments.router, prefix="/summary-adjustments", tags=["汇总调整"])
 api_router.include_router(transaction_accounting.router, prefix="/transaction-accounting", tags=["动账核算"])
 api_router.include_router(bic_accounting.router, prefix="/bic-accounting", tags=["BIC核算"])
+api_router.include_router(reconciliation_checklist.router, prefix="/reconciliation-checklist", tags=["对账清单"])
 api_router.include_router(merchant_reconciliation.router, prefix="/merchant-reconciliation", tags=["商家对账"])
 api_router.include_router(platforms.router, prefix="/platforms", tags=["平台配置"])
 api_router.include_router(category_dicts.router, prefix="/category-dicts", tags=["分类字典"])

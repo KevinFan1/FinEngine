@@ -246,6 +246,7 @@ export interface TransactionTaskListParams {
 export interface TransactionDetailListParams {
     page?: number;
     page_size?: number;
+    include_total?: boolean;
     org_id?: number | string;
     task_id?: number;
     status?: string;

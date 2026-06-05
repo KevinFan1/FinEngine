@@ -700,6 +700,7 @@ const typeOptions = [
     { label: "其他服务款", value: "其他服务款" },
     { label: "红单", value: "红单" },
     { label: "银行流水", value: "银行流水" },
+    { label: "对账清单", value: "对账清单" },
 ];
 
 // Table

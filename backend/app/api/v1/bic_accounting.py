@@ -388,6 +388,7 @@ async def export_details(
 async def list_source_rows(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    include_total: bool = Query(False),
     task_id: int | None = Query(None),
     platform_code: str | None = Query(None),
     shop_name: str | None = Query(None),
@@ -423,6 +424,7 @@ async def list_source_rows(
         accounting_end_month=accounting_end_month,
         page=page,
         page_size=page_size,
+        include_total=include_total,
     )
     return ApiResponse(data=PageResponse(items=[BicSourceRowOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
 
@@ -485,6 +487,7 @@ async def list_detail_source_rows(
     detail_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    include_total: bool = Query(False),
     org_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
@@ -497,6 +500,7 @@ async def list_detail_source_rows(
         detail_id=detail_id,
         page=page,
         page_size=page_size,
+        include_total=include_total,
     )
     return ApiResponse(data=PageResponse(items=[BicSourceRowOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
 

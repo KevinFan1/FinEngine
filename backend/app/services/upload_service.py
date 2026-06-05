@@ -15,6 +15,7 @@ from app.services.audit_service import AuditService
 from app.services.bic_accounting_service import BicAccountingService
 from app.services.platform_profile_service import resolve_platform_profile
 from app.services.quota_service import QuotaService
+from app.services.reconciliation_checklist_service import CHECKLIST_FILE_TYPE, ReconciliationChecklistService
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
@@ -41,6 +42,10 @@ def _is_merchant_red_sheet_type(type_code: str | None) -> bool:
 
 def _is_merchant_bank_flow_type(type_code: str | None) -> bool:
     return (type_code or "").strip().lower() == MERCHANT_BANK_FLOW_TYPE.lower()
+
+
+def _is_reconciliation_checklist_type(type_code: str | None) -> bool:
+    return (type_code or "").strip() == CHECKLIST_FILE_TYPE
 
 
 class UploadService:
@@ -157,12 +162,14 @@ class UploadService:
 
         is_red_sheet = _is_merchant_red_sheet_type(data.parsed_type)
         is_bank_flow = _is_merchant_bank_flow_type(data.parsed_type)
+        is_checklist = _is_reconciliation_checklist_type(data.parsed_type)
 
         if data.parsed_month is not None and (data.parsed_month < 1 or data.parsed_month > 12):
             raise ValueError("所属月份不正确")
         if (
             not is_red_sheet
             and not is_bank_flow
+            and not is_checklist
             and not await resolve_upload_period_header(
                 db,
                 platform_profile.source_platform_code if platform_profile else data.detected_platform,
@@ -230,6 +237,21 @@ class UploadService:
             UploadService.dispatch_red_sheet_task_after_commit(db, task=task, upload_file=upload_file)
         elif is_bank_flow:
             UploadService.dispatch_bank_flow_task_after_commit(db, task=task, upload_file=upload_file)
+        elif is_checklist:
+            task.status = "success"
+            task.progress = 100
+            task.processed_rows = 0
+            task.success_rows = 0
+            task.failed_rows = 0
+            task.result_summary = {"message": "已提交对账清单独立处理任务"}
+            upload_file.status = "processed"
+            await UploadService.dispatch_independent_tasks(
+                db,
+                upload_file=upload_file,
+                user=user,
+                ip=ip,
+                user_agent=user_agent,
+            )
         else:
             # Dispatch Celery task — use hardcoded platform processor
             from app.tasks.processors import PLATFORM_PROCESSORS
@@ -374,6 +396,15 @@ class UploadService:
 
         if source_platform == "douyin" and parsed_type == "bic":
             await BicAccountingService.create_from_shared_upload(
+                db,
+                upload_file=upload_file,
+                user=user,
+                ip=ip,
+                user_agent=user_agent,
+            )
+
+        if (upload_file.parsed_type or "").strip() == CHECKLIST_FILE_TYPE:
+            await ReconciliationChecklistService.create_from_shared_upload(
                 db,
                 upload_file=upload_file,
                 user=user,

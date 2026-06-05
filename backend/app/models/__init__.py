@@ -16,6 +16,14 @@ from app.models.merchant_reconciliation import (
 )
 from app.models.operation_log import OperationLog
 from app.models.order_index import OrderIndex
+from app.models.reconciliation_checklist import (
+    ReconciliationChecklistDetail,
+    ReconciliationChecklistEntity,
+    ReconciliationChecklistSummaryProductRow,
+    ReconciliationChecklistSummaryRow,
+    ReconciliationChecklistTask,
+    ReconciliationChecklistUploadFile,
+)
 from app.models.organization import Organization
 from app.models.platform import Platform
 from app.models.shop import Shop
@@ -72,6 +80,12 @@ __all__ = [
     "SummaryAdjustment",
     "OperationLog",
     "OrderIndex",
+    "ReconciliationChecklistDetail",
+    "ReconciliationChecklistEntity",
+    "ReconciliationChecklistSummaryProductRow",
+    "ReconciliationChecklistSummaryRow",
+    "ReconciliationChecklistTask",
+    "ReconciliationChecklistUploadFile",
     "Shop",
     "UserPreference",
 ]

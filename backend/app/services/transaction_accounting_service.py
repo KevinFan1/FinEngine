@@ -970,10 +970,11 @@ class TransactionAccountingService:
         ids: list[int] | None = None,
         page: int | None = 1,
         page_size: int | None = 50,
-    ) -> tuple[list[TransactionDetail], int]:
+        include_total: bool = False,
+    ) -> tuple[list[TransactionDetail], int | None]:
         org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
         if ids is not None and not ids:
-            return [], 0
+            return [], 0 if include_total else None
         filters = [
             TransactionDetail.is_deleted.is_(False),
             TransactionUploadFile.is_deleted.is_(False),
@@ -1088,16 +1089,18 @@ class TransactionAccountingService:
                 TransactionDetail.id.desc(),
             )
         )
-        count_stmt = (
-            select(func.count())
-            .select_from(TransactionDetail)
-            .join(TransactionUploadFile, TransactionUploadFile.id == TransactionDetail.file_id)
-            .join(TransactionTask, TransactionTask.id == TransactionDetail.task_id)
-            .outerjoin(TransactionSubject, TransactionSubject.id == TransactionDetail.subject_id)
-            .outerjoin(TransactionMajorCategory, TransactionMajorCategory.id == resolved_major_category_id)
-            .where(*filters)
-        )
-        total = (await db.execute(count_stmt)).scalar() or 0
+        total = None
+        if include_total:
+            count_stmt = (
+                select(func.count())
+                .select_from(TransactionDetail)
+                .join(TransactionUploadFile, TransactionUploadFile.id == TransactionDetail.file_id)
+                .join(TransactionTask, TransactionTask.id == TransactionDetail.task_id)
+                .outerjoin(TransactionSubject, TransactionSubject.id == TransactionDetail.subject_id)
+                .outerjoin(TransactionMajorCategory, TransactionMajorCategory.id == resolved_major_category_id)
+                .where(*filters)
+            )
+            total = (await db.execute(count_stmt)).scalar() or 0
         if page is not None and page_size is not None:
             stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)

@@ -747,6 +747,7 @@ async def batch_recalculate_tasks(
 async def list_details(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    include_total: bool = Query(False),
     org_id: str | None = Query(None),
     task_id: int | None = Query(None),
     status: str | None = Query(None),
@@ -802,6 +803,7 @@ async def list_details(
         keyword=keyword,
         page=page,
         page_size=page_size,
+        include_total=include_total,
     )
     items = []
     for detail in rows:

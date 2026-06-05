@@ -17,6 +17,7 @@
                         <el-option label="资金科目核算" value="transaction_accounting" />
                         <el-option label="BIC对账" value="bic_accounting" />
                         <el-option label="商家对账" value="merchant_reconciliation" />
+                        <el-option label="对账清单" value="reconciliation_checklist" />
                     </el-select>
                 </el-form-item>
                 <el-form-item>
@@ -291,6 +292,7 @@ function moduleLabel(module: string) {
         transaction_accounting: "资金科目核算",
         bic_accounting: "BIC对账",
         merchant_reconciliation: "商家对账",
+        reconciliation_checklist: "对账清单",
     }[module] || module;
 }
 
@@ -344,7 +346,7 @@ async function fetchData() {
             module: searchForm.module || undefined,
         });
         tableData.value = res.items;
-        pagination.total = res.total;
+        pagination.total = res.total ?? 0;
     } catch {
         ElMessage.error("获取下载任务失败");
     } finally {

@@ -32,7 +32,7 @@ export class ApiBusinessError extends Error {
 // Paginated response type
 export interface PaginatedData<T = any> {
     items: T[];
-    total: number;
+    total: number | null;
     page: number;
     page_size: number;
 }

@@ -39,6 +39,7 @@ const typeMap: Record<string, { label: string; typeClass: string; mark: string }
   其他服务款: { label: '其他服务款', typeClass: 'service', mark: '服' },
   红单: { label: '红单', typeClass: 'red-sheet', mark: '红' },
   银行流水: { label: '银行流水', typeClass: 'bank-flow', mark: '银' },
+  对账清单: { label: '对账清单', typeClass: 'checklist', mark: '清' },
 }
 
 const normalizedType = computed(() => String(props.type || '').trim())
@@ -183,6 +184,14 @@ const typeClass = computed(() => meta.value.typeClass)
   --type-mark-text: #075985;
 }
 
+.file-type-badge--checklist {
+  --type-bg: #f7fee7;
+  --type-border: #d9f99d;
+  --type-text: #3f6212;
+  --type-mark-bg: #ecfccb;
+  --type-mark-text: #365314;
+}
+
 .file-type-badge--unknown {
   --type-bg: var(--bg-elevated);
   --type-border: var(--border-color-light);
@@ -261,5 +270,13 @@ const typeClass = computed(() => meta.value.typeClass)
   --type-text: #bae6fd;
   --type-mark-bg: rgba(14, 165, 233, 0.21);
   --type-mark-text: #e0f2fe;
+}
+
+:global(html.dark) .file-type-badge--checklist {
+  --type-bg: rgba(132, 204, 22, 0.14);
+  --type-border: rgba(163, 230, 53, 0.34);
+  --type-text: #d9f99d;
+  --type-mark-bg: rgba(132, 204, 22, 0.2);
+  --type-mark-text: #ecfccb;
 }
 </style>

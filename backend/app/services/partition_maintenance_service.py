@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.partition_service import (
     BIC_SOURCE_PARTITION,
     DOUYIN_SOURCE_PARTITION,
+    RECONCILIATION_CHECKLIST_PARTITION,
+    RECONCILIATION_CHECKLIST_SUMMARY_PARTITION,
+    RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION,
     ensure_month_window,
     month_floor,
     shift_months,
@@ -26,6 +29,9 @@ async def ensure_source_partitions_for_window(db: AsyncSession, *, anchor: date 
 
     await ensure_month_window(db, spec=BIC_SOURCE_PARTITION, start_period=start_period, end_period=end_period)
     await ensure_month_window(db, spec=DOUYIN_SOURCE_PARTITION, start_period=start_period, end_period=end_period)
+    await ensure_month_window(db, spec=RECONCILIATION_CHECKLIST_PARTITION, start_period=start_period, end_period=end_period)
+    await ensure_month_window(db, spec=RECONCILIATION_CHECKLIST_SUMMARY_PARTITION, start_period=start_period, end_period=end_period)
+    await ensure_month_window(db, spec=RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION, start_period=start_period, end_period=end_period)
 
     return {
         "start_period": start_period,
@@ -33,3 +39,64 @@ async def ensure_source_partitions_for_window(db: AsyncSession, *, anchor: date 
         "base_period": month_floor(base),
     }
 
+
+async def ensure_reconciliation_checklist_partitions_for_window(
+    db: AsyncSession,
+    *,
+    start_period: int,
+    end_period: int,
+) -> dict[str, int]:
+    await ensure_month_window(
+        db,
+        spec=RECONCILIATION_CHECKLIST_PARTITION,
+        start_period=start_period,
+        end_period=end_period,
+    )
+    await ensure_month_window(
+        db,
+        spec=RECONCILIATION_CHECKLIST_SUMMARY_PARTITION,
+        start_period=start_period,
+        end_period=end_period,
+    )
+    await ensure_month_window(
+        db,
+        spec=RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION,
+        start_period=start_period,
+        end_period=end_period,
+    )
+    return {
+        "start_period": start_period,
+        "end_period": end_period,
+    }
+
+
+async def ensure_reconciliation_checklist_partitions_for_year(
+    db: AsyncSession,
+    *,
+    year: int,
+) -> dict[str, int]:
+    start_period = year * 100 + 1
+    end_period = year * 100 + 12
+    await ensure_month_window(
+        db,
+        spec=RECONCILIATION_CHECKLIST_PARTITION,
+        start_period=start_period,
+        end_period=end_period,
+    )
+    await ensure_month_window(
+        db,
+        spec=RECONCILIATION_CHECKLIST_SUMMARY_PARTITION,
+        start_period=start_period,
+        end_period=end_period,
+    )
+    await ensure_month_window(
+        db,
+        spec=RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION,
+        start_period=start_period,
+        end_period=end_period,
+    )
+    return {
+        "start_period": start_period,
+        "end_period": end_period,
+        "year": year,
+    }

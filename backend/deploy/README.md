@@ -10,7 +10,8 @@ This directory contains a source-based deployment baseline for the backend.
 - `update_backend.sh`: guarded update flow for pull/install/migrate/restart/health-check
 - `start_api.sh`: start the FastAPI API process
 - `start_worker.sh`: start the Celery worker process
-- `supervisor/finengine.conf`: `supervisor` config for API + worker
+- `start_flower.sh`: start the Flower Celery monitor
+- `supervisor/finengine.conf`: `supervisor` config for API + worker + Flower
 - `nginx/finengine.conf`: `nginx` config example for frontend + API reverse proxy
 
 ## Recommended server layout
@@ -38,6 +39,8 @@ Edit `.env` and fill at least:
 
 ```env
 DATABASE_URL=
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=5
 REDIS_URL=          # 缓存/验证码/防重放
 CELERY_REDIS_URL=   # Celery 队列和结果，建议使用不同 DB
 SECRET_KEY=
@@ -75,6 +78,12 @@ Start worker:
 bash deploy/start_worker.sh
 ```
 
+Start Flower:
+
+```bash
+bash deploy/start_flower.sh
+```
+
 ## Supervisor
 
 Copy `deploy/supervisor/finengine.conf` to your server's `supervisor` config directory, then adjust:
@@ -103,6 +112,30 @@ Restart:
 ```bash
 supervisorctl restart finengine:*
 ```
+
+## 4C16G application server baseline
+
+For a 4 vCPU / 16 GiB ECS used as the API application server, keep the process
+model conservative:
+
+- `APP_WORKERS=2`
+- `finengine-worker` `numprocs=0~2` on the API server; move heavy Celery work to
+  a separate worker ECS when monthly imports grow.
+- `DB_POOL_SIZE=5` and `DB_MAX_OVERFLOW=5` for API processes.
+- Use one API service bound to one local port. `uvicorn --workers` already runs
+  multiple API worker processes behind the same socket, so running two identical
+  API supervisor programs on the same ECS and load balancing them with nginx is
+  usually unnecessary. Keep a second API program only for blue/green deploys.
+
+Gunicorn is optional for this stack. The current `uvicorn --workers` launcher is
+fine behind nginx; use Gunicorn only if you want its process manager features
+and then avoid also wrapping it with multiple supervisor API programs.
+
+## Flower
+
+Flower is managed as `finengine-flower` by the supervisor example and listens on
+`127.0.0.1:5555` by default. Keep it private; expose it through an SSH tunnel or
+nginx with authentication. Set `FLOWER_BASIC_AUTH=user:password` if you proxy it.
 
 ## Routine updates
 

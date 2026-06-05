@@ -41,6 +41,7 @@ celery_app.autodiscover_tasks(["app.tasks"])
 celery_app.conf.imports = (
     "app.tasks.transaction_accounting",
     "app.tasks.bic_accounting",
+    "app.tasks.reconciliation_checklist",
     "app.tasks.partition_maintenance",
     "app.tasks.export_jobs",
 )

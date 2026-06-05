@@ -24,6 +24,7 @@ from app.services.bic_accounting_service import BicAccountingService
 from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
 from app.services.merchant_reconciliation_service import MerchantReconciliationService
 from app.services.oss_service import assume_sts_role, oss_service
+from app.services.reconciliation_checklist_service import ReconciliationChecklistService
 from app.services.summary_service import SummaryService
 from app.services.transaction_accounting_service import TransactionAccountingService
 from app.utils.query_filters import resolve_org_ids
@@ -364,6 +365,39 @@ async def _merchant_reconciliation_summary_export(db: AsyncSession, user: User, 
     return ExportArtifact(output_path, row_count=row_count)
 
 
+async def _reconciliation_checklist_summary_export(db: AsyncSession, user: User, params: dict[str, Any]):
+    output_path = _new_temp_export_path()
+    scope = str(params.get("scope") or "all")
+    try:
+        row_count = await ReconciliationChecklistService.export_summary_to_file(
+            db,
+            user=user,
+            output_path=output_path,
+            org_id=params.get("org_id"),
+            accounting_year=_int_param(params, "accounting_year"),
+            accounting_month=_int_param(params, "accounting_month"),
+            accounting_start_year=_int_param(params, "accounting_start_year"),
+            accounting_start_month=_int_param(params, "accounting_start_month"),
+            accounting_end_year=_int_param(params, "accounting_end_year"),
+            accounting_end_month=_int_param(params, "accounting_end_month"),
+            shop_ids=params.get("shop_ids"),
+            merchant_name=params.get("merchant_name"),
+            live_promoter=params.get("live_promoter"),
+            receipt_merchant=params.get("receipt_merchant"),
+            merchant_ids=params.get("merchant_ids"),
+            live_promoter_ids=params.get("live_promoter_ids"),
+            receipt_merchant_ids=params.get("receipt_merchant_ids"),
+            keyword=params.get("keyword"),
+            ids=_parse_str_ids(params.get("ids")) if scope == "selected" else None,
+            page=_int_param(params, "page") if scope == "current_page" else None,
+            page_size=_int_param(params, "page_size") if scope == "current_page" else None,
+        )
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+    return ExportArtifact(output_path, row_count=row_count)
+
+
 EXPORT_SPECS: dict[str, ExportSpec] = {
     "summary.detail": ExportSpec("summary", _summary_export),
     "summary.report": ExportSpec("summary", _summary_report_export),
@@ -376,6 +410,7 @@ EXPORT_SPECS: dict[str, ExportSpec] = {
     "bic.reconciliation": ExportSpec("bic_accounting", _bic_reconciliation_export),
     "merchant_reconciliation.details": ExportSpec("merchant_reconciliation", _merchant_reconciliation_detail_export),
     "merchant_reconciliation.summary": ExportSpec("merchant_reconciliation", _merchant_reconciliation_summary_export),
+    "reconciliation_checklist.summary": ExportSpec("reconciliation_checklist", _reconciliation_checklist_summary_export),
 }
 
 

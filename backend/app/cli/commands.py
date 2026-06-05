@@ -155,3 +155,9 @@ def ensure_source_partitions() -> None:
     from scripts.ensure_source_partitions import main
 
     asyncio.run(main())
+
+
+def ensure_reconciliation_checklist_partitions() -> None:
+    from scripts.ensure_reconciliation_checklist_partitions import main
+
+    asyncio.run(main())

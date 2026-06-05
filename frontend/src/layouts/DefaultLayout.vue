@@ -43,16 +43,46 @@
                                 /></el-icon>
                                 <span>{{ item.title }}</span>
                             </template>
-                            <el-menu-item
+                            <template
                                 v-for="child in item.children"
                                 :key="child.path"
-                                :index="child.path"
                             >
-                                <el-icon class="menu-icon"
-                                    ><component :is="child.icon"
-                                /></el-icon>
-                                <template #title>{{ child.title }}</template>
-                            </el-menu-item>
+                                <el-menu-item
+                                    v-if="!child.children?.length"
+                                    :index="child.path"
+                                >
+                                    <el-icon class="menu-icon"
+                                        ><component :is="child.icon"
+                                    /></el-icon>
+                                    <template #title>{{
+                                        child.title
+                                    }}</template>
+                                </el-menu-item>
+                                <el-sub-menu
+                                    v-else
+                                    :index="child.path"
+                                    popper-class="sidebar-sub-menu-popper"
+                                >
+                                    <template #title>
+                                        <el-icon class="menu-icon"
+                                            ><component :is="child.icon"
+                                        /></el-icon>
+                                        <span>{{ child.title }}</span>
+                                    </template>
+                                    <el-menu-item
+                                        v-for="grandchild in child.children"
+                                        :key="grandchild.path"
+                                        :index="grandchild.path"
+                                    >
+                                        <el-icon class="menu-icon"
+                                            ><component :is="grandchild.icon"
+                                        /></el-icon>
+                                        <template #title>{{
+                                            grandchild.title
+                                        }}</template>
+                                    </el-menu-item>
+                                </el-sub-menu>
+                            </template>
                         </el-sub-menu>
                         <el-menu-item v-else :index="item.path">
                             <el-icon class="menu-icon"
@@ -491,6 +521,13 @@ import { useThemeStore } from "@/stores/theme";
 import BrandLogo from "@/components/BrandLogo.vue";
 import ForcePasswordChangeDialog from "@/components/ForcePasswordChangeDialog.vue";
 import QuotaWarning from "@/components/QuotaWarning.vue";
+import {
+    filterSidebarMenuByRole,
+    sidebarMenuItems,
+    type ResolvedSidebarMenuItem,
+    type SidebarMenuIconName,
+    type SidebarMenuItem,
+} from "@/layouts/sidebarMenu";
 
 const route = useRoute();
 const router = useRouter();
@@ -535,186 +572,70 @@ const tabContextMenu = ref<{
     tab: null,
 });
 
-interface MenuItem {
-    path: string;
-    title: string;
-    icon: Component;
-    roles?: string[];
-    children?: MenuItem[];
+const iconComponents: Record<SidebarMenuIconName, Component> = {
+    Collection,
+    CollectionTag,
+    DataAnalysis,
+    Document,
+    Download,
+    House,
+    List,
+    Money,
+    OfficeBuilding,
+    Setting,
+    Shop,
+    Upload,
+    User,
+    Wallet,
+    Warning,
+};
+
+function resolveSidebarMenuIcons(
+    items: SidebarMenuItem[],
+): ResolvedSidebarMenuItem[] {
+    return items.map((item) => ({
+        ...item,
+        icon: iconComponents[item.icon],
+        children: item.children
+            ? resolveSidebarMenuIcons(item.children)
+            : undefined,
+    }));
 }
 
-const merchantReconciliationMenuEnabled = false;
+function findMenuPath(
+    items: ResolvedSidebarMenuItem[],
+    routePath: string,
+): ResolvedSidebarMenuItem[] {
+    for (const item of items) {
+        if (item.path === routePath) return [item];
+        if (!item.children?.length) continue;
 
-const menuItems: MenuItem[] = [
-    {
-        path: "/workspace",
-        title: "工作台",
-        icon: House,
-        children: [
-            { path: "/dashboard", title: "首页", icon: House },
-            { path: "/upload", title: "上传中心", icon: Upload },
-            { path: "/downloads", title: "下载中心", icon: Download },
-        ],
-    },
-    {
-        path: "/base-data",
-        title: "基础资料",
-        icon: Collection,
-        children: [{ path: "/shops", title: "店铺管理", icon: Shop }],
-    },
-    {
-        path: "/order-accounting",
-        title: "动账核算",
-        icon: Money,
-        children: [
-            { path: "/tasks", title: "核算任务", icon: List },
-            { path: "/summaries", title: "汇总明细", icon: Document },
-            { path: "/summary-report", title: "汇总报表", icon: DataAnalysis },
-        ],
-    },
-    {
-        path: "/transaction-accounting",
-        title: "动账资金核算",
-        icon: Wallet,
-        children: [
-            { path: "/transaction-tasks", title: "资金任务", icon: List },
-            {
-                path: "/transaction-summaries",
-                title: "科目明细",
-                icon: Document,
-            },
-            {
-                path: "/transaction-summary-report",
-                title: "年度报表",
-                icon: DataAnalysis,
-            },
-        ],
-    },
-    {
-        path: "/bic-accounting",
-        title: "BIC核算",
-        icon: Wallet,
-        children: [
-            {
-                path: "/bic-tasks",
-                title: "BIC任务",
-                icon: List,
-            },
-            {
-                path: "/bic-details",
-                title: "BIC源明细",
-                icon: Document,
-            },
-            {
-                path: "/bic-summary",
-                title: "BIC汇总",
-                icon: Document,
-            },
-        ],
-    },
-    ...(merchantReconciliationMenuEnabled
-        ? [{
-            path: "/merchant-reconciliation",
-            title: "商家对账",
-            icon: Money,
-            children: [
-                { path: "/merchant-reconciliation/upload", title: "上传中心", icon: Upload },
-                { path: "/merchant-reconciliation/tasks", title: "对账任务", icon: List },
-                { path: "/merchant-reconciliation/unmatched", title: "未匹配维护", icon: Warning },
-                { path: "/merchant-reconciliation/payments", title: "货款明细", icon: Document },
-                { path: "/merchant-reconciliation/purchases", title: "采购明细", icon: Document },
-                { path: "/merchant-reconciliation/bank-flows", title: "银行流水", icon: Wallet },
-                { path: "/merchant-reconciliation/summary", title: "汇总数据", icon: DataAnalysis },
-                { path: "/merchant-reconciliation/net-rates", title: "净额比例", icon: Setting },
-            ],
-        }]
-        : []),
-    {
-        path: "/rule-config",
-        title: "规则配置",
-        icon: Setting,
-        children: [
-            {
-                path: "/category-dicts",
-                title: "动账重分类字典",
-                icon: Collection,
-                roles: ["superadmin"],
-            },
-            {
-                path: "/file-specs",
-                title: "文件规格配置",
-                icon: Setting,
-                roles: ["superadmin"],
-            },
-            {
-                path: "/transaction-major-categories",
-                title: "资金大分类",
-                icon: CollectionTag,
-                roles: ["superadmin"],
-            },
-            {
-                path: "/transaction-rules",
-                title: "资金重分类规则",
-                icon: Setting,
-                roles: ["superadmin"],
-            },
-        ],
-    },
-    {
-        path: "/system-management",
-        title: "系统管理",
-        icon: OfficeBuilding,
-        children: [
-            {
-                path: "/organizations",
-                title: "组织管理",
-                icon: OfficeBuilding,
-                roles: ["superadmin"],
-            },
-            {
-                path: "/users",
-                title: "用户管理",
-                icon: User,
-                roles: ["superadmin", "org_admin"],
-            },
-            {
-                path: "/audit-logs",
-                title: "操作日志",
-                icon: Document,
-                roles: ["superadmin", "org_admin"],
-            },
-        ],
-    },
-];
+        const childPath = findMenuPath(item.children, routePath);
+        if (childPath.length) return [item, ...childPath];
+    }
 
-const filteredMenuItems = computed(() => {
-    const userRole = userStore.userRole;
-    return menuItems.flatMap((item) => {
-        if (item.roles && !item.roles.includes(userRole)) return [];
-        if (!item.children?.length) return [item];
-        const children = item.children.filter((child) => {
-            if (!child.roles) return true;
-            return child.roles.includes(userRole);
-        });
-        return children.length ? [{ ...item, children }] : [];
-    });
-});
+    return [];
+}
+
+const menuItems = computed(() =>
+    resolveSidebarMenuIcons(
+        filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole),
+    ),
+);
+
+const filteredMenuItems = computed(() => menuItems.value);
 
 const activeMenu = computed(() => route.path);
 
 const openedMenuPaths = computed(() => {
-    const matched = menuItems.find((item) =>
-        item.children?.some((child) => child.path === route.path),
-    );
-    return matched ? [matched.path] : [];
+    const path = findMenuPath(menuItems.value, route.path);
+    return path.slice(0, -1).map((item) => item.path);
 });
 
 const currentRouteTitle = computed(() => (route.meta.title as string) || "");
 const currentRouteParentTitle = computed(() => {
-    const matched = menuItems.find((item) =>
-        item.children?.some((child) => child.path === route.path),
-    );
-    return matched?.title || "";
+    const path = findMenuPath(menuItems.value, route.path);
+    return path.length > 1 ? path[path.length - 2].title : "";
 });
 
 const cachedRouteNames = computed(() => {
@@ -1316,6 +1237,11 @@ function handleCommand(command: string) {
             padding-left: 18px !important;
             font-size: 13px;
             border-radius: 9px;
+        }
+
+        :deep(.el-sub-menu .el-sub-menu .el-menu-item) {
+            margin: 2px 10px 2px 42px;
+            padding-left: 14px !important;
         }
 
         :deep(.el-menu-item) {

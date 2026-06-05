@@ -145,6 +145,7 @@ export interface BicDetailListParams {
 export interface BicSourceRowListParams {
     page?: number;
     page_size?: number;
+    include_total?: boolean;
     org_id?: number | string;
     detail_id?: number;
     task_id?: number;

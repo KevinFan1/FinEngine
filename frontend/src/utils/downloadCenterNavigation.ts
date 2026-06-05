@@ -1,4 +1,6 @@
-export const DOWNLOAD_CENTER_ROUTE = { path: "/downloads" } as const;
+export const DOWNLOAD_CENTER_ROUTE = { name: "DownloadCenter" } as const;
+
+type DownloadCenterRoute = typeof DOWNLOAD_CENTER_ROUTE;
 
 type DownloadCenterTarget = {
     fullPath: string;
@@ -11,8 +13,8 @@ export interface DownloadCenterRouterLike {
             fullPath: string;
         };
     };
-    resolve: (to: typeof DOWNLOAD_CENTER_ROUTE) => DownloadCenterTarget;
-    push: (to: typeof DOWNLOAD_CENTER_ROUTE) => Promise<unknown>;
+    resolve: (to: DownloadCenterRoute) => DownloadCenterTarget;
+    push: (to: DownloadCenterRoute) => Promise<unknown>;
 }
 
 export interface DownloadCenterLocationLike {
@@ -28,6 +30,7 @@ export async function navigateToDownloadCenter(
 
     try {
         await router.push(DOWNLOAD_CENTER_ROUTE);
+        await Promise.resolve();
         if (router.currentRoute.value.fullPath === target.fullPath) {
             return;
         }

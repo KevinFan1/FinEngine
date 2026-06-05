@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from sqlalchemy import Select
 from openpyxl import Workbook, load_workbook
 import pytest
 
@@ -145,27 +146,55 @@ class _BicSourceRowsQuerySession:
     def __init__(self) -> None:
         self.statements: list[object] = []
         self.active_rows: list[BicSourceRow] = []
+        self.count_queries = 0
 
     async def execute(self, statement: object):
         self.statements.append(statement)
+        statement_sql = str(statement.compile(compile_kwargs={"literal_binds": True})) if isinstance(statement, Select) else str(statement)
+        is_count = "SELECT count(" in statement_sql
+        if is_count:
+            self.count_queries += 1
 
         class _Result:
-            def __init__(self_inner, rows: list[BicSourceRow]):
+            def __init__(self_inner, rows: list[BicSourceRow], count_value: int = 0):
                 self_inner._rows = rows
+                self_inner._count_value = count_value
+                self_inner._mapping_mode = False
 
             def scalar(self_inner):
-                return 0
+                return self_inner._count_value
 
             def scalars(self_inner):
+                self_inner._mapping_mode = False
                 return self_inner
 
             def all(self_inner):
+                if self_inner._mapping_mode:
+                    return [
+                        {
+                            "id": row.id,
+                            "task_id": row.task_id,
+                            "file_id": row.file_id,
+                            "detail_id": row.detail_id,
+                            "org_id": row.org_id,
+                            "shop_id": row.shop_id,
+                            "platform_code": row.platform_code,
+                            "service_provider": row.service_provider,
+                            "shop_name": row.shop_name,
+                            "accounting_year": row.accounting_year,
+                            "accounting_month": row.accounting_month,
+                            "accounting_period": row.accounting_period,
+                            "qic_warehouse": row.qic_warehouse,
+                        }
+                        for row in self_inner._rows
+                    ]
                 return self_inner._rows
 
             def mappings(self_inner):
+                self_inner._mapping_mode = True
                 return self_inner
 
-        return _Result(self.active_rows)
+        return _Result(self.active_rows, len(self.active_rows) if is_count else 0)
 
     def add_all(self, rows: list[object]) -> None:
         self.active_rows.extend([row for row in rows if isinstance(row, BicSourceRow)])
@@ -866,15 +895,38 @@ async def test_list_source_rows_defaults_to_latest_task_scope() -> None:
     )
 
     assert rows == []
-    assert total == 0
-    assert len(session.statements) == 2
-    statement_sql = str(session.statements[1].compile(compile_kwargs={"literal_binds": True}))
+    assert total is None
+    assert session.count_queries == 0
+    assert len(session.statements) == 1
+    statement_sql = str(session.statements[0].compile(compile_kwargs={"literal_binds": True}))
     assert "fin_bic_source_rows.task_id IN (SELECT max(fin_bic_tasks.id) AS task_id" in statement_sql
     assert "GROUP BY fin_bic_upload_files.org_id" in statement_sql
     assert "fin_bic_upload_files.accounting_month" in statement_sql
     assert "fin_bic_source_rows.shop_id IS NULL" in statement_sql
     assert "EXISTS" in statement_sql
     assert "fin_shops" in statement_sql
+
+
+@pytest.mark.asyncio
+async def test_list_source_rows_can_request_total_count() -> None:
+    session = _BicSourceRowsQuerySession()
+    session.active_rows = [
+        _source_model(task_id=1, file_id=1, detail_id=1, amount="1.20", flow_no="FLOW-1"),
+        _source_model(task_id=1, file_id=1, detail_id=1, amount="2.30", flow_no="FLOW-2"),
+    ]
+    user = SimpleNamespace(role="member", org_id=3)
+
+    rows, total = await BicAccountingService.list_source_rows(
+        session,  # type: ignore[arg-type]
+        user=user,  # type: ignore[arg-type]
+        page=1,
+        page_size=50,
+        include_total=True,
+    )
+
+    assert len(rows) == 2
+    assert total == 2
+    assert session.count_queries == 1
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,13 @@ mkdir -p logs logs/supervisor
 
 export PYTHONPATH="${BACKEND_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
+source "${SCRIPT_DIR}/load_deploy_env.sh"
+load_deploy_env "${BACKEND_DIR}/.env" \
+  APP_HOST \
+  APP_PORT \
+  APP_WORKERS \
+  APP_FORWARDED_ALLOW_IPS
+
 APP_HOST="${APP_HOST:-127.0.0.1}"
 APP_PORT="${APP_PORT:-8000}"
 APP_WORKERS="${APP_WORKERS:-1}"

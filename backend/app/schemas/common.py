@@ -18,6 +18,6 @@ class PageRequest(BaseModel):
 
 class PageResponse(BaseModel, Generic[T]):
     items: list[T]
-    total: int
+    total: int | None
     page: int
     page_size: int

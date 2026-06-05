@@ -16,6 +16,7 @@ dependencies = [
     "bcrypt<5.0.0",
     "python-multipart==0.0.18",
     "celery[redis]==5.4.0",
+    "flower==2.0.1",
     "redis==5.2.1",
     "openpyxl==3.1.5",
     "asteval==1.0.6",
@@ -44,6 +45,7 @@ seed-transaction-accounting-defaults = "app.cli.commands:seed_transaction_accoun
 seed-transaction-accounting-rules = "app.cli.commands:seed_transaction_accounting_rules"
 seed-transaction-major-subjects = "app.cli.commands:seed_transaction_major_subjects"
 ensure-source-partitions = "app.cli.commands:ensure_source_partitions"
+ensure-reconciliation-checklist-partitions = "app.cli.commands:ensure_reconciliation_checklist_partitions"
 migrate-generate = "app.cli.commands:migrate_generate"
 migrate-upgrade = "app.cli.commands:migrate_upgrade"
 migrate-downgrade = "app.cli.commands:migrate_downgrade"
