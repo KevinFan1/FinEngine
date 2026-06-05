@@ -7,7 +7,7 @@
                     type="month"
                     clearable
                     value-format="YYYY-MM"
-                    placeholder="选择月份"
+                    placeholder="选择数据年月"
                     style="width: 170px"
                     @update:model-value="updateField('month', $event)"
                 />

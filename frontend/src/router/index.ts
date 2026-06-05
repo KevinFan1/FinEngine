@@ -82,7 +82,7 @@ const routes: RouteRecordRaw[] = [
                 path: "upload",
                 name: "UploadCenter",
                 component: () => import("@/views/upload/index.vue"),
-                meta: { title: "上传中心", icon: "Upload" },
+                meta: { title: "核算上传中心", icon: "Upload" },
             },
             {
                 path: "downloads",

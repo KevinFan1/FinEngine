@@ -8,7 +8,7 @@
                             <span class="section-kicker">MERCHANT RECONCILIATION</span>
                             <h2>商家对账上传中心</h2>
                         </div>
-                        <p>红单和银行流水共用一个上传框。红单校验 sheet 名，银行流水校验文件名年月；处理结果统一在对账任务里查看。</p>
+                        <p>红单和银行流水共用一个上传框。红单校验 sheet 名，银行流水校验文件名中的数据年月；处理结果统一在对账任务里查看。</p>
                     </div>
                     <div class="rule-code-line">
                         <span class="rule-token rule-token--type">YYYYMM货款</span>
@@ -48,7 +48,7 @@
                                 <span class="step-chip">2</span>
                                 <strong>统一预检</strong>
                             </div>
-                            <p class="platform-example">自动区分红单和银行流水，显示年月和校验结果</p>
+                            <p class="platform-example">自动区分红单和银行流水，显示数据年月和校验结果</p>
                         </div>
                         <div class="platform-card">
                             <div class="platform-card-line">
@@ -173,7 +173,7 @@
                             <el-table-column v-if="userStore.isSuperAdmin" label="组织" width="160" show-overflow-tooltip>
                                 <template #default>{{ currentOrgLabel }}</template>
                             </el-table-column>
-                            <el-table-column label="提取年月" width="120">
+                            <el-table-column label="提取数据年月" width="120">
                                 <template #default="{ row }">
                                     <el-tag v-if="row.accountingYear && row.accountingMonth" type="info" size="small" class="soft-badge">
                                         {{ row.accountingYear }}-{{ String(row.accountingMonth).padStart(2, "0") }}
@@ -241,8 +241,8 @@
 
         <el-dialog v-model="templateDialogVisible" title="下载红单模板" width="420px">
             <el-form>
-                <el-form-item label="模板月份" required>
-                    <el-date-picker v-model="templateMonth" type="month" value-format="YYYY-MM" placeholder="选择月份" style="width: 100%" />
+                <el-form-item label="模板数据年月" required>
+                    <el-date-picker v-model="templateMonth" type="month" value-format="YYYY-MM" placeholder="选择数据年月" style="width: 100%" />
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -306,8 +306,8 @@ const uploadItems = ref<UploadQueueItem[]>([]);
 let ossModulePromise: Promise<typeof import("ali-oss")> | null = null;
 
 const readyUploadItems = computed(() => uploadItems.value.filter((item) => item.valid && item.status !== "success"));
-const precheckDropText = computed(() => "正在识别文件类型、年月和校验信息...");
-const precheckHintText = computed(() => "红单会读取 sheet 和采购店铺；银行流水会读取文件名年月。");
+const precheckDropText = computed(() => "正在识别文件类型、数据年月和校验信息...");
+const precheckHintText = computed(() => "红单会读取 sheet 和采购店铺；银行流水会读取文件名中的数据年月。");
 const currentOrgLabel = computed(() => {
     if (!userStore.isSuperAdmin) return "-";
     return orgOptions.value.find((org) => org.id === searchForm.orgId)?.name || "待选择";
@@ -483,7 +483,7 @@ function inspectBankFlowFilename(filename: string): {
     const accountingYear = Number(match[1]);
     const accountingMonth = Number(match[2]);
     if (!accountingYear || accountingMonth < 1 || accountingMonth > 12) {
-        return { type: "银行流水", valid: false, message: "文件名年月不正确", accountingYear: undefined, accountingMonth: undefined, shopNames: [] };
+        return { type: "银行流水", valid: false, message: "文件名数据年月不正确", accountingYear: undefined, accountingMonth: undefined, shopNames: [] };
     }
     return { type: "银行流水", valid: true, message: "文件名识别成功，账户和日期由后端解析", accountingYear, accountingMonth, shopNames: [] };
 }
@@ -506,7 +506,7 @@ function requireImportOrg() {
 async function confirmUploadSingle(row: UploadQueueItem) {
     if (!requireImportOrg()) return;
     if (!row.accountingYear || !row.accountingMonth) {
-        ElMessage.warning("请先确认年月识别正确");
+        ElMessage.warning("请先确认数据年月识别正确");
         return;
     }
     const typeLabel = row.type;

@@ -32,8 +32,13 @@
                         v-for="item in filteredMenuItems"
                         :key="item.path"
                     >
+                        <div
+                            v-if="item.type === 'divider'"
+                            class="sidebar-menu-divider"
+                            aria-hidden="true"
+                        />
                         <el-sub-menu
-                            v-if="item.children?.length"
+                            v-else-if="item.children?.length"
                             :index="item.path"
                             popper-class="sidebar-sub-menu-popper"
                         >
@@ -48,7 +53,6 @@
                                 :key="child.path"
                             >
                                 <el-menu-item
-                                    v-if="!child.children?.length"
                                     :index="child.path"
                                 >
                                     <el-icon class="menu-icon"
@@ -58,30 +62,6 @@
                                         child.title
                                     }}</template>
                                 </el-menu-item>
-                                <el-sub-menu
-                                    v-else
-                                    :index="child.path"
-                                    popper-class="sidebar-sub-menu-popper"
-                                >
-                                    <template #title>
-                                        <el-icon class="menu-icon"
-                                            ><component :is="child.icon"
-                                        /></el-icon>
-                                        <span>{{ child.title }}</span>
-                                    </template>
-                                    <el-menu-item
-                                        v-for="grandchild in child.children"
-                                        :key="grandchild.path"
-                                        :index="grandchild.path"
-                                    >
-                                        <el-icon class="menu-icon"
-                                            ><component :is="grandchild.icon"
-                                        /></el-icon>
-                                        <template #title>{{
-                                            grandchild.title
-                                        }}</template>
-                                    </el-menu-item>
-                                </el-sub-menu>
                             </template>
                         </el-sub-menu>
                         <el-menu-item v-else :index="item.path">
@@ -527,6 +507,7 @@ import {
     type ResolvedSidebarMenuItem,
     type SidebarMenuIconName,
     type SidebarMenuItem,
+    type SidebarMenuLinkItem,
 } from "@/layouts/sidebarMenu";
 
 const route = useRoute();
@@ -591,7 +572,7 @@ const iconComponents: Record<SidebarMenuIconName, Component> = {
 };
 
 function resolveSidebarMenuIcons(
-    items: SidebarMenuItem[],
+    items: SidebarMenuLinkItem[],
 ): ResolvedSidebarMenuItem[] {
     return items.map((item) => ({
         ...item,
@@ -619,11 +600,25 @@ function findMenuPath(
 
 const menuItems = computed(() =>
     resolveSidebarMenuIcons(
-        filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole),
+        filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole).filter(
+            (item): item is SidebarMenuLinkItem => item.type !== "divider",
+        ),
     ),
 );
 
-const filteredMenuItems = computed(() => menuItems.value);
+const filteredMenuItems = computed(() =>
+    filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole).map((item) =>
+        item.type === "divider"
+            ? item
+            : {
+                  ...item,
+                  icon: iconComponents[item.icon],
+                  children: item.children
+                      ? resolveSidebarMenuIcons(item.children)
+                      : undefined,
+              },
+    ),
+);
 
 const activeMenu = computed(() => route.path);
 
@@ -699,7 +694,7 @@ const quickStartSteps = [
     {
         index: "03",
         title: "查看对应任务",
-        desc: "普通动账文件看核算任务；抖音资金链路看资金任务；BIC 文件看 BIC 任务。失败任务先读错误原因，再决定重试或重新上传。",
+        desc: "普通动账文件看核算任务；抖音资金链路看资金任务；BIC 文件看 BIC 任务。失败任务先读错误原因，再决定重新统计或重新上传。",
     },
     {
         index: "04",
@@ -734,7 +729,7 @@ const guideActionRows = [
         goal: "跟踪普通动账核算",
         when: "上传普通动账、订单、GMV、运费险文件后",
         entry: "核算任务",
-        action: "查看任务状态、错误原因、处理摘要，必要时重试或重新统计。",
+        action: "查看任务状态、错误原因、处理摘要，必要时重新统计。",
         outcome: "任务处理成功，失败原因已定位并处理。",
     },
     {
@@ -1110,7 +1105,7 @@ function handleCommand(command: string) {
     display: flex;
     height: 100vh;
     overflow: hidden;
-    background: var(--page-bg-gradient);
+    background: var(--bg-page);
 }
 
 // ==============================
@@ -1239,9 +1234,10 @@ function handleCommand(command: string) {
             border-radius: 9px;
         }
 
-        :deep(.el-sub-menu .el-sub-menu .el-menu-item) {
-            margin: 2px 10px 2px 42px;
-            padding-left: 14px !important;
+        .sidebar-menu-divider {
+            height: 1px;
+            margin: 8px 16px;
+            background: var(--sidebar-border);
         }
 
         :deep(.el-menu-item) {
@@ -1643,7 +1639,7 @@ function handleCommand(command: string) {
 .content {
     flex: 1;
     overflow: auto;
-    background: var(--page-bg-gradient);
+    background: var(--bg-page);
     padding: clamp(12px, 1.25vw, var(--spacing));
     min-width: 0;
     container-type: inline-size;

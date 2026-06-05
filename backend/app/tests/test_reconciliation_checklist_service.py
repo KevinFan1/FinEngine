@@ -148,6 +148,53 @@ class _ChecklistReplaceSession:
         return SimpleNamespace(rowcount=7)
 
 
+class _DashboardMetricsResult:
+    def __init__(self, rows: list[object]) -> None:
+        self.rows = rows
+
+    def all(self) -> list[object]:
+        return self.rows
+
+
+class _ChecklistDashboardSession:
+    def __init__(self) -> None:
+        self.scalar_results: list[object] = [3, 5, 1, 59832, Decimal("12345.67"), 2, 2]
+        self.scalar_statements: list[str] = []
+        self.execute_statements: list[str] = []
+        self.execute_results: list[_DashboardMetricsResult] = [
+            _DashboardMetricsResult([(1, 1), (3, 2)]),
+            _DashboardMetricsResult([(1, Decimal("1000.50")), (3, Decimal("2345.60"))]),
+            _DashboardMetricsResult(
+                [
+                    SimpleNamespace(merchant_id=11, merchant_name="商家A", total_order_amount=Decimal("9000.00")),
+                    SimpleNamespace(merchant_id=12, merchant_name="商家B", total_order_amount=Decimal("3345.67")),
+                ]
+            ),
+            _DashboardMetricsResult(
+                [
+                    SimpleNamespace(id=8, original_name="6月对账清单.xlsx", status="success", total_rows=59832, success_rows=59832, failed_rows=0, inserted_rows=59832, finished_at=datetime(2026, 6, 5, 12, 29, 40)),
+                ]
+            ),
+        ]
+
+    async def scalar(self, statement: object):
+        self.scalar_statements.append(_compile_sql(statement))
+        return self.scalar_results.pop(0)
+
+    async def execute(self, statement: object):
+        self.execute_statements.append(_compile_sql(statement))
+        return self.execute_results.pop(0)
+
+
+def _compile_sql(statement: object) -> str:
+    return str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+
 def test_reconciliation_checklist_models_define_partitioned_business_tables() -> None:
     detail_table_args = ReconciliationChecklistDetail.__table_args__
     assert isinstance(detail_table_args, tuple)
@@ -856,3 +903,75 @@ async def test_export_summary_forwards_entity_id_filters(tmp_path: Path, monkeyp
     )
 
     assert row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dashboard_metrics_uses_processed_checklist_data_and_full_year_months() -> None:
+    session = _ChecklistDashboardSession()
+
+    metrics = await ReconciliationChecklistService.get_dashboard_metrics(
+        session,  # type: ignore[arg-type]
+        user=SimpleNamespace(role="org_admin", org_id=8),  # type: ignore[arg-type]
+        year=2026,
+    )
+
+    assert metrics["processed_task_count"] == 3
+    assert metrics["total_task_count"] == 5
+    assert metrics["failed_task_count"] == 1
+    assert metrics["total_rows"] == 59832
+    assert metrics["total_order_amount"] == Decimal("12345.67")
+    assert metrics["merchant_count"] == 2
+    assert metrics["covered_month_count"] == 2
+    assert metrics["completion_rate"] == Decimal("60.00")
+    assert metrics["year"] == 2026
+    assert metrics["monthly_task_counts"] == [
+        {"month": 1, "task_count": 1},
+        {"month": 2, "task_count": 0},
+        {"month": 3, "task_count": 2},
+        {"month": 4, "task_count": 0},
+        {"month": 5, "task_count": 0},
+        {"month": 6, "task_count": 0},
+        {"month": 7, "task_count": 0},
+        {"month": 8, "task_count": 0},
+        {"month": 9, "task_count": 0},
+        {"month": 10, "task_count": 0},
+        {"month": 11, "task_count": 0},
+        {"month": 12, "task_count": 0},
+    ]
+    assert metrics["monthly_order_amounts"] == [
+        {"month": 1, "total_order_amount": Decimal("1000.50")},
+        {"month": 2, "total_order_amount": Decimal("0.00")},
+        {"month": 3, "total_order_amount": Decimal("2345.60")},
+        {"month": 4, "total_order_amount": Decimal("0.00")},
+        {"month": 5, "total_order_amount": Decimal("0.00")},
+        {"month": 6, "total_order_amount": Decimal("0.00")},
+        {"month": 7, "total_order_amount": Decimal("0.00")},
+        {"month": 8, "total_order_amount": Decimal("0.00")},
+        {"month": 9, "total_order_amount": Decimal("0.00")},
+        {"month": 10, "total_order_amount": Decimal("0.00")},
+        {"month": 11, "total_order_amount": Decimal("0.00")},
+        {"month": 12, "total_order_amount": Decimal("0.00")},
+    ]
+    assert metrics["top_merchants"] == [
+        {"merchant_id": 11, "merchant_name": "商家A", "total_order_amount": Decimal("9000.00")},
+        {"merchant_id": 12, "merchant_name": "商家B", "total_order_amount": Decimal("3345.67")},
+    ]
+    assert metrics["recent_tasks"] == [
+        {
+            "id": 8,
+            "original_name": "6月对账清单.xlsx",
+            "status": "success",
+            "total_rows": 59832,
+            "success_rows": 59832,
+            "failed_rows": 0,
+            "inserted_rows": 59832,
+            "finished_at": datetime(2026, 6, 5, 12, 29, 40),
+        }
+    ]
+
+    joined_scalar_sql = "\n".join(session.scalar_statements)
+    assert "fin_reconciliation_checklist_tasks.status IN ('success', 'partial_success')" in joined_scalar_sql
+    assert "fin_reconciliation_checklist_details.order_amount" in joined_scalar_sql
+    assert "count(distinct(fin_reconciliation_checklist_details.merchant_id))" in joined_scalar_sql
+    assert "receipt_merchant_id" not in session.scalar_statements[5]
+    assert "fin_reconciliation_checklist_tasks.org_id IN (8)" in joined_scalar_sql

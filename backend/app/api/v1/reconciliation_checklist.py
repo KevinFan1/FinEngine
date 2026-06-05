@@ -1,5 +1,7 @@
 """对账清单接口。"""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +46,49 @@ class ReconciliationChecklistTaskSourceDownloadOut(BaseModel):
     expires_seconds: int
 
 
+class ReconciliationChecklistDashboardMonthlyOut(BaseModel):
+    month: int
+    task_count: int
+
+
+class ReconciliationChecklistDashboardMonthlyAmountOut(BaseModel):
+    month: int
+    total_order_amount: str
+
+
+class ReconciliationChecklistDashboardMerchantOut(BaseModel):
+    merchant_id: int
+    merchant_name: str
+    total_order_amount: str
+
+
+class ReconciliationChecklistDashboardRecentTaskOut(BaseModel):
+    id: int
+    original_name: str
+    status: str
+    total_rows: int
+    success_rows: int
+    failed_rows: int
+    inserted_rows: int
+    finished_at: datetime | None
+
+
+class ReconciliationChecklistDashboardOut(BaseModel):
+    processed_task_count: int
+    total_task_count: int
+    failed_task_count: int
+    total_rows: int
+    total_order_amount: str
+    merchant_count: int
+    covered_month_count: int
+    completion_rate: str
+    year: int
+    monthly_task_counts: list[ReconciliationChecklistDashboardMonthlyOut]
+    monthly_order_amounts: list[ReconciliationChecklistDashboardMonthlyAmountOut]
+    top_merchants: list[ReconciliationChecklistDashboardMerchantOut]
+    recent_tasks: list[ReconciliationChecklistDashboardRecentTaskOut]
+
+
 def _task_out(task, upload_file, org_name: str | None = None) -> ReconciliationChecklistTaskOut:
     return ReconciliationChecklistTaskOut(
         id=task.id,
@@ -76,6 +121,70 @@ def _load_task_error(task: ReconciliationChecklistTask | None, upload_file: Reco
     if upload_file is None or upload_file.is_deleted:
         return ApiResponse(code=404, message="上传文件不存在")
     return None
+
+
+@router.get("/dashboard-metrics", response_model=ApiResponse[ReconciliationChecklistDashboardOut])
+async def get_dashboard_metrics(
+    year: int | None = Query(None, ge=2000, le=2100),
+    org_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    metric_year = year or datetime.now().year
+    metrics = await ReconciliationChecklistService.get_dashboard_metrics(
+        db,
+        user=current_user,
+        year=metric_year,
+        org_id=org_id,
+    )
+    return ApiResponse(
+        data=ReconciliationChecklistDashboardOut(
+            processed_task_count=int(metrics["processed_task_count"]),
+            total_task_count=int(metrics["total_task_count"]),
+            failed_task_count=int(metrics["failed_task_count"]),
+            total_rows=int(metrics["total_rows"]),
+            total_order_amount=str(metrics["total_order_amount"]),
+            merchant_count=int(metrics["merchant_count"]),
+            covered_month_count=int(metrics["covered_month_count"]),
+            completion_rate=str(metrics["completion_rate"]),
+            year=int(metrics["year"]),
+            monthly_task_counts=[
+                ReconciliationChecklistDashboardMonthlyOut(
+                    month=int(item["month"]),
+                    task_count=int(item["task_count"]),
+                )
+                for item in metrics["monthly_task_counts"]
+            ],
+            monthly_order_amounts=[
+                ReconciliationChecklistDashboardMonthlyAmountOut(
+                    month=int(item["month"]),
+                    total_order_amount=str(item["total_order_amount"]),
+                )
+                for item in metrics["monthly_order_amounts"]
+            ],
+            top_merchants=[
+                ReconciliationChecklistDashboardMerchantOut(
+                    merchant_id=int(item["merchant_id"]),
+                    merchant_name=str(item["merchant_name"]),
+                    total_order_amount=str(item["total_order_amount"]),
+                )
+                for item in metrics["top_merchants"]
+            ],
+            recent_tasks=[
+                ReconciliationChecklistDashboardRecentTaskOut(
+                    id=int(item["id"]),
+                    original_name=str(item["original_name"]),
+                    status=str(item["status"]),
+                    total_rows=int(item["total_rows"]),
+                    success_rows=int(item["success_rows"]),
+                    failed_rows=int(item["failed_rows"]),
+                    inserted_rows=int(item["inserted_rows"]),
+                    finished_at=item["finished_at"],
+                )
+                for item in metrics["recent_tasks"]
+            ],
+        )
+    )
 
 
 @router.get("/tasks", response_model=ApiResponse[PageResponse[ReconciliationChecklistTaskOut]])

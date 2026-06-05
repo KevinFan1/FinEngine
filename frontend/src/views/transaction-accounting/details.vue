@@ -2,16 +2,14 @@
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline class="filter-form">
-                <el-form-item label="业务年月">
+                <el-form-item label="核算年月">
                     <el-date-picker
-                        v-model="searchForm.businessMonthRange"
-                        type="monthrange"
-                        start-placeholder="业务年月起"
-                        end-placeholder="业务年月止"
-                        range-separator="至"
+                        v-model="searchForm.accountingMonth"
+                        type="month"
+                        placeholder="选择核算年月"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 260px"
+                        style="width: 180px"
                     />
                 </el-form-item>
                 <el-form-item label="平台">
@@ -235,7 +233,7 @@
                         (pagination.page - 1) * pagination.pageSize + $index + 1
                     }}</template>
                 </el-table-column>
-                <el-table-column label="业务年月" width="120">
+                <el-table-column label="核算年月" width="120">
                     <template #default="{ row }">{{
                         formatMonth(row.accounting_year, row.accounting_month)
                     }}</template>
@@ -372,8 +370,7 @@ import {
     detailSummaryMethod,
     formatAmount,
     formatMonth,
-    monthRangeLabel,
-    splitMonthRange,
+    splitSingleAccountingMonth,
 } from "./common";
 import {
     buildExportFilename,
@@ -419,7 +416,7 @@ const paginationDisplayTotal = computed(() =>
     ),
 );
 const searchForm = reactive({
-    businessMonthRange: null as string[] | null,
+    accountingMonth: "",
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -478,7 +475,7 @@ const subjectById = computed(() => {
 
 interface DetailFilterTag extends ActiveFilterTag {
     key:
-        | "businessMonthRange"
+        | "accountingMonth"
         | "orgIds"
         | "platforms"
         | "shopIds"
@@ -489,11 +486,11 @@ interface DetailFilterTag extends ActiveFilterTag {
 
 const activeFilterTags = computed<DetailFilterTag[]>(() => {
     const tags: DetailFilterTag[] = [];
-    if (searchForm.businessMonthRange?.length) {
+    if (searchForm.accountingMonth) {
         tags.push({
-            key: "businessMonthRange",
-            label: "业务年月",
-            value: monthRangeLabel(searchForm.businessMonthRange),
+            key: "accountingMonth",
+            label: "核算年月",
+            value: searchForm.accountingMonth,
         });
     }
     searchForm.orgIds.forEach((value) => {
@@ -554,7 +551,7 @@ function queryParams() {
         major_category_id: searchForm.majorCategoryIds.join(",") || undefined,
         subject_id: searchForm.subjectIds.join(",") || undefined,
         category_id: searchForm.categoryIds.join(",") || undefined,
-        ...splitMonthRange(searchForm.businessMonthRange),
+        ...splitSingleAccountingMonth(searchForm.accountingMonth),
     };
 }
 
@@ -592,7 +589,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.businessMonthRange = null;
+    searchForm.accountingMonth = "";
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -604,8 +601,8 @@ function handleReset() {
 }
 
 async function removeFilterTag(tag: DetailFilterTag) {
-    if (tag.key === "businessMonthRange") {
-        searchForm.businessMonthRange = null;
+    if (tag.key === "accountingMonth") {
+        searchForm.accountingMonth = "";
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
@@ -779,7 +776,7 @@ async function handleExport(scope: TransactionExportScope) {
                   ? `第${pagination.page}页`
                   : "选中";
         const filename = normalizeExportFilename(buildExportFilename([
-            monthRangeLabel(searchForm.businessMonthRange) || "全部业务年月",
+            searchForm.accountingMonth || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || String(id)), "全部")}`,
             `大分类${summarizeFilenameValues(searchForm.majorCategoryIds.map(majorCategoryName), "全部")}`,

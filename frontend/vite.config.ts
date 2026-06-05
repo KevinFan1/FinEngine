@@ -39,6 +39,7 @@ export default defineConfig({
           if (id.includes('node_modules')) {
             if (id.includes('element-plus')) return undefined
             if (id.includes('@element-plus/icons-vue')) return 'vendor-icons'
+            if (id.includes('echarts') || id.includes('zrender')) return 'vendor-echarts'
             if (id.includes('ali-oss')) return 'vendor-oss'
             if (id.includes('xlsx')) return 'vendor-xlsx'
             if (

@@ -92,6 +92,19 @@ export function splitMonthRange(range: string[] | null | undefined) {
     };
 }
 
+export function splitSingleAccountingMonth(month: string | null | undefined) {
+    const [yearText, monthText] = String(month || "").split("-");
+    const year = Number(yearText) || undefined;
+    const monthNumber = Number(monthText) || undefined;
+    if (!year || !monthNumber) {
+        return {};
+    }
+    return {
+        accounting_year: year,
+        accounting_month: monthNumber,
+    };
+}
+
 export function splitUploadMonthRange(range: string[] | null | undefined) {
     const filters = splitMonthRange(range);
     return {

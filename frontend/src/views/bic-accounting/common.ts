@@ -40,6 +40,19 @@ export function splitMonthRange(range: string[] | null | undefined) {
     };
 }
 
+export function splitSingleAccountingMonth(month: string | null | undefined) {
+    const [yearText, monthText] = String(month || "").split("-");
+    const year = Number(yearText) || undefined;
+    const monthNumber = Number(monthText) || undefined;
+    if (!year || !monthNumber) {
+        return {};
+    }
+    return {
+        accounting_year: year,
+        accounting_month: monthNumber,
+    };
+}
+
 export function monthRangeLabel(range: string[] | null | undefined) {
     if (!range?.length) return "";
     if (range.length === 1 || range[0] === range[1]) return range[0];

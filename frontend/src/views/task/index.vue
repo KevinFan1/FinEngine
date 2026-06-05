@@ -3,11 +3,11 @@
         <!-- Filter bar -->
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline>
-                <el-form-item label="年月">
+                <el-form-item label="核算年月">
                     <el-date-picker
                         v-model="searchForm.sourceMonth"
                         type="month"
-                        placeholder="任务年月"
+                        placeholder="选择核算年月"
                         clearable
                         value-format="YYYY-MM"
                         style="width: 150px"
@@ -176,14 +176,6 @@
                             >
                             <el-button
                                 size="small"
-                                :disabled="selectedRetryableRows.length === 0"
-                                :loading="batchRetrying"
-                                @click="handleBatchRetry"
-                            >
-                                批量重试
-                            </el-button>
-                            <el-button
-                                size="small"
                                 type="primary"
                                 :disabled="
                                     selectedRecalculableRows.length === 0
@@ -247,7 +239,7 @@
                         <span v-else class="text-tertiary">-</span>
                     </template>
                 </el-table-column>
-                <el-table-column label="年月" width="160">
+                <el-table-column label="核算年月" width="160">
                     <template #default="{ row }">
                         <span v-if="row.parsed_year && row.parsed_month">
                             {{ row.parsed_year }}-{{
@@ -372,16 +364,6 @@
                                 下载原表
                             </el-button>
                             <el-button
-                                v-if="row.status === 'failed'"
-                                type="primary"
-                                link
-                                :loading="retryingTaskId === row.id"
-                                :disabled="isActionExpired(row)"
-                                @click="handleRetry(row)"
-                            >
-                                重试
-                            </el-button>
-                            <el-button
                                 v-if="canRecalculate(row)"
                                 type="primary"
                                 link
@@ -414,37 +396,6 @@
                 />
             </div>
         </el-card>
-
-        <el-dialog
-            v-model="retryDialogVisible"
-            title="重试确认"
-            width="420px"
-            append-to-body
-            destroy-on-close
-            :close-on-click-modal="false"
-            :close-on-press-escape="retryingTaskId === null"
-            :show-close="retryingTaskId === null"
-            @closed="handleRetryDialogClosed"
-        >
-            <p class="retry-dialog-text">
-                确定要重试任务「{{ retryTargetLabel }}」吗？
-            </p>
-            <template #footer>
-                <el-button
-                    :disabled="retryingTaskId !== null"
-                    @click="retryDialogVisible = false"
-                >
-                    取消
-                </el-button>
-                <el-button
-                    type="primary"
-                    :loading="retryingTaskId !== null"
-                    @click="confirmRetry"
-                >
-                    确定重试
-                </el-button>
-            </template>
-        </el-dialog>
 
         <el-drawer
             v-model="uploadDrawerVisible"
@@ -534,7 +485,7 @@
                     </div>
                     <div class="detail-grid">
                         <div class="detail-item">
-                            <span class="detail-label">年月</span>
+                            <span class="detail-label">核算年月</span>
                             <strong>
                                 <template
                                     v-if="
@@ -640,9 +591,7 @@ import { useUserStore } from "@/stores/user";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     getTaskList,
-    retryTask,
     recalculateTask,
-    batchRetryTasks,
     batchRecalculateTasks,
     getTaskSourceDownload,
     type Task,
@@ -670,6 +619,12 @@ import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import ActiveFilterTags from "@/components/ActiveFilterTags.vue";
 import type { ActiveFilterTag } from "@/components/activeFilterTags";
+import {
+    ACCOUNTING_UPLOAD_TASK_TYPES,
+    buildAccountingTaskTypes,
+    filterAccountingTasks,
+    isAccountingRecalculateOnlyTaskType,
+} from "@/views/accountingFilters";
 
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
@@ -691,30 +646,24 @@ const platformOptions = ref<PlatformOption[]>(
     toSourcePlatformOptions(platforms.value),
 );
 
-const typeOptions = [
-    { label: "动账", value: "动账" },
-    { label: "GMV", value: "gmv" },
-    { label: "BIC", value: "bic" },
-    { label: "运费险", value: "运费险" },
-    { label: "订单", value: "订单" },
-    { label: "其他服务款", value: "其他服务款" },
-    { label: "红单", value: "红单" },
-    { label: "银行流水", value: "银行流水" },
-    { label: "对账清单", value: "对账清单" },
-];
+const typeOptions = ACCOUNTING_UPLOAD_TASK_TYPES.map((value) => ({
+    label:
+        value.toLowerCase() === "gmv"
+            ? "GMV"
+            : value.toLowerCase() === "bic"
+              ? "BIC"
+              : value,
+    value,
+}));
 
 // Table
 const loading = ref(false);
 const tableData = ref<Task[]>([]);
 const shopLoading = ref(false);
 const shopOptions = ref<Shop[]>([]);
-const retryingTaskId = ref<number | null>(null);
 const recalculatingTaskId = ref<number | null>(null);
 const downloadingTaskId = ref<number | null>(null);
-const batchRetrying = ref(false);
 const batchRecalculating = ref(false);
-const retryDialogVisible = ref(false);
-const retryTarget = ref<Task | null>(null);
 const selectedRows = ref<Task[]>([]);
 const uploadDrawerVisible = ref(false);
 const taskDetailDrawerVisible = ref(false);
@@ -732,10 +681,6 @@ const hasRunningTasks = computed(() => {
     return tableData.value.some(
         (t) => t.status === "running" || t.status === "queued",
     );
-});
-
-const retryTargetLabel = computed(() => {
-    return retryTarget.value?.filename || retryTarget.value?.id || "";
 });
 
 const selectedYear = computed(() => {
@@ -772,7 +717,12 @@ const selectedShopIdsParam = computed(
     () => searchForm.shopIds.join(",") || undefined,
 );
 const selectedParsedTypesParam = computed(
-    () => searchForm.parsedTypes.join(",") || undefined,
+    () =>
+        buildAccountingTaskTypes(
+            searchForm.parsedTypes.length
+                ? searchForm.parsedTypes
+                : typeOptions.map((item) => item.value),
+        ),
 );
 const selectedStatusesParam = computed(
     () => searchForm.statuses.join(",") || undefined,
@@ -787,11 +737,6 @@ const selectedReportPlatformsParam = computed(() => {
 });
 
 const selectedCount = computed(() => selectedRows.value.length);
-const selectedRetryableRows = computed(() =>
-    selectedRows.value.filter(
-        (row) => row.status === "failed" && !isActionExpired(row),
-    ),
-);
 const selectedRecalculableRows = computed(() =>
     selectedRows.value.filter((row) => canRecalculate(row)),
 );
@@ -802,7 +747,7 @@ interface TaskFilterTag extends ActiveFilterTag {
 
 const activeFilterTags = computed<TaskFilterTag[]>(() => {
     const tags: TaskFilterTag[] = [];
-    if (searchForm.sourceMonth) tags.push({ key: "sourceMonth", label: "年月", value: searchForm.sourceMonth });
+    if (searchForm.sourceMonth) tags.push({ key: "sourceMonth", label: "核算年月", value: searchForm.sourceMonth });
     if (searchForm.createdTimeRange?.length) tags.push({ key: "createdTimeRange", label: "创建时间", value: dateRangeLabel(searchForm.createdTimeRange) });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
@@ -855,6 +800,7 @@ function isActionExpired(row: Task) {
 }
 
 function canRecalculate(row: Task) {
+    if (!isAccountingRecalculateOnlyTaskType(row.parsed_type)) return false;
     return !["queued", "running", "expired"].includes(row.status) && !isActionExpired(row);
 }
 
@@ -923,8 +869,8 @@ async function fetchData() {
             created_start_time: searchForm.createdTimeRange?.[0] || undefined,
             created_end_time: searchForm.createdTimeRange?.[1] || undefined,
         });
-        tableData.value = res.items || [];
-        pagination.total = res.total || 0;
+        tableData.value = filterAccountingTasks(res.items || []);
+        pagination.total = tableData.value.length + (res.total || 0) - (res.items || []).length;
         selectedRows.value = selectedRows.value.filter((selected) =>
             tableData.value.some((row) => row.id === selected.id),
         );
@@ -1060,51 +1006,6 @@ function handleContinueUpload() {
     fetchData();
 }
 
-async function handleRetry(row: Task) {
-    if (isActionExpired(row)) {
-        ElMessage.warning(row.action_expire_reason || "任务已过期，不能重试");
-        await fetchData();
-        return;
-    }
-    retryTarget.value = row;
-    retryDialogVisible.value = true;
-    stopAutoRefresh();
-}
-
-function handleRetryDialogClosed() {
-    retryTarget.value = null;
-    if (retryingTaskId.value === null) {
-        startAutoRefresh();
-    }
-}
-
-async function confirmRetry() {
-    if (!retryTarget.value || retryingTaskId.value !== null) return;
-
-    if (isActionExpired(retryTarget.value)) {
-        ElMessage.warning(
-            retryTarget.value.action_expire_reason || "任务已过期，不能重试",
-        );
-        retryDialogVisible.value = false;
-        await fetchData();
-        return;
-    }
-
-    const taskId = retryTarget.value.id;
-    retryingTaskId.value = taskId;
-    try {
-        await retryTask(taskId);
-        ElMessage.success("已重新提交任务");
-        retryDialogVisible.value = false;
-        await fetchData();
-    } catch {
-        // Error handled by interceptor
-    } finally {
-        retryingTaskId.value = null;
-        startAutoRefresh();
-    }
-}
-
 async function handleRecalculate(row: Task) {
     if (isActionExpired(row)) {
         ElMessage.warning(
@@ -1138,27 +1039,6 @@ function showBatchResult(result: TaskBatchActionResult, successText: string) {
         return;
     }
     ElMessage.success(`${successText} ${result.success_count} 个`);
-}
-
-async function handleBatchRetry() {
-    const rows = selectedRetryableRows.value;
-    if (!rows.length) {
-        ElMessage.warning("请选择未过期的失败任务");
-        return;
-    }
-
-    batchRetrying.value = true;
-    stopAutoRefresh();
-    try {
-        const result = await batchRetryTasks(rows.map((row) => row.id));
-        showBatchResult(result, "已重新提交任务");
-        await fetchData();
-    } catch {
-        await fetchData();
-    } finally {
-        batchRetrying.value = false;
-        startAutoRefresh();
-    }
 }
 
 async function handleBatchRecalculate() {

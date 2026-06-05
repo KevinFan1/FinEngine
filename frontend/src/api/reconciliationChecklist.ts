@@ -106,8 +106,58 @@ export interface ReconciliationChecklistTaskSourceDownload {
     expires_seconds: number;
 }
 
+export interface ReconciliationChecklistDashboardMonthlyMetric {
+    month: number;
+    task_count: number;
+}
+
+export interface ReconciliationChecklistDashboardMonthlyAmount {
+    month: number;
+    total_order_amount: string;
+}
+
+export interface ReconciliationChecklistDashboardMerchant {
+    merchant_id: number;
+    merchant_name: string;
+    total_order_amount: string;
+}
+
+export interface ReconciliationChecklistDashboardRecentTask {
+    id: number;
+    original_name: string;
+    status: string;
+    total_rows: number;
+    success_rows: number;
+    failed_rows: number;
+    inserted_rows: number;
+    finished_at?: string | null;
+}
+
+export interface ReconciliationChecklistDashboardMetrics {
+    processed_task_count: number;
+    total_task_count: number;
+    failed_task_count: number;
+    total_rows: number;
+    total_order_amount: string;
+    merchant_count: number;
+    covered_month_count: number;
+    completion_rate: string;
+    year: number;
+    monthly_task_counts: ReconciliationChecklistDashboardMonthlyMetric[];
+    monthly_order_amounts: ReconciliationChecklistDashboardMonthlyAmount[];
+    top_merchants: ReconciliationChecklistDashboardMerchant[];
+    recent_tasks: ReconciliationChecklistDashboardRecentTask[];
+}
+
 export function listReconciliationChecklistTasks(params: ReconciliationChecklistTaskParams) {
     return get<PaginatedData<ReconciliationChecklistTask>>("/reconciliation-checklist/tasks", params);
+}
+
+export function getReconciliationChecklistDashboardMetrics(params?: {
+    year?: number;
+    org_id?: number | string;
+}) {
+    return get<ReconciliationChecklistDashboardMetrics>("/reconciliation-checklist/dashboard-metrics", params);
 }
 
 export function retryReconciliationChecklistTask(taskId: number) {

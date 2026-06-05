@@ -2,11 +2,11 @@
     <div class="page-container transaction-page">
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline class="filter-form">
-                <el-form-item label="任务年月">
+                <el-form-item label="数据年月">
                     <el-date-picker
                         v-model="searchForm.sourceMonth"
                         type="month"
-                        placeholder="任务年月"
+                        placeholder="选择数据年月"
                         clearable
                         value-format="YYYY-MM"
                         style="width: 160px"
@@ -145,7 +145,7 @@
                         <FileTypeBadge :type="taskType(row)" />
                     </template>
                 </el-table-column>
-                <el-table-column label="年月" width="120">
+                <el-table-column label="数据年月" width="120">
                     <template #default="{ row }">{{ formatMonth(row.parsed_year, row.parsed_month) }}</template>
                 </el-table-column>
                 <el-table-column prop="platform" label="平台" width="100">
@@ -332,7 +332,7 @@
                     </div>
                     <div class="detail-grid">
                         <div class="detail-item">
-                            <span class="detail-label">任务年月</span>
+                            <span class="detail-label">数据年月</span>
                             <strong>{{ formatMonth(taskDetail.parsed_year, taskDetail.parsed_month) }}</strong>
                         </div>
                         <div v-if="userStore.isSuperAdmin" class="detail-item">
@@ -450,6 +450,7 @@ import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import { formatMonth } from "./common";
+import { isMerchantReconciliationRecalculateOnlyTaskType } from "@/views/accountingFilters";
 
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
@@ -577,6 +578,9 @@ function canRecalculate(row: Task) {
 
 function canRetry(row: Task) {
     if (isActionExpired(row) || row.status === "expired") return false;
+    if (isMerchantReconciliationRecalculateOnlyTaskType(taskType(row))) {
+        return false;
+    }
     if (taskType(row) === "银行流水") {
         return !["queued", "running"].includes(row.status);
     }

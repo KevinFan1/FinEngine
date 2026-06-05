@@ -8,7 +8,7 @@
                             <span class="section-kicker">NAMING RULE</span>
                             <h2>文件命名规则</h2>
                         </div>
-                        <p>先按规则命名，系统会识别年月、动账类型和店铺；当前仅支持抖音动账。</p>
+                        <p>先按规则命名，系统会识别核算年月、动账类型和店铺；当前仅支持抖音动账。</p>
                     </div>
                     <div class="rule-code-line" aria-label="标准文件命名格式">
                         <span class="rule-token rule-token--date">YY年MM月</span>
@@ -23,7 +23,7 @@
                             示例：<code>26年02月_动账_抖音旗舰店.xlsx</code>
                         </p>
                         <div class="rule-hint-list">
-                            <span>年月支持 26年 或 2026年</span>
+                            <span>核算年月支持 26年 或 2026年</span>
                             <span>月份支持 2月 或 02月</span>
                             <span>后续平台接入后沿用此入口</span>
                         </div>
@@ -268,7 +268,7 @@
                                 min-width="220"
                                 show-overflow-tooltip
                             />
-                            <el-table-column label="年月" width="100">
+                            <el-table-column label="核算年月" width="100">
                                 <template #default="{ row }">
                                     <el-tag
                                         v-if="row.meta"
@@ -427,13 +427,13 @@
                         <div class="naming-assistant">
                             <div class="naming-fields">
                                 <label class="naming-field">
-                                    <span>年月</span>
+                                    <span>核算年月</span>
                                     <el-date-picker
                                         v-model="namingMonth"
                                         type="month"
                                         value-format="YYYY-MM"
                                         format="YYYY年MM月"
-                                        placeholder="选择年月"
+                                        placeholder="选择核算年月"
                                         :clearable="false"
                                     />
                                 </label>
@@ -798,7 +798,7 @@ function fallbackCopyText(text: string): boolean {
 
 async function copyGeneratedFileName() {
     if (!generatedFileName.value) {
-        ElMessage.warning("请先填写年月和店铺名称");
+        ElMessage.warning("请先填写核算年月和店铺名称");
         return;
     }
     try {

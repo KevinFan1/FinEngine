@@ -6,8 +6,8 @@
                     <el-date-picker
                         v-model="searchForm.monthRange"
                         type="monthrange"
-                        start-placeholder="任务年月起"
-                        end-placeholder="任务年月止"
+                        start-placeholder="核算年月起"
+                        end-placeholder="核算年月止"
                         range-separator="至"
                         clearable
                         value-format="YYYY-MM"
@@ -180,7 +180,7 @@
                         <FileTypeBadge type="bic" />
                     </template>
                 </el-table-column>
-                <el-table-column label="年月" width="160">
+                <el-table-column label="核算年月" width="160">
                     <template #default="{ row }">{{ formatMonth(row.accounting_year, row.accounting_month) }}</template>
                 </el-table-column>
                 <el-table-column prop="platform_code" label="平台" width="100">

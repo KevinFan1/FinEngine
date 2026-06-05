@@ -30,7 +30,7 @@
                     <template #default="{ $index }">{{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}</template>
                 </el-table-column>
                 <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="160" show-overflow-tooltip />
-                <el-table-column label="年月" width="110">
+                <el-table-column label="数据年月" width="110">
                     <template #default="{ row }">{{ formatAccountingPeriod(row.accounting_period) }}</template>
                 </el-table-column>
                 <el-table-column label="店铺" width="190" show-overflow-tooltip>

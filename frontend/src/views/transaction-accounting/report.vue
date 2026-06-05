@@ -13,18 +13,6 @@
                         @change="handleYearChange"
                     />
                 </el-form-item>
-                <el-form-item label="核算年月">
-                    <el-date-picker
-                        v-model="searchForm.uploadMonthRange"
-                        type="monthrange"
-                        start-placeholder="核算年月起"
-                        end-placeholder="核算年月止"
-                        range-separator="至"
-                        clearable
-                        value-format="YYYY-MM"
-                        style="width: 260px"
-                    />
-                </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
                     <el-select
                         v-model="searchForm.orgIds"
@@ -303,8 +291,6 @@ import {
 } from "@/api/transactionAccounting";
 import {
     formatAmount,
-    monthRangeLabel,
-    splitUploadMonthRange,
 } from "./common";
 import {
     buildExportFilename,
@@ -340,7 +326,6 @@ const shopLoading = ref(false);
 const exportLoading = ref(false);
 const searchForm = reactive({
     year: currentYear,
-    uploadMonthRange: null as string[] | null,
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -383,7 +368,6 @@ const filteredShopOptions = computed(() => {
 interface ReportFilterTag extends ActiveFilterTag {
     key:
         | "year"
-        | "uploadMonthRange"
         | "orgIds"
         | "platforms"
         | "shopIds"
@@ -396,13 +380,6 @@ const activeFilterTags = computed<ReportFilterTag[]>(() => {
     const tags: ReportFilterTag[] = [
         { key: "year", label: "业务年份", value: `${searchForm.year}` },
     ];
-    if (searchForm.uploadMonthRange?.length) {
-        tags.push({
-            key: "uploadMonthRange",
-            label: "核算年月",
-            value: monthRangeLabel(searchForm.uploadMonthRange),
-        });
-    }
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({
@@ -469,7 +446,6 @@ function queryParams(): TransactionAnnualSummaryParams {
         major_category_id: searchForm.majorCategoryIds.join(",") || undefined,
         subject_id: searchForm.subjectIds.join(",") || undefined,
         category_id: searchForm.categoryIds.join(",") || undefined,
-        ...splitUploadMonthRange(searchForm.uploadMonthRange),
     };
 }
 
@@ -509,7 +485,6 @@ function handleSearch() {
 function handleReset() {
     searchForm.year = currentYear;
     yearPickerValue.value = String(currentYear);
-    searchForm.uploadMonthRange = null;
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -609,8 +584,6 @@ async function removeFilterTag(tag: ReportFilterTag) {
         searchForm.year = currentYear;
         yearPickerValue.value = String(currentYear);
         reportMonths.value = buildYearMonths(currentYear);
-    } else if (tag.key === "uploadMonthRange") {
-        searchForm.uploadMonthRange = [];
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
@@ -665,7 +638,6 @@ async function handleExport() {
         const params = queryParams();
         const filename = normalizeExportFilename(buildExportFilename([
             `${searchForm.year}年`,
-            monthRangeLabel(searchForm.uploadMonthRange) || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || String(id)), "全部")}`,
             `大分类${summarizeFilenameValues(searchForm.majorCategoryIds.map(majorCategoryName), "全部")}`,

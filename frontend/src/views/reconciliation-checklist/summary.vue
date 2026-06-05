@@ -22,14 +22,14 @@
                     </el-select>
                 </el-form-item>
                 <el-form-item
-                    label="年月"
+                    label="数据年月"
                     class="filter-field filter-field--month"
                 >
                     <el-date-picker
                         v-model="filters.month"
                         type="month"
                         value-format="YYYY-MM"
-                        placeholder="年月"
+                        placeholder="选择数据年月"
                         :clearable="false"
                         @change="handleMonthChange"
                     />
@@ -48,7 +48,7 @@
                                 fetchEntityOptions('live_promoter', keyword)
                         "
                         :loading="entityLoading.live_promoter"
-                        placeholder="先选年月，再选推广方"
+                        placeholder="先选数据年月，再选推广方"
                     >
                         <el-option
                             v-for="item in entityOptions.live_promoter"
@@ -72,7 +72,7 @@
                                 fetchEntityOptions('merchant', keyword)
                         "
                         :loading="entityLoading.merchant"
-                        placeholder="先选年月，再选商家"
+                        placeholder="先选数据年月，再选商家"
                     >
                         <el-option
                             v-for="item in entityOptions.merchant"
@@ -96,7 +96,7 @@
                                 fetchEntityOptions('receipt_merchant', keyword)
                         "
                         :loading="entityLoading.receipt_merchant"
-                        placeholder="先选年月，再选收款商家"
+                        placeholder="先选数据年月，再选收款商家"
                     >
                         <el-option
                             v-for="item in entityOptions.receipt_merchant"
@@ -170,7 +170,7 @@
                     width="48"
                     reserve-selection
                 />
-                <el-table-column label="年月" width="110">
+                <el-table-column label="数据年月" width="110">
                     <template #default="{ row }">{{
                         formatChecklistMonth(
                             row.accounting_year,
@@ -789,7 +789,7 @@ async function handleExport(scope: ExportScope) {
         return;
     }
     const ids = selectedRows.value.map((row) => row.key);
-    const monthLabel = filters.month || "全部月份";
+    const monthLabel = filters.month || "全部数据年月";
     const loadingRef =
         scope === "selected"
             ? exportSelectedLoading

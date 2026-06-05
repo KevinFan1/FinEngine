@@ -1,488 +1,858 @@
 <template>
-  <div class="page-container dashboard-page">
-    <section class="dashboard-summary">
-      <div class="summary-main">
-        <div class="summary-kicker">
-          <span class="status-dot" :class="statusDotClass"></span>
-          财务工作台
-        </div>
-        <h2>工作台</h2>
-        <div class="summary-meta">
-          <span>{{ userStore.displayName }}</span>
-          <span v-if="userStore.userInfo?.org_name">{{ userStore.userInfo.org_name }}</span>
-          <span>{{ roleLabel }}</span>
-        </div>
-      </div>
-
-      <div class="summary-actions">
-        <el-button type="primary" @click="router.push('/upload')">
-          <el-icon><Upload /></el-icon>
-          上传文件
-        </el-button>
-        <el-button @click="router.push('/summary-report')">
-          <el-icon><DataAnalysis /></el-icon>
-          查看报表
-        </el-button>
-      </div>
-    </section>
-
-    <section class="metric-strip">
-      <button
-        v-for="metric in taskMetrics"
-        :key="metric.label"
-        type="button"
-        class="metric-cell"
-        :class="metric.className"
-        @click="router.push(metric.path)"
-      >
-        <div>
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-        </div>
-        <small>{{ metric.hint }}</small>
-      </button>
-    </section>
-
-    <section class="dashboard-board">
-      <el-card shadow="never" class="status-card">
-        <template #header>
-          <div class="card-header">
-            <span class="card-header-title">任务状态</span>
-            <el-button link type="primary" @click="router.push('/tasks')">任务列表</el-button>
-          </div>
-        </template>
-        <div class="status-panel">
-          <div class="status-head">
-            <span>当前状态</span>
-            <strong :class="healthClass">{{ healthLabel }}</strong>
-          </div>
-          <div class="health-bar">
-            <span :style="{ width: completionRate }"></span>
-          </div>
-          <div class="status-foot">
-            <span>总任务 {{ totalTasks }}</span>
-            <span>待处理 {{ pendingTasks }}</span>
-            <span>失败 {{ failedTasks }}</span>
-          </div>
-        </div>
-      </el-card>
-
-      <el-card shadow="never" class="shortcut-card">
-        <template #header>
-          <span class="card-header-title">常用操作</span>
-        </template>
-        <div class="shortcut-list">
-          <button
-            v-for="entry in shortcutEntries"
-            :key="entry.path"
-            type="button"
-            class="shortcut-item"
-            @click="router.push(entry.path)"
-          >
-            <el-icon :size="18"><component :is="entry.icon" /></el-icon>
-            <div>
-              <strong>{{ entry.title }}</strong>
-              <span>{{ entry.desc }}</span>
+    <div class="page-container dashboard-page">
+        <section class="dashboard-hero">
+            <div class="hero-copy">
+                <span class="hero-kicker">数据总览</span>
+                <h2>首页</h2>
+                <p>
+                    围绕对账清单处理结果，集中查看任务规模、GMV、商家覆盖和最近处理情况。
+                </p>
             </div>
-          </button>
-        </div>
-      </el-card>
-    </section>
-  </div>
+            <div class="hero-meta">
+                <span>{{ userStore.displayName || "当前用户" }}</span>
+                <span v-if="userStore.userInfo?.org_name">{{
+                    userStore.userInfo.org_name
+                }}</span>
+                <span>{{ metrics.year }} 年</span>
+                <!-- <el-button text type="primary" :loading="loading" @click="fetchMetrics">刷新数据</el-button> -->
+            </div>
+        </section>
+
+        <section class="dashboard-metrics" :aria-busy="loading">
+            <article
+                v-for="card in metricCards"
+                :key="card.label"
+                class="metric-card"
+                :class="card.className"
+            >
+                <div class="metric-card__head">
+                    <span>{{ card.label }}</span>
+                    <small>{{ card.badge }}</small>
+                </div>
+                <strong>{{ card.value }}</strong>
+                <p>{{ card.hint }}</p>
+            </article>
+        </section>
+
+        <section class="dashboard-grid">
+            <article class="panel-card chart-panel chart-panel--wide">
+                <div class="panel-header">
+                    <div>
+                        <span class="panel-kicker">Monthly Tasks</span>
+                        <h3>{{ metrics.year }} 年每月处理任务数量</h3>
+                    </div>
+                    <span class="panel-note">按任务完成时间统计</span>
+                </div>
+                <div
+                    ref="taskChartRef"
+                    class="chart-box"
+                    role="img"
+                    aria-label="全年每月处理任务数量柱状图"
+                ></div>
+                <el-empty
+                    v-if="!loading && !hasMonthlyTaskData"
+                    class="chart-empty"
+                    description="暂无本年度处理任务"
+                />
+            </article>
+
+            <article class="panel-card chart-panel">
+                <div class="panel-header">
+                    <div>
+                        <span class="panel-kicker">Monthly GMV</span>
+                        <h3>{{ metrics.year }} 年每月 GMV</h3>
+                    </div>
+                    <span class="panel-note">按动账月份统计</span>
+                </div>
+                <div
+                    ref="amountChartRef"
+                    class="chart-box"
+                    role="img"
+                    aria-label="全年每月 GMV 面积图"
+                ></div>
+                <el-empty
+                    v-if="!loading && !hasMonthlyAmountData"
+                    class="chart-empty"
+                    description="暂无本年度 GMV"
+                />
+            </article>
+
+            <article class="panel-card merchant-panel">
+                <div class="panel-header">
+                    <div>
+                        <span class="panel-kicker">Top Merchants</span>
+                        <h3>商家 GMV Top 5</h3>
+                    </div>
+                    <span class="panel-note">按商家维度</span>
+                </div>
+                <div v-if="metrics.top_merchants.length" class="merchant-list">
+                    <div
+                        v-for="(merchant, index) in metrics.top_merchants"
+                        :key="merchant.merchant_id"
+                        class="merchant-row"
+                    >
+                        <span class="rank">{{ index + 1 }}</span>
+                        <div class="merchant-info">
+                            <strong>{{
+                                merchant.merchant_name || "未命名商家"
+                            }}</strong>
+                            <div class="merchant-bar">
+                                <span
+                                    :style="{
+                                        width: merchantBarWidth(
+                                            merchant.total_order_amount,
+                                        ),
+                                    }"
+                                ></span>
+                            </div>
+                        </div>
+                        <b>{{
+                            formatCompactCurrency(merchant.total_order_amount)
+                        }}</b>
+                    </div>
+                </div>
+                <el-empty
+                    v-else
+                    class="panel-empty"
+                    description="暂无商家排行"
+                />
+            </article>
+
+            <article class="panel-card recent-panel">
+                <div class="panel-header">
+                    <div>
+                        <span class="panel-kicker">Recent Runs</span>
+                        <h3>最近处理任务</h3>
+                    </div>
+                    <span class="panel-note">最多 5 条</span>
+                </div>
+                <div v-if="metrics.recent_tasks.length" class="recent-list">
+                    <div
+                        v-for="task in metrics.recent_tasks"
+                        :key="task.id"
+                        class="recent-row"
+                    >
+                        <div class="recent-main">
+                            <strong>{{ task.original_name }}</strong>
+                            <span>{{ formatDateTime(task.finished_at) }}</span>
+                        </div>
+                        <div class="recent-stats">
+                            <span>{{ formatInteger(task.total_rows) }} 行</span>
+                            <span
+                                class="status-label"
+                                :class="statusClass(task.status)"
+                                >{{ statusLabel(task.status) }}</span
+                            >
+                        </div>
+                    </div>
+                </div>
+                <el-empty
+                    v-else
+                    class="panel-empty"
+                    description="暂无最近任务"
+                />
+            </article>
+        </section>
+    </div>
 </template>
 
 <script setup lang="ts">
-defineOptions({ name: 'Dashboard' })
+defineOptions({ name: "Dashboard" });
 
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useUserStore } from '@/stores/user'
-import { getTaskList } from '@/api/task'
-import { getRoleLabel } from '@/utils/format'
-import { usePageRefresh } from '@/composables/pageRefresh'
+import { BarChart, LineChart } from "echarts/charts";
+import {
+    GridComponent,
+    TooltipComponent,
+    type GridComponentOption,
+    type TooltipComponentOption,
+} from "echarts/components";
+import * as echarts from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
+import type { BarSeriesOption, LineSeriesOption } from "echarts/charts";
+import type { ComposeOption, ECharts } from "echarts/core";
+import {
+    computed,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    shallowRef,
+} from "vue";
+import {
+    getReconciliationChecklistDashboardMetrics,
+    type ReconciliationChecklistDashboardMetrics,
+} from "@/api/reconciliationChecklist";
+import { usePageRefresh } from "@/composables/pageRefresh";
+import { useUserStore } from "@/stores/user";
 
-const router = useRouter()
-const userStore = useUserStore()
+type DashboardChartOption = ComposeOption<
+    | GridComponentOption
+    | TooltipComponentOption
+    | BarSeriesOption
+    | LineSeriesOption
+>;
 
-const roleLabel = computed(() => getRoleLabel(userStore.userRole))
+echarts.use([
+    BarChart,
+    LineChart,
+    GridComponent,
+    TooltipComponent,
+    CanvasRenderer,
+]);
 
-const pendingTasks = ref(0)
-const completedTasks = ref(0)
-const failedTasks = ref(0)
+const userStore = useUserStore();
+const currentYear = new Date().getFullYear();
 
-const totalTasks = computed(() => pendingTasks.value + completedTasks.value + failedTasks.value)
+const emptyMonthlyTaskCounts = () =>
+    Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        task_count: 0,
+    }));
 
-const completionRate = computed(() => {
-  if (totalTasks.value === 0) return '0%'
-  return `${Math.round((completedTasks.value / totalTasks.value) * 100)}%`
-})
+const emptyMonthlyAmounts = () =>
+    Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        total_order_amount: "0.00",
+    }));
 
-const healthLabel = computed(() => {
-  if (failedTasks.value > 0) return '需要关注'
-  if (pendingTasks.value > 0) return '处理中'
-  return totalTasks.value > 0 ? '运行正常' : '暂无任务'
-})
+const metrics = shallowRef<ReconciliationChecklistDashboardMetrics>({
+    processed_task_count: 0,
+    total_task_count: 0,
+    failed_task_count: 0,
+    total_rows: 0,
+    total_order_amount: "0.00",
+    merchant_count: 0,
+    covered_month_count: 0,
+    completion_rate: "0.00",
+    year: currentYear,
+    monthly_task_counts: emptyMonthlyTaskCounts(),
+    monthly_order_amounts: emptyMonthlyAmounts(),
+    top_merchants: [],
+    recent_tasks: [],
+});
+const loading = ref(false);
+const taskChartRef = ref<HTMLElement | null>(null);
+const amountChartRef = ref<HTMLElement | null>(null);
+let taskChartInstance: ECharts | null = null;
+let amountChartInstance: ECharts | null = null;
 
-const healthClass = computed(() => ({
-  'is-danger': failedTasks.value > 0,
-  'is-warning': failedTasks.value === 0 && pendingTasks.value > 0,
-  'is-success': failedTasks.value === 0 && pendingTasks.value === 0 && totalTasks.value > 0,
-}))
+const metricCards = computed(() => [
+    {
+        label: "处理任务",
+        value: formatInteger(metrics.value.processed_task_count),
+        badge: `${formatPercent(metrics.value.completion_rate)} 完成率`,
+        hint: `累计任务 ${formatInteger(metrics.value.total_task_count)} 个，失败 ${formatInteger(metrics.value.failed_task_count)} 个`,
+        className: "metric-card--tasks",
+    },
+    {
+        label: "累计 GMV",
+        value: formatCurrency(metrics.value.total_order_amount),
+        badge: "订单金额",
+        hint: "来自已落库的对账清单明细订单金额",
+        className: "metric-card--gmv",
+    },
+    {
+        label: "对账商家",
+        value: formatInteger(metrics.value.merchant_count),
+        badge: "商家口径",
+        hint: "按商家维度统计，不含收款商家口径",
+        className: "metric-card--merchant",
+    },
+    {
+        label: "处理行数",
+        value: formatInteger(metrics.value.total_rows),
+        badge: `${formatInteger(metrics.value.covered_month_count)} 个期间`,
+        hint: "已成功或部分成功任务累计解析行数",
+        className: "metric-card--rows",
+    },
+]);
 
-const statusDotClass = computed(() => ({
-  'is-danger': failedTasks.value > 0,
-  'is-warning': failedTasks.value === 0 && pendingTasks.value > 0,
-  'is-success': failedTasks.value === 0 && pendingTasks.value === 0 && totalTasks.value > 0,
-}))
+const monthlyTaskCounts = computed(() =>
+    Array.from({ length: 12 }, (_, index) => {
+        const month = index + 1;
+        return (
+            metrics.value.monthly_task_counts.find(
+                (item) => item.month === month,
+            )?.task_count ?? 0
+        );
+    }),
+);
 
-const taskMetrics = computed(() => [
-  {
-    label: '待处理',
-    value: pendingTasks.value,
-    hint: '查看进度',
-    className: 'metric-cell--warning',
-    path: '/tasks',
-  },
-  {
-    label: '失败任务',
-    value: failedTasks.value,
-    hint: '优先处理',
-    className: 'metric-cell--danger',
-    path: '/tasks',
-  },
-  {
-    label: '已完成',
-    value: completedTasks.value,
-    hint: '进入报表',
-    className: 'metric-cell--success',
-    path: '/summary-report',
-  },
-])
+const monthlyAmounts = computed(() =>
+    Array.from({ length: 12 }, (_, index) => {
+        const month = index + 1;
+        return Number(
+            metrics.value.monthly_order_amounts.find(
+                (item) => item.month === month,
+            )?.total_order_amount ?? 0,
+        );
+    }),
+);
 
-const shortcutEntries = [
-  {
-    title: '上传中心',
-    desc: '导入文件',
-    path: '/upload',
-    icon: 'Upload',
-  },
-  {
-    title: '任务列表',
-    desc: '处理进度',
-    path: '/tasks',
-    icon: 'List',
-  },
-  {
-    title: '汇总报表',
-    desc: '查看结果',
-    path: '/summary-report',
-    icon: 'DataAnalysis',
-  },
-]
+const topMerchantMaxAmount = computed(() =>
+    Math.max(
+        0,
+        ...metrics.value.top_merchants.map((merchant) =>
+            Number(merchant.total_order_amount || 0),
+        ),
+    ),
+);
 
-async function fetchStats() {
-  try {
-    const pendingRes = await getTaskList({ page: 1, page_size: 1, status: 'queued' })
-    pendingTasks.value = pendingRes.total || 0
+const hasMonthlyTaskData = computed(() =>
+    monthlyTaskCounts.value.some((count) => count > 0),
+);
+const hasMonthlyAmountData = computed(() =>
+    monthlyAmounts.value.some((amount) => amount > 0),
+);
 
-    const completedRes = await getTaskList({ page: 1, page_size: 1, status: 'success' })
-    completedTasks.value = completedRes.total || 0
+function formatInteger(value: number) {
+    return Number(value || 0).toLocaleString("zh-CN");
+}
 
-    const failedRes = await getTaskList({ page: 1, page_size: 1, status: 'failed' })
-    failedTasks.value = failedRes.total || 0
-  } catch {
-    // 首页统计不阻断工作台加载。
-  }
+function formatPercent(value: string) {
+    const rate = Number(value || 0);
+    if (!Number.isFinite(rate)) return "0%";
+    return `${rate.toFixed(2).replace(/\.00$/, "")}%`;
+}
+
+function formatCurrency(value: string) {
+    const amount = Number(value || 0);
+    if (!Number.isFinite(amount)) return "¥0.00";
+    return amount.toLocaleString("zh-CN", {
+        style: "currency",
+        currency: "CNY",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function formatCompactCurrency(value: string) {
+    const amount = Number(value || 0);
+    if (!Number.isFinite(amount)) return "¥0";
+    if (Math.abs(amount) >= 10000)
+        return `¥${(amount / 10000).toFixed(1).replace(/\.0$/, "")}万`;
+    return `¥${Math.round(amount).toLocaleString("zh-CN")}`;
+}
+
+function formatDateTime(value?: string | null) {
+    if (!value) return "未记录完成时间";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+function statusLabel(status: string) {
+    const labels: Record<string, string> = {
+        success: "成功",
+        partial_success: "部分成功",
+        failed: "失败",
+        expired: "已过期",
+    };
+    return labels[status] || status;
+}
+
+function statusClass(status: string) {
+    if (status === "success") return "status-label--success";
+    if (status === "partial_success") return "status-label--warning";
+    return "status-label--neutral";
+}
+
+function merchantBarWidth(value: string) {
+    const amount = Number(value || 0);
+    if (!topMerchantMaxAmount.value || !Number.isFinite(amount)) return "0%";
+    return `${Math.max(8, Math.round((amount / topMerchantMaxAmount.value) * 100))}%`;
+}
+
+async function fetchMetrics() {
+    loading.value = true;
+    try {
+        metrics.value = await getReconciliationChecklistDashboardMetrics();
+        await nextTick();
+        renderCharts();
+    } catch {
+        renderCharts();
+    } finally {
+        loading.value = false;
+    }
+}
+
+function renderCharts() {
+    renderTaskChart();
+    renderAmountChart();
+}
+
+function renderTaskChart() {
+    if (!taskChartRef.value) return;
+    if (!taskChartInstance) {
+        taskChartInstance = echarts.init(taskChartRef.value);
+    }
+    const option: DashboardChartOption = {
+        color: ["#2563EB"],
+        tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow" },
+            formatter(params) {
+                const item = Array.isArray(params) ? params[0] : params;
+                return `${item.name}<br/>处理任务：${formatInteger(Number(item.value || 0))} 个`;
+            },
+        },
+        grid: { left: 18, right: 14, top: 20, bottom: 26, containLabel: true },
+        xAxis: chartXAxis(),
+        yAxis: chartYAxis({ minInterval: 1 }),
+        series: [
+            {
+                name: "处理任务",
+                type: "bar",
+                data: monthlyTaskCounts.value,
+                barMaxWidth: 32,
+                itemStyle: { borderRadius: [8, 8, 3, 3] },
+            },
+        ],
+    };
+    taskChartInstance.setOption(option);
+}
+
+function renderAmountChart() {
+    if (!amountChartRef.value) return;
+    if (!amountChartInstance) {
+        amountChartInstance = echarts.init(amountChartRef.value);
+    }
+    const option: DashboardChartOption = {
+        color: ["#2563EB"],
+        tooltip: {
+            trigger: "axis",
+            formatter(params) {
+                const item = Array.isArray(params) ? params[0] : params;
+                return `${item.name}<br/>GMV：${formatCurrency(String(item.value || 0))}`;
+            },
+        },
+        grid: { left: 18, right: 14, top: 20, bottom: 26, containLabel: true },
+        xAxis: chartXAxis(),
+        yAxis: chartYAxis({
+            formatter: (value: number) =>
+                value >= 10000 ? `${Math.round(value / 10000)}万` : `${value}`,
+        }),
+        series: [
+            {
+                name: "GMV",
+                type: "line",
+                smooth: true,
+                data: monthlyAmounts.value,
+                showSymbol: false,
+                lineStyle: { width: 3 },
+                areaStyle: {
+                    color: "rgba(96, 165, 250, 0.18)",
+                },
+            },
+        ],
+    };
+    amountChartInstance.setOption(option);
+}
+
+function chartXAxis() {
+    return {
+        type: "category" as const,
+        data: Array.from({ length: 12 }, (_, index) => `${index + 1}月`),
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: "#E2E8F0" } },
+        axisLabel: { color: "#64748B" },
+    };
+}
+
+function chartYAxis(
+    options: {
+        minInterval?: number;
+        formatter?: (value: number) => string;
+    } = {},
+) {
+    return {
+        type: "value" as const,
+        minInterval: options.minInterval,
+        splitLine: { lineStyle: { color: "#E2E8F0" } },
+        axisLabel: {
+            color: "#64748B",
+            formatter: options.formatter,
+        },
+    };
+}
+
+function resizeCharts() {
+    taskChartInstance?.resize();
+    amountChartInstance?.resize();
 }
 
 onMounted(() => {
-  fetchStats()
-})
+    fetchMetrics();
+    window.addEventListener("resize", resizeCharts);
+});
 
-usePageRefresh(fetchStats)
+onBeforeUnmount(() => {
+    window.removeEventListener("resize", resizeCharts);
+    taskChartInstance?.dispose();
+    amountChartInstance?.dispose();
+    taskChartInstance = null;
+    amountChartInstance = null;
+});
+
+usePageRefresh(fetchMetrics);
 </script>
 
 <style scoped lang="scss">
 .dashboard-page {
-  max-width: none;
+    --dashboard-primary: #2563eb;
+    --dashboard-bg: #f8fafc;
+    --dashboard-surface: #ffffff;
+    --dashboard-border: #e2e8f0;
+    --dashboard-success: #10b981;
+    --dashboard-warning: #f59e0b;
+    --dashboard-text: #1e293b;
+    --dashboard-muted: #64748b;
+    max-width: none;
+    background: var(--dashboard-bg);
 }
 
-.dashboard-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 14px;
-  padding: 18px 20px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-card);
-  background: var(--bg-card);
-  box-shadow: var(--shadow-card);
+.dashboard-hero {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 14px;
+    padding: 18px 20px;
+    border: 1px solid var(--dashboard-border);
+    border-radius: 18px;
+    background: var(--dashboard-surface);
+    box-shadow: none;
+    overflow: hidden;
 }
 
-.summary-main {
-  min-width: 0;
+.hero-copy {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
 
-  h2 {
-    margin: 4px 0 6px;
-    color: var(--text-primary);
-    font-size: 24px;
-    font-weight: 700;
-    line-height: 1.2;
-  }
+    h2 {
+        margin: 3px 0 6px;
+        color: var(--dashboard-text);
+        font-size: 28px;
+        font-weight: 850;
+        letter-spacing: -0.03em;
+        line-height: 1.12;
+    }
+
+    p {
+        margin: 0;
+        color: var(--dashboard-muted);
+        font-size: 13px;
+        line-height: 1.7;
+    }
 }
 
-.summary-kicker,
-.summary-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.hero-kicker,
+.panel-kicker {
+    color: var(--dashboard-primary);
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
 }
 
-.summary-kicker {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.summary-meta {
-  color: var(--text-tertiary);
-  font-size: 13px;
-
-  span + span::before {
-    content: '/';
-    margin-right: 8px;
-    color: var(--border-color);
-  }
-}
-
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--text-tertiary);
-
-  &.is-success {
-    background: var(--success);
-  }
-
-  &.is-warning {
-    background: var(--warning);
-  }
-
-  &.is-danger {
-    background: var(--error);
-  }
-}
-
-.summary-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.metric-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 14px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-card);
-  background: var(--bg-card);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
-}
-
-.metric-cell {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 86px;
-  padding: 16px 20px;
-  border: 0;
-  border-right: 1px solid var(--border-color-light);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.16s;
-
-  &:last-child {
-    border-right: 0;
-  }
-
-  &:hover {
-    background: var(--bg-hover);
-  }
-
-  span {
-    display: block;
-    margin-bottom: 6px;
-    color: var(--text-tertiary);
-    font-size: 13px;
-  }
-
-  strong {
-    color: var(--text-primary);
-    font-size: 30px;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-
-  small {
-    color: var(--text-tertiary);
+.hero-meta {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    color: var(--dashboard-muted);
     font-size: 12px;
-  }
 
-  &--warning strong {
-    color: var(--warning);
-  }
-
-  &--danger strong {
-    color: var(--error);
-  }
-
-  &--success strong {
-    color: var(--success);
-  }
+    span {
+        padding: 6px 10px;
+        border: 1px solid var(--dashboard-border);
+        border-radius: 999px;
+        background: var(--dashboard-surface);
+    }
 }
 
-.dashboard-board {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 14px;
+.dashboard-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
 }
 
-.status-card,
-.shortcut-card {
-  .card-header {
+.metric-card,
+.panel-card {
+    border: 1px solid var(--dashboard-border);
+    background: var(--dashboard-surface);
+    box-shadow: none;
+}
+
+.metric-card {
+    position: relative;
+    min-height: 132px;
+    padding: 16px;
+    border-radius: 18px;
+    overflow: hidden;
+
+    strong {
+        display: block;
+        margin: 14px 0 10px;
+        color: var(--dashboard-text);
+        font-size: clamp(25px, 2.6vw, 34px);
+        font-weight: 850;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+    }
+
+    p {
+        margin: 0;
+        color: var(--dashboard-muted);
+        font-size: 12px;
+        line-height: 1.55;
+    }
+}
+
+.metric-card__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  .card-header-title {
-    color: var(--text-primary);
-    font-size: 15px;
-    font-weight: 600;
-  }
-}
-
-.status-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.status-head,
-.status-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.status-head {
-  span {
-    color: var(--text-tertiary);
-    font-size: 13px;
-  }
-
-  strong {
-    color: var(--text-primary);
-    font-size: 20px;
-    font-weight: 700;
-  }
-
-  .is-danger {
-    color: var(--error);
-  }
-
-  .is-warning {
-    color: var(--warning);
-  }
-
-  .is-success {
-    color: var(--success);
-  }
-}
-
-.health-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--border-color-light);
-  overflow: hidden;
-
-  span {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
-  }
-}
-
-.status-foot {
-  justify-content: flex-start;
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-
-.shortcut-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.shortcut-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 14px 0;
-  border: 0;
-  border-bottom: 1px solid var(--border-color-light);
-  background: transparent;
-  color: var(--text-primary);
-  text-align: left;
-  cursor: pointer;
-  transition: color 0.16s;
-
-  &:hover {
-    color: var(--primary);
-  }
-
-  &:last-child {
-    border-bottom: 0;
-  }
-
-  .el-icon {
-    flex-shrink: 0;
-    color: var(--primary);
-  }
-
-  div {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    min-width: 0;
-  }
-
-  strong {
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  span {
-    color: var(--text-tertiary);
+    gap: 10px;
+    color: var(--dashboard-muted);
     font-size: 12px;
-  }
+    font-weight: 750;
+
+    small {
+        flex-shrink: 0;
+        padding: 3px 7px;
+        border: 1px solid var(--dashboard-border);
+        border-radius: 999px;
+        background: var(--dashboard-bg);
+        color: var(--dashboard-muted);
+        font-size: 11px;
+    }
 }
 
-@media (max-width: 1100px) {
-  .dashboard-board {
-    grid-template-columns: 1fr;
-  }
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.7fr);
+    gap: 14px;
+}
+
+.panel-card {
+    position: relative;
+    min-height: 320px;
+    padding: 18px;
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.chart-panel--wide {
+    grid-column: span 1;
+}
+
+.panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 12px;
+
+    h3 {
+        margin: 4px 0 0;
+        color: var(--dashboard-text);
+        font-size: 17px;
+        font-weight: 820;
+    }
+}
+
+.panel-note {
+    flex-shrink: 0;
+    color: var(--dashboard-muted);
+    font-size: 12px;
+}
+
+.chart-box {
+    width: 100%;
+    height: 252px;
+}
+
+.chart-empty {
+    position: absolute;
+    inset: 74px 18px 18px;
+    pointer-events: none;
+}
+
+.merchant-list,
+.recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.merchant-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(219, 229, 238, 0.8);
+    border-radius: 14px;
+    background: var(--dashboard-bg);
+
+    b {
+        color: var(--dashboard-text);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+.rank {
+    display: inline-grid;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 9px;
+    border: 1px solid var(--dashboard-border);
+    background: var(--dashboard-surface);
+    color: var(--dashboard-primary);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.merchant-info {
+    min-width: 0;
+
+    strong {
+        display: block;
+        overflow: hidden;
+        color: var(--dashboard-text);
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.merchant-bar {
+    height: 6px;
+    margin-top: 8px;
+    border-radius: 999px;
+    background: var(--dashboard-border);
+    overflow: hidden;
+
+    span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--dashboard-primary);
+    }
+}
+
+.recent-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(219, 229, 238, 0.86);
+
+    &:last-child {
+        border-bottom: 0;
+    }
+}
+
+.recent-main {
+    min-width: 0;
+
+    strong,
+    span {
+        display: block;
+    }
+
+    strong {
+        overflow: hidden;
+        color: var(--dashboard-text);
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    span {
+        margin-top: 4px;
+        color: var(--dashboard-muted);
+        font-size: 12px;
+    }
+}
+
+.recent-stats {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    color: var(--dashboard-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.status-label {
+    font-weight: 750;
+}
+
+.status-label--success {
+    color: var(--dashboard-success);
+}
+
+.status-label--warning {
+    color: var(--dashboard-warning);
+}
+
+.status-label--neutral {
+    color: var(--dashboard-muted);
+}
+
+.panel-empty {
+    margin-top: 24px;
+}
+
+@media (max-width: 1280px) {
+    .dashboard-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .dashboard-hero {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .hero-meta {
+        justify-content: flex-start;
+    }
+
+    .dashboard-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .panel-header,
+    .recent-row {
+        align-items: stretch;
+        grid-template-columns: 1fr;
+    }
+
+    .recent-stats {
+        align-items: flex-start;
+    }
 }
 </style>

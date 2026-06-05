@@ -3,7 +3,7 @@
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="核算年月">
-                    <el-date-picker v-model="searchForm.monthRange" type="monthrange" start-placeholder="核算年月起" end-placeholder="核算年月止" range-separator="至" clearable value-format="YYYY-MM" style="width: 260px" />
+                    <el-date-picker v-model="searchForm.accountingMonth" type="month" placeholder="选择核算年月" clearable value-format="YYYY-MM" style="width: 180px" />
                 </el-form-item>
                 <el-form-item label="平台">
                     <el-select v-model="searchForm.platforms" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="平台" style="width: 190px" @change="handlePlatformChange">
@@ -113,7 +113,7 @@
         <el-drawer v-model="sourceDrawerVisible" :title="sourceDrawerTitle" size="92%" class="bic-source-drawer">
             <el-form :model="drawerSearchForm" inline class="filter-form drawer-filter-form">
                 <el-form-item label="核算年月">
-                    <el-date-picker v-model="drawerSearchForm.monthRange" type="monthrange" start-placeholder="核算年月起" end-placeholder="核算年月止" range-separator="至" clearable value-format="YYYY-MM" style="width: 260px" />
+                    <el-date-picker v-model="drawerSearchForm.accountingMonth" type="month" placeholder="选择核算年月" clearable value-format="YYYY-MM" style="width: 180px" />
                 </el-form-item>
                 <el-form-item label="平台">
                     <el-select v-model="drawerSearchForm.platforms" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="平台" style="width: 190px">
@@ -164,7 +164,7 @@
                     <div>
                         <div class="reconciliation-dialog-kicker">BIC汇总导出</div>
                         <div class="reconciliation-dialog-title">导出 BIC 对账表</div>
-                        <div class="reconciliation-dialog-subtitle">单次仅支持单个月份和单个服务商，其他条件用于缩小本次导出范围。</div>
+                        <div class="reconciliation-dialog-subtitle">单次仅支持单个核算年月和单个服务商，其他条件用于缩小本次导出范围。</div>
                     </div>
                     <el-button text @click="syncReconciliationFormFromListFilters">带入列表条件</el-button>
                 </div>
@@ -178,8 +178,8 @@
                     </div>
                     <el-form :model="reconciliationForm" label-position="top" class="reconciliation-form">
                         <div class="reconciliation-form-grid">
-                            <el-form-item label="核算月份" required>
-                                <el-date-picker v-model="reconciliationForm.accountingMonth" type="month" value-format="YYYY-MM" placeholder="选择单个月份" style="width: 100%" />
+                            <el-form-item label="核算年月" required>
+                                <el-date-picker v-model="reconciliationForm.accountingMonth" type="month" value-format="YYYY-MM" placeholder="选择核算年月" style="width: 100%" />
                             </el-form-item>
                             <el-form-item label="服务商" required>
                                 <el-select v-model="reconciliationForm.serviceProvider" clearable filterable allow-create default-first-option reserve-keyword placeholder="输入或选择单个服务商" style="width: 100%">
@@ -279,7 +279,7 @@ import {
     summarizeFilenameValues,
 } from "@/utils/format";
 import { getFallbackPlatforms, getReportPlatformCode, toSourcePlatformOptions, type PlatformOption } from "@/utils/platform";
-import { formatAmount, formatMonth, monthRangeLabel, splitMonthRange } from "./common";
+import { formatAmount, formatMonth, splitMonthRange, splitSingleAccountingMonth } from "./common";
 import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 
 const loading = ref(false);
@@ -325,7 +325,7 @@ const reconciliationForm = reactive({
     qicWarehouse: "",
 });
 const drawerSearchForm = reactive({
-    monthRange: null as string[] | null,
+    accountingMonth: "",
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -333,7 +333,7 @@ const drawerSearchForm = reactive({
     qicWarehouse: "",
 });
 const searchForm = reactive({
-    monthRange: null as string[] | null,
+    accountingMonth: "",
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -362,12 +362,12 @@ const shopColorByName = computed(() => {
 });
 
 interface DetailFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "orgIds" | "platforms" | "shopIds" | "serviceProvider" | "qicWarehouse";
+    key: "accountingMonth" | "orgIds" | "platforms" | "shopIds" | "serviceProvider" | "qicWarehouse";
 }
 
 const activeFilterTags = computed<DetailFilterTag[]>(() => {
     const tags: DetailFilterTag[] = [];
-    if (searchForm.monthRange?.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    if (searchForm.accountingMonth) tags.push({ key: "accountingMonth", label: "核算年月", value: searchForm.accountingMonth });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -429,7 +429,7 @@ const reconciliationPreviewAlertType = computed(() => {
     return "success";
 });
 const reconciliationPreviewHint = computed(() => {
-    if (!reconciliationCanPreview()) return "先选择单个月份和单个服务商，再预估本次导出范围。";
+    if (!reconciliationCanPreview()) return "先选择单个核算年月和单个服务商，再预估本次导出范围。";
     if (reconciliationPreviewLoading.value) return "正在根据当前条件计算可导出的源数据范围。";
     if (reconciliationPreviewTotal.value === 0) return "当前条件会导出一个仅含表头的空白工作簿。";
     if (reconciliationPreviewTotal.value !== null) return `当前条件预计命中 ${reconciliationPreviewTotal.value.toLocaleString("zh-CN")} 行源数据，将提交到下载中心生成。`;
@@ -449,7 +449,7 @@ function queryParams() {
         shop_ids: searchForm.shopIds.join(",") || undefined,
         service_provider: searchForm.serviceProvider || undefined,
         qic_warehouse: searchForm.qicWarehouse || undefined,
-        ...splitMonthRange(searchForm.monthRange),
+        ...splitSingleAccountingMonth(searchForm.accountingMonth),
     };
 }
 
@@ -483,7 +483,7 @@ async function fetchSourceRows() {
             shop_ids: drawerSearchForm.shopIds.join(",") || undefined,
             service_provider: drawerSearchForm.serviceProvider || undefined,
             qic_warehouse: drawerSearchForm.qicWarehouse || undefined,
-            ...splitMonthRange(drawerSearchForm.monthRange),
+            ...splitSingleAccountingMonth(drawerSearchForm.accountingMonth),
         });
         sourceRows.value = data.items;
         sourcePagination.total = data.total ?? null;
@@ -549,7 +549,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.monthRange = null;
+    searchForm.accountingMonth = "";
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -560,7 +560,7 @@ function handleReset() {
 }
 
 async function removeFilterTag(tag: DetailFilterTag) {
-    if (tag.key === "monthRange") searchForm.monthRange = null;
+    if (tag.key === "accountingMonth") searchForm.accountingMonth = "";
     if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
@@ -596,7 +596,7 @@ function openSourceRows(row: BicDetail) {
     sourceDetail.value = row;
     sourcePagination.page = 1;
     sourceRows.value = [];
-    drawerSearchForm.monthRange = [...searchForm.monthRange];
+    drawerSearchForm.accountingMonth = searchForm.accountingMonth;
     drawerSearchForm.orgIds = [...searchForm.orgIds];
     drawerSearchForm.platforms = [...searchForm.platforms];
     drawerSearchForm.shopIds = [...searchForm.shopIds];
@@ -630,7 +630,7 @@ function reconciliationCanPreview() {
 }
 
 async function syncReconciliationFormFromListFilters() {
-    const currentMonth = selectedMonthFromRange(searchForm.monthRange);
+    const currentMonth = selectedMonthFromValue(searchForm.accountingMonth);
     reconciliationForm.accountingMonth = currentMonth ? `${currentMonth.accounting_year}-${String(currentMonth.accounting_month).padStart(2, "0")}` : "";
     reconciliationForm.orgIds = [...searchForm.orgIds];
     reconciliationForm.platforms = [...searchForm.platforms];
@@ -682,7 +682,7 @@ function handleDrawerSearch() {
 }
 
 function handleDrawerReset() {
-    drawerSearchForm.monthRange = [];
+    drawerSearchForm.accountingMonth = "";
     drawerSearchForm.orgIds = [];
     drawerSearchForm.platforms = [];
     drawerSearchForm.shopIds = [];
@@ -706,7 +706,7 @@ async function handleExport(scope: BicExportScope) {
     loadingRef.value = true;
     try {
         const filename = normalizeExportFilename(buildExportFilename([
-            monthRangeLabel(searchForm.monthRange) || "全部核算年月",
+            searchForm.accountingMonth || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || String(id)), "全部")}`,
             `服务商${searchForm.serviceProvider || "全部"}`,
@@ -732,7 +732,7 @@ async function handleExport(scope: BicExportScope) {
 async function handleReconciliationExport() {
     const selectedMonth = reconciliationSelectedMonth.value;
     if (!selectedMonth) {
-        ElMessage.warning("导出汇总需要选择单个核算月份");
+        ElMessage.warning("导出汇总需要选择单个核算年月");
         return;
     }
     const provider = reconciliationSelectedProvider.value;

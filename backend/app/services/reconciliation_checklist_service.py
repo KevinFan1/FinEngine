@@ -63,6 +63,7 @@ CHECKLIST_HEADERS = [
 CHECKLIST_FILE_TYPE = "对账清单"
 CHECKLIST_ERROR_SAMPLE_LIMIT = 20
 CHECKLIST_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
+CHECKLIST_PROCESSED_TASK_STATUSES = ("success", "partial_success")
 CHECKLIST_EXPORT_BATCH_SIZE = 5000
 CHECKLIST_SUMMARY_HEADERS = ["直播编号", "货品名称", "订单金额", "直播推广佣金", "应付商家净额"]
 CHECKLIST_ENTITY_TYPES = {"live_promoter", "merchant", "receipt_merchant"}
@@ -827,6 +828,9 @@ class ReconciliationChecklistService:
         db: AsyncSession,
         rows: Iterable[ReconciliationChecklistDetail],
     ) -> tuple[int, int, list[ChecklistScope]]:
+        replace_started = perf_counter()
+        delete_seconds = 0.0
+        insert_seconds = 0.0
         detail_rows = list(rows)
         if not detail_rows:
             return 0, 0, []
@@ -835,6 +839,7 @@ class ReconciliationChecklistService:
         await _lock_scopes(db, scopes)
 
         deleted_rows = 0
+        delete_started = perf_counter()
         for scope_chunk in _chunked(scopes, 200):
             delete_result = await db.execute(
                 ReconciliationChecklistDetail.__table__.delete().where(
@@ -847,10 +852,25 @@ class ReconciliationChecklistService:
                 )
             )
             deleted_rows += int(getattr(delete_result, "rowcount", 0) or 0)
+        delete_seconds = perf_counter() - delete_started
 
         values = [{field: getattr(row, field) for field in DETAIL_INSERT_FIELDS} for row in detail_rows]
-        for value_chunk in _chunked(values, 1000):
+        insert_batch_size = 1000
+        insert_started = perf_counter()
+        for value_chunk in _chunked(values, insert_batch_size):
             await db.execute(ReconciliationChecklistDetail.__table__.insert(), value_chunk)
+        insert_seconds = perf_counter() - insert_started
+        total_seconds = perf_counter() - replace_started
+        logger.info(
+            "reconciliation_checklist.replace_detail_rows_perf rows=%s scopes=%s deleted_rows=%s insert_batches=%s delete_seconds=%.3f insert_seconds=%.3f total_seconds=%.3f",
+            len(detail_rows),
+            len(scopes),
+            deleted_rows,
+            (len(values) + insert_batch_size - 1) // insert_batch_size,
+            delete_seconds,
+            insert_seconds,
+            total_seconds,
+        )
         return len(detail_rows), deleted_rows, scopes
 
     @staticmethod
@@ -1096,6 +1116,198 @@ class ReconciliationChecklistService:
         total = (await db.execute(count_stmt)).scalar() or 0
         result = await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))
         return list(result.all()), total
+
+    @staticmethod
+    async def get_dashboard_metrics(
+        db: AsyncSession,
+        *,
+        user: User,
+        year: int,
+        org_id: str | int | None = None,
+    ) -> dict[str, object]:
+        org_ids = resolve_org_ids(user_role=user.role, user_org_id=user.org_id, requested_org_id=org_id)
+        task_filters = [
+            ReconciliationChecklistTask.is_deleted.is_(False),
+            ReconciliationChecklistTask.status.in_(CHECKLIST_PROCESSED_TASK_STATUSES),
+        ]
+        all_task_filters = [
+            ReconciliationChecklistTask.is_deleted.is_(False),
+        ]
+        failed_task_filters = [
+            ReconciliationChecklistTask.is_deleted.is_(False),
+            ReconciliationChecklistTask.status == "failed",
+        ]
+        detail_filters = [
+            ReconciliationChecklistDetail.is_deleted.is_(False),
+        ]
+        if org_ids is not None:
+            task_filters.append(ReconciliationChecklistTask.org_id.in_(org_ids))
+            all_task_filters.append(ReconciliationChecklistTask.org_id.in_(org_ids))
+            failed_task_filters.append(ReconciliationChecklistTask.org_id.in_(org_ids))
+            detail_filters.append(ReconciliationChecklistDetail.org_id.in_(org_ids))
+
+        processed_task_count = await db.scalar(
+            select(func.count())
+            .select_from(ReconciliationChecklistTask)
+            .where(*task_filters)
+        )
+        total_task_count = await db.scalar(
+            select(func.count())
+            .select_from(ReconciliationChecklistTask)
+            .where(*all_task_filters)
+        )
+        failed_task_count = await db.scalar(
+            select(func.count())
+            .select_from(ReconciliationChecklistTask)
+            .where(*failed_task_filters)
+        )
+        total_rows = await db.scalar(
+            select(func.coalesce(func.sum(ReconciliationChecklistTask.total_rows), 0))
+            .select_from(ReconciliationChecklistTask)
+            .where(*task_filters)
+        )
+        total_order_amount = await db.scalar(
+            select(func.coalesce(func.sum(ReconciliationChecklistDetail.order_amount), Decimal("0.00")))
+            .select_from(ReconciliationChecklistDetail)
+            .where(*detail_filters)
+        )
+        merchant_count = await db.scalar(
+            select(func.count(func.distinct(ReconciliationChecklistDetail.merchant_id)))
+            .select_from(ReconciliationChecklistDetail)
+            .where(
+                *detail_filters,
+                ReconciliationChecklistDetail.merchant_id.is_not(None),
+            )
+        )
+        covered_month_count = await db.scalar(
+            select(func.count(func.distinct(ReconciliationChecklistDetail.accounting_period)))
+            .select_from(ReconciliationChecklistDetail)
+            .where(*detail_filters)
+        )
+
+        monthly_result = await db.execute(
+            select(
+                func.extract("month", ReconciliationChecklistTask.finished_at).label("month"),
+                func.count().label("task_count"),
+            )
+            .select_from(ReconciliationChecklistTask)
+            .where(
+                *task_filters,
+                ReconciliationChecklistTask.finished_at.is_not(None),
+                func.extract("year", ReconciliationChecklistTask.finished_at) == year,
+            )
+            .group_by("month")
+            .order_by("month")
+        )
+        monthly_counts = {month: 0 for month in range(1, 13)}
+        for month, task_count in monthly_result.all():
+            if month is not None:
+                monthly_counts[int(month)] = int(task_count or 0)
+
+        monthly_amount_result = await db.execute(
+            select(
+                ReconciliationChecklistDetail.accounting_month.label("month"),
+                func.coalesce(func.sum(ReconciliationChecklistDetail.order_amount), Decimal("0.00")).label("total_order_amount"),
+            )
+            .select_from(ReconciliationChecklistDetail)
+            .where(
+                *detail_filters,
+                ReconciliationChecklistDetail.accounting_year == year,
+            )
+            .group_by(ReconciliationChecklistDetail.accounting_month)
+            .order_by(ReconciliationChecklistDetail.accounting_month)
+        )
+        monthly_amounts = {month: Decimal("0.00") for month in range(1, 13)}
+        for month, total_amount in monthly_amount_result.all():
+            if month is not None:
+                monthly_amounts[int(month)] = total_amount or Decimal("0.00")
+
+        top_merchant_result = await db.execute(
+            select(
+                ReconciliationChecklistDetail.merchant_id.label("merchant_id"),
+                func.max(ReconciliationChecklistDetail.merchant_name).label("merchant_name"),
+                func.coalesce(func.sum(ReconciliationChecklistDetail.order_amount), Decimal("0.00")).label("total_order_amount"),
+            )
+            .select_from(ReconciliationChecklistDetail)
+            .where(
+                *detail_filters,
+                ReconciliationChecklistDetail.merchant_id.is_not(None),
+            )
+            .group_by(ReconciliationChecklistDetail.merchant_id)
+            .order_by(func.coalesce(func.sum(ReconciliationChecklistDetail.order_amount), Decimal("0.00")).desc())
+            .limit(5)
+        )
+        top_merchants = [
+            {
+                "merchant_id": int(row.merchant_id),
+                "merchant_name": safe_str(row.merchant_name),
+                "total_order_amount": row.total_order_amount or Decimal("0.00"),
+            }
+            for row in top_merchant_result.all()
+        ]
+
+        recent_task_result = await db.execute(
+            select(
+                ReconciliationChecklistTask.id.label("id"),
+                ReconciliationChecklistUploadFile.original_name.label("original_name"),
+                ReconciliationChecklistTask.status.label("status"),
+                ReconciliationChecklistTask.total_rows.label("total_rows"),
+                ReconciliationChecklistTask.success_rows.label("success_rows"),
+                ReconciliationChecklistTask.failed_rows.label("failed_rows"),
+                ReconciliationChecklistTask.inserted_rows.label("inserted_rows"),
+                ReconciliationChecklistTask.finished_at.label("finished_at"),
+            )
+            .select_from(ReconciliationChecklistTask)
+            .join(ReconciliationChecklistUploadFile, ReconciliationChecklistUploadFile.id == ReconciliationChecklistTask.file_id)
+            .where(
+                *task_filters,
+                ReconciliationChecklistUploadFile.is_deleted.is_(False),
+            )
+            .order_by(ReconciliationChecklistTask.finished_at.desc().nullslast(), ReconciliationChecklistTask.id.desc())
+            .limit(5)
+        )
+        recent_tasks = [
+            {
+                "id": int(row.id),
+                "original_name": safe_str(row.original_name),
+                "status": safe_str(row.status),
+                "total_rows": int(row.total_rows or 0),
+                "success_rows": int(row.success_rows or 0),
+                "failed_rows": int(row.failed_rows or 0),
+                "inserted_rows": int(row.inserted_rows or 0),
+                "finished_at": row.finished_at,
+            }
+            for row in recent_task_result.all()
+        ]
+
+        processed_count = int(processed_task_count or 0)
+        all_count = int(total_task_count or 0)
+        completion_rate = (
+            Decimal(processed_count * 100)
+            / Decimal(all_count)
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if all_count else Decimal("0.00")
+
+        return {
+            "processed_task_count": processed_count,
+            "total_task_count": all_count,
+            "failed_task_count": int(failed_task_count or 0),
+            "total_rows": int(total_rows or 0),
+            "total_order_amount": total_order_amount or Decimal("0.00"),
+            "merchant_count": int(merchant_count or 0),
+            "covered_month_count": int(covered_month_count or 0),
+            "completion_rate": completion_rate,
+            "year": year,
+            "monthly_task_counts": [
+                {"month": month, "task_count": monthly_counts[month]}
+                for month in range(1, 13)
+            ],
+            "monthly_order_amounts": [
+                {"month": month, "total_order_amount": monthly_amounts[month]}
+                for month in range(1, 13)
+            ],
+            "top_merchants": top_merchants,
+            "recent_tasks": recent_tasks,
+        }
 
     @staticmethod
     async def list_summary(

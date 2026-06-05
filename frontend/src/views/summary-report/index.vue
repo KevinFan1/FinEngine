@@ -4,14 +4,12 @@
             <el-form :model="searchForm" inline class="summary-filter-form">
                 <el-form-item label="核算年月">
                     <el-date-picker
-                        v-model="searchForm.accountingMonthRange"
-                        type="monthrange"
-                        start-placeholder="核算年月起"
-                        end-placeholder="核算年月止"
-                        range-separator="至"
+                        v-model="searchForm.accountingMonth"
+                        type="month"
+                        placeholder="选择核算年月"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 260px"
+                        style="width: 180px"
                     />
                 </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
@@ -504,12 +502,13 @@ import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import SummaryDetailDrawer, {
     type SummaryDetailContext,
 } from "@/components/SummaryDetailDrawer.vue";
+import { buildSingleMonthParams } from "@/views/accountingFilters";
 
 const userStore = useUserStore();
 const orgOptions = ref<Organization[]>([]);
 
 interface FilterTag extends ActiveFilterTag {
-    key: "accountingMonthRange" | "orgIds" | "platforms" | "shopIds" | "keyword";
+    key: "accountingMonth" | "orgIds" | "platforms" | "shopIds" | "keyword";
 }
 
 interface SummaryTableInstance {
@@ -519,7 +518,7 @@ interface SummaryTableInstance {
 }
 
 const searchForm = reactive({
-    accountingMonthRange: null as string[] | null,
+    accountingMonth: "",
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -550,33 +549,9 @@ const pagination = reactive({
     total: 0,
 });
 
-const selectedAccountingStartYear = computed(() => {
-    const [start] = searchForm.accountingMonthRange || [];
-    if (!start) return undefined;
-    const [year] = start.split("-");
-    return Number(year) || undefined;
-});
-
-const selectedAccountingStartMonth = computed(() => {
-    const [start] = searchForm.accountingMonthRange || [];
-    if (!start) return undefined;
-    const [, month] = start.split("-");
-    return Number(month) || undefined;
-});
-
-const selectedAccountingEndYear = computed(() => {
-    const [, end] = searchForm.accountingMonthRange || [];
-    if (!end) return undefined;
-    const [year] = end.split("-");
-    return Number(year) || undefined;
-});
-
-const selectedAccountingEndMonth = computed(() => {
-    const [, end] = searchForm.accountingMonthRange || [];
-    if (!end) return undefined;
-    const [, month] = end.split("-");
-    return Number(month) || undefined;
-});
+const selectedAccountingMonthParams = computed(() =>
+    buildSingleMonthParams(searchForm.accountingMonth, "accounting"),
+);
 
 const selectedOrgIdsParam = computed(
     () => searchForm.orgIds.join(",") || undefined,
@@ -598,21 +573,14 @@ const selectedShopIdsParam = computed(
 );
 const keywordParam = computed(() => searchForm.keyword.trim() || undefined);
 const selectedCount = computed(() => selectedRows.value.length);
-const accountingMonthRangeLabel = computed(() => {
-    const [start, end] = searchForm.accountingMonthRange || [];
-    if (!start && !end) return "";
-    if (start && end) return start === end ? start : `${start} 至 ${end}`;
-    if (start) return `${start} 起`;
-    return `截至 ${end}`;
-});
 const activeFilterTags = computed<FilterTag[]>(() => {
     const tags: FilterTag[] = [];
 
-    if (accountingMonthRangeLabel.value) {
+    if (searchForm.accountingMonth) {
         tags.push({
-            key: "accountingMonthRange",
+            key: "accountingMonth",
             label: "核算年月",
-            value: accountingMonthRangeLabel.value,
+            value: searchForm.accountingMonth,
         });
     }
     searchForm.orgIds.forEach((value) => {
@@ -712,10 +680,7 @@ async function fetchData() {
             page: pagination.page,
             page_size: pagination.pageSize,
             org_id: selectedOrgIdsParam.value,
-            accounting_start_year: selectedAccountingStartYear.value,
-            accounting_start_month: selectedAccountingStartMonth.value,
-            accounting_end_year: selectedAccountingEndYear.value,
-            accounting_end_month: selectedAccountingEndMonth.value,
+            ...selectedAccountingMonthParams.value,
             report_platform_name: selectedReportPlatformsParam.value,
             shop_ids: selectedShopIdsParam.value,
             keyword: keywordParam.value,
@@ -775,7 +740,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.accountingMonthRange = null;
+    searchForm.accountingMonth = "";
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -805,8 +770,8 @@ function handleSelectionChange(rows: SummaryReportRecord[]) {
 }
 
 function removeFilterTag(tag: FilterTag) {
-    if (tag.key === "accountingMonthRange") {
-        searchForm.accountingMonthRange = null;
+    if (tag.key === "accountingMonth") {
+        searchForm.accountingMonth = "";
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
@@ -865,10 +830,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
     try {
         const params = {
             org_id: selectedOrgIdsParam.value,
-            accounting_start_year: selectedAccountingStartYear.value,
-            accounting_start_month: selectedAccountingStartMonth.value,
-            accounting_end_year: selectedAccountingEndYear.value,
-            accounting_end_month: selectedAccountingEndMonth.value,
+            ...selectedAccountingMonthParams.value,
             report_platform_name: selectedReportPlatformsParam.value,
             shop_ids: selectedShopIdsParam.value,
             keyword: keywordParam.value,
@@ -889,7 +851,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                   ? `第${pagination.page}页`
                   : "选中";
         const filename = normalizeExportFilename(buildExportFilename([
-            accountingMonthRangeLabel.value || "全部核算年月",
+            searchForm.accountingMonth || "全部核算年月",
             `归集平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map(id => shopOptions.value.find(s => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
             searchForm.keyword.trim()

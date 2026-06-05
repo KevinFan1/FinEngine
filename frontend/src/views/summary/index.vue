@@ -2,28 +2,14 @@
     <div class="page-container">
         <el-card shadow="never" class="search-card summary-search-card">
             <el-form :model="searchForm" inline class="summary-filter-form">
-                <el-form-item label="业务年月">
-                    <el-date-picker
-                        v-model="searchForm.summaryMonthRange"
-                        type="monthrange"
-                        start-placeholder="业务年月起"
-                        end-placeholder="业务年月止"
-                        range-separator="至"
-                        clearable
-                        value-format="YYYY-MM"
-                        style="width: 260px"
-                    />
-                </el-form-item>
                 <el-form-item label="核算年月">
                     <el-date-picker
-                        v-model="searchForm.sourceMonthRange"
-                        type="monthrange"
-                        start-placeholder="核算年月起"
-                        end-placeholder="核算年月止"
-                        range-separator="至"
+                        v-model="searchForm.sourceMonth"
+                        type="month"
+                        placeholder="选择核算年月"
                         clearable
                         value-format="YYYY-MM"
-                        style="width: 260px"
+                        style="width: 180px"
                     />
                 </el-form-item>
                 <el-form-item v-if="userStore.isSuperAdmin" label="组织">
@@ -236,7 +222,7 @@
                 />
                 <el-table-column
                     prop="summary_date"
-                    label="业务年月"
+                    label="订单年月"
                     width="108"
                 />
                 <el-table-column prop="platform" label="来源平台" width="112">
@@ -576,6 +562,7 @@ import type { ActiveFilterTag } from "@/components/activeFilterTags";
 import DouyinDongzhangDetailDrawer, {
     type DouyinDongzhangDetailContext,
 } from "@/components/DouyinDongzhangDetailDrawer.vue";
+import { buildSingleMonthParams } from "@/views/accountingFilters";
 
 const route = useRoute();
 const userStore = useUserStore();
@@ -583,8 +570,7 @@ const orgOptions = ref<Organization[]>([]);
 
 interface FilterTag extends ActiveFilterTag {
     key:
-        | "summaryMonthRange"
-        | "sourceMonthRange"
+        | "sourceMonth"
         | "orgIds"
         | "platforms"
         | "reportPlatforms"
@@ -600,8 +586,7 @@ interface SummaryTableInstance {
 
 // Search
 const searchForm = reactive({
-    summaryMonthRange: null as string[] | null,
-    sourceMonthRange: null as string[] | null,
+    sourceMonth: "",
     orgIds: [] as number[],
     platforms: [] as string[],
     reportPlatforms: [] as string[],
@@ -636,39 +621,8 @@ const pagination = reactive({
     total: 0,
 });
 
-function parseMonthValue(value: string | undefined) {
-    if (!value) return { year: undefined, month: undefined };
-    const [year, month] = value.split("-");
-    return {
-        year: Number(year) || undefined,
-        month: Number(month) || undefined,
-    };
-}
-
-function formatMonthRangeLabel(range: string[]) {
-    const [start, end] = range;
-    if (!start && !end) return "";
-    if (start && end && start !== end) return `${start} 至 ${end}`;
-    return start || end || "";
-}
-
-const selectedSummaryStart = computed(() =>
-    parseMonthValue(searchForm.summaryMonthRange?.[0]),
-);
-const selectedSummaryEnd = computed(() =>
-    parseMonthValue(
-        searchForm.summaryMonthRange?.[1] ||
-            searchForm.summaryMonthRange?.[0],
-    ),
-);
-const selectedSourceStart = computed(() =>
-    parseMonthValue(searchForm.sourceMonthRange?.[0]),
-);
-const selectedSourceEnd = computed(() =>
-    parseMonthValue(
-        searchForm.sourceMonthRange?.[1] ||
-            searchForm.sourceMonthRange?.[0],
-    ),
+const selectedSourceMonthParams = computed(() =>
+    buildSingleMonthParams(searchForm.sourceMonth, "source"),
 );
 
 const filteredShopOptions = computed(() => {
@@ -710,18 +664,11 @@ const selectedCount = computed(() => selectedRowMap.value.size);
 const activeFilterTags = computed<FilterTag[]>(() => {
     const tags: FilterTag[] = [];
 
-    if (searchForm.summaryMonthRange?.length) {
+    if (searchForm.sourceMonth) {
         tags.push({
-            key: "summaryMonthRange",
-            label: "业务年月",
-            value: formatMonthRangeLabel(searchForm.summaryMonthRange),
-        });
-    }
-    if (searchForm.sourceMonthRange?.length) {
-        tags.push({
-            key: "sourceMonthRange",
+            key: "sourceMonth",
             label: "核算年月",
-            value: formatMonthRangeLabel(searchForm.sourceMonthRange),
+            value: searchForm.sourceMonth,
         });
     }
     searchForm.orgIds.forEach((value) => {
@@ -811,14 +758,7 @@ async function fetchData() {
             page: pagination.page,
             page_size: pagination.pageSize,
             org_id: selectedOrgIdsParam.value,
-            summary_start_year: selectedSummaryStart.value.year,
-            summary_start_month: selectedSummaryStart.value.month,
-            summary_end_year: selectedSummaryEnd.value.year,
-            summary_end_month: selectedSummaryEnd.value.month,
-            source_start_year: selectedSourceStart.value.year,
-            source_start_month: selectedSourceStart.value.month,
-            source_end_year: selectedSourceEnd.value.year,
-            source_end_month: selectedSourceEnd.value.month,
+            ...selectedSourceMonthParams.value,
             platform_name: selectedSourcePlatformsParam.value,
             report_platform_name: selectedReportPlatformsParam.value,
             shop_ids: selectedShopsParam.value,
@@ -912,8 +852,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.summaryMonthRange = null;
-    searchForm.sourceMonthRange = null;
+    searchForm.sourceMonth = "";
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.reportPlatforms = [];
@@ -957,10 +896,8 @@ function clearSelectedRows(clearTable = true) {
 }
 
 function removeFilterTag(tag: FilterTag) {
-    if (tag.key === "summaryMonthRange") {
-        searchForm.summaryMonthRange = null;
-    } else if (tag.key === "sourceMonthRange") {
-        searchForm.sourceMonthRange = null;
+    if (tag.key === "sourceMonth") {
+        searchForm.sourceMonth = "";
     } else if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
@@ -1065,14 +1002,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
     try {
         const params = {
             org_id: selectedOrgIdsParam.value,
-            summary_start_year: selectedSummaryStart.value.year,
-            summary_start_month: selectedSummaryStart.value.month,
-            summary_end_year: selectedSummaryEnd.value.year,
-            summary_end_month: selectedSummaryEnd.value.month,
-            source_start_year: selectedSourceStart.value.year,
-            source_start_month: selectedSourceStart.value.month,
-            source_end_year: selectedSourceEnd.value.year,
-            source_end_month: selectedSourceEnd.value.month,
+            ...selectedSourceMonthParams.value,
             platform_name: selectedSourcePlatformsParam.value,
             report_platform_name: selectedReportPlatformsParam.value,
             shop_ids: selectedShopsParam.value,
@@ -1094,10 +1024,7 @@ async function handleExport(scope: "all" | "current_page" | "selected") {
                   ? `第${pagination.page}页`
                   : "选中";
         const filename = normalizeExportFilename(buildExportFilename([
-            formatMonthRangeLabel(searchForm.summaryMonthRange) ||
-                "全部业务年月",
-            formatMonthRangeLabel(searchForm.sourceMonthRange) ||
-                "全部核算年月",
+            searchForm.sourceMonth || "全部核算年月",
             `来源平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `归集平台${summarizeFilenameValues(searchForm.reportPlatforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
@@ -1155,10 +1082,7 @@ function splitQueryNumberList(value: unknown): number[] {
 
 function applyRouteQuery() {
     const sourceMonth = queryString(route.query.sourceMonth);
-    const summaryMonth = queryString(route.query.summaryMonth);
-    if (sourceMonth) searchForm.sourceMonthRange = [sourceMonth, sourceMonth];
-    if (summaryMonth)
-        searchForm.summaryMonthRange = [summaryMonth, summaryMonth];
+    if (sourceMonth) searchForm.sourceMonth = sourceMonth;
     searchForm.orgIds = splitQueryNumberList(route.query.org_id);
     searchForm.platforms = splitQueryList(route.query.platforms);
     searchForm.reportPlatforms = splitQueryList(route.query.reportPlatforms);

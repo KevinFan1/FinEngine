@@ -3,7 +3,7 @@
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="核算年月">
-                    <el-date-picker v-model="searchForm.monthRange" type="monthrange" start-placeholder="核算年月起" end-placeholder="核算年月止" range-separator="至" clearable value-format="YYYY-MM" style="width: 260px" />
+                    <el-date-picker v-model="searchForm.accountingMonth" type="month" placeholder="选择核算年月" clearable value-format="YYYY-MM" style="width: 180px" />
                 </el-form-item>
                 <el-form-item label="平台">
                     <el-select v-model="searchForm.platforms" clearable filterable multiple collapse-tags collapse-tags-tooltip placeholder="平台" style="width: 190px" @change="handlePlatformChange">
@@ -94,7 +94,7 @@ import {
 } from "@/utils/format";
 import { getFallbackPlatforms, getReportPlatformCode, toSourcePlatformOptions, type PlatformOption } from "@/utils/platform";
 import BicSourceRowsTable from "./BicSourceRowsTable.vue";
-import { monthRangeLabel, splitMonthRange } from "./common";
+import { splitSingleAccountingMonth } from "./common";
 import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 
 type SourceRowsTableRef = InstanceType<typeof BicSourceRowsTable> & {
@@ -124,7 +124,7 @@ const exportCurrentPageLoading = ref(false);
 const exportSelectedLoading = ref(false);
 const exportAllLoading = ref(false);
 const searchForm = reactive({
-    monthRange: null as string[] | null,
+    accountingMonth: "",
     orgIds: [] as number[],
     platforms: [] as string[],
     shopIds: [] as number[],
@@ -153,12 +153,12 @@ const shopColorByName = computed(() => {
 });
 
 interface SourceFilterTag extends ActiveFilterTag {
-    key: "monthRange" | "orgIds" | "platforms" | "shopIds" | "serviceProvider" | "qicWarehouse";
+    key: "accountingMonth" | "orgIds" | "platforms" | "shopIds" | "serviceProvider" | "qicWarehouse";
 }
 
 const activeFilterTags = computed<SourceFilterTag[]>(() => {
     const tags: SourceFilterTag[] = [];
-    if (searchForm.monthRange?.length) tags.push({ key: "monthRange", label: "核算年月", value: monthRangeLabel(searchForm.monthRange) });
+    if (searchForm.accountingMonth) tags.push({ key: "accountingMonth", label: "核算年月", value: searchForm.accountingMonth });
     searchForm.orgIds.forEach((value) => {
         const org = orgOptions.value.find((item) => item.id === value);
         tags.push({ key: "orgIds", label: "组织", value: org?.name || `组织#${value}` });
@@ -182,7 +182,7 @@ function queryParams() {
         shop_ids: searchForm.shopIds.join(",") || undefined,
         service_provider: searchForm.serviceProvider || undefined,
         qic_warehouse: searchForm.qicWarehouse || undefined,
-        ...splitMonthRange(searchForm.monthRange),
+        ...splitSingleAccountingMonth(searchForm.accountingMonth),
     };
 }
 
@@ -245,7 +245,7 @@ function handleSearch() {
 }
 
 function handleReset() {
-    searchForm.monthRange = null;
+    searchForm.accountingMonth = "";
     searchForm.orgIds = [];
     searchForm.platforms = [];
     searchForm.shopIds = [];
@@ -256,7 +256,7 @@ function handleReset() {
 }
 
 async function removeFilterTag(tag: SourceFilterTag) {
-    if (tag.key === "monthRange") searchForm.monthRange = null;
+    if (tag.key === "accountingMonth") searchForm.accountingMonth = "";
     if (tag.key === "orgIds") {
         searchForm.orgIds = searchForm.orgIds.filter((item) => {
             const org = orgOptions.value.find((orgItem) => orgItem.id === item);
@@ -308,17 +308,17 @@ async function handleExport(scope: BicSourceExportScope) {
     loadingRef.value = true;
     try {
         const filename = normalizeExportFilename(buildExportFilename([
-            monthRangeLabel(searchForm.monthRange) || "全部核算年月",
+            searchForm.accountingMonth || "全部核算年月",
             `平台${summarizeFilenameValues(searchForm.platforms.map(getPlatformLabel), "全部")}`,
             `店铺${summarizeFilenameValues(searchForm.shopIds.map((id) => shopOptions.value.find((s) => s.id === id)?.shop_name || `店铺#${id}`), "全部")}`,
             `服务商${searchForm.serviceProvider || "全部"}`,
             `QIC仓${searchForm.qicWarehouse || "全部"}`,
-            "BIC源明细",
+            "BIC源数据",
             scope === "all" ? "全部" : scope === "current_page" ? `第${pagination.page}页` : "选中",
         ]));
         await submitExportJob({
             export_type: "bic.source_rows",
-            title: "BIC源明细导出",
+            title: "BIC源数据导出",
             filename,
             params,
         });

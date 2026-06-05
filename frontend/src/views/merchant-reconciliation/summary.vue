@@ -58,7 +58,7 @@
                 </div>
                 <div class="summary-empty-content">
                     <p class="summary-empty-kicker">需要先确定数据年月</p>
-                    <h2>选择月份后生成商家应付、冲减和未付流水汇总</h2>
+                    <h2>选择数据年月后生成商家应付、冲减和未付流水汇总</h2>
                     <p>汇总会按我方主体与收款商家聚合，适合导出给财务复核。当前不是 0 条数据，而是还没有选定查询口径。</p>
                     <div class="summary-empty-actions">
                         <el-button type="primary" @click="selectCurrentMonth">
@@ -92,7 +92,7 @@
                 <el-table-column label="序号" width="70" align="center" fixed="left">
                     <template #default="{ $index }">{{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}</template>
                 </el-table-column>
-                <el-table-column label="年月" width="110" fixed="left">
+                <el-table-column label="数据年月" width="110" fixed="left">
                     <template #default="{ row }">{{ formatMonth(row.accounting_year, row.accounting_month) }}</template>
                 </el-table-column>
                 <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="160" show-overflow-tooltip />

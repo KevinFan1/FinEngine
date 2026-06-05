@@ -36,7 +36,7 @@
 
             <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border>
                 <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" min-width="220" show-overflow-tooltip />
-                <el-table-column label="业务年月" width="110">
+                <el-table-column label="数据年月" width="110">
                     <template #default="{ row }">{{ formatMonth(row.accounting_year, row.accounting_month) }}</template>
                 </el-table-column>
                 <el-table-column label="平台" width="100">

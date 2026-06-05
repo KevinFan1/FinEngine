@@ -28,7 +28,7 @@
                 <el-table-column label="序号" width="70" align="center" fixed="left">
                     <template #default="{ $index }">{{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}</template>
                 </el-table-column>
-                <el-table-column label="年月" width="110" fixed="left">
+                <el-table-column label="数据年月" width="110" fixed="left">
                     <template #default="{ row }">{{ formatAccountingPeriod(row.accounting_period) }}</template>
                 </el-table-column>
                 <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="160" show-overflow-tooltip />
