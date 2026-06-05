@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import tempfile
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from time import perf_counter
 from typing import AsyncIterator, Iterable
 
 from openpyxl import Workbook
@@ -86,6 +88,7 @@ CHECKLIST_EXPORT_BORDER = Border(
 CHECKLIST_EXPORT_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 CHECKLIST_EXPORT_HEADER_FONT = Font(bold=True)
 ChecklistScope = tuple[int, int, str, int]
+logger = logging.getLogger("finengine.reconciliation_checklist")
 DETAIL_INSERT_FIELDS = (
     "task_id",
     "file_id",
@@ -485,6 +488,10 @@ class ReconciliationChecklistService:
 
     @staticmethod
     async def execute_task(db: AsyncSession, *, task_id: int) -> ReconciliationChecklistTask:
+        task_started = perf_counter()
+        partition_seconds = 0.0
+        download_seconds = 0.0
+        persist_seconds = 0.0
         task = await db.get(ReconciliationChecklistTask, task_id)
         if task is None or task.is_deleted:
             raise ValueError("对账清单任务不存在")
@@ -499,21 +506,28 @@ class ReconciliationChecklistService:
         task.finished_at = None
         task.error_message = None
         await db.flush()
+        await db.commit()
 
         try:
+            partition_started = perf_counter()
             await ensure_reconciliation_checklist_partitions_for_year(
                 db,
                 year=datetime.now().year,
             )
+            partition_seconds = perf_counter() - partition_started
             suffix = Path(upload_file.original_name).suffix or ".xlsx"
             with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+                download_started = perf_counter()
                 oss_service.download_to_temp(upload_file.oss_key, tmp.name)
+                download_seconds = perf_counter() - download_started
+                persist_started = perf_counter()
                 summary = await ReconciliationChecklistService.persist_task_result(
                     db,
                     task=task,
                     upload_file=upload_file,
                     file_path=tmp.name,
                 )
+                persist_seconds = perf_counter() - persist_started
 
             task.total_rows = int(summary.get("总行数", 0))
             task.success_rows = int(summary.get("成功行数", 0))
@@ -545,6 +559,20 @@ class ReconciliationChecklistService:
             upload_file.status = "expired" if is_expired else "failed"
             upload_file.error_message = task.error_message
 
+        total_seconds = perf_counter() - task_started
+        logger.info(
+            "reconciliation_checklist.task_perf task_id=%s file_id=%s status=%s total_rows=%s inserted_rows=%s deleted_rows=%s partition_seconds=%.3f download_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f",
+            task.id,
+            task.file_id,
+            task.status,
+            task.total_rows,
+            task.inserted_rows,
+            int((task.result_summary or {}).get("覆盖删除行数", 0) or 0),
+            partition_seconds,
+            download_seconds,
+            persist_seconds,
+            total_seconds,
+        )
         await db.flush()
         await db.refresh(task)
         return task
@@ -557,12 +585,23 @@ class ReconciliationChecklistService:
         upload_file: ReconciliationChecklistUploadFile,
         file_path: str,
     ) -> dict:
+        persist_started = perf_counter()
         parse_result = ReconciliationChecklistService.parse_file(file_path)
+        parse_seconds = perf_counter() - persist_started
         inserted_rows = 0
         deleted_rows = 0
+        partition_seconds = 0.0
+        build_seconds = 0.0
+        replace_seconds = 0.0
+        summary_seconds = 0.0
+        deduped_rows = 0
+        periods: list[int] = []
+        scopes: list[ChecklistScope] = []
         if not parse_result.get("fatal_error"):
             parsed_rows = ReconciliationChecklistService._dedupe_rows(parse_result.get("rows", []))
+            deduped_rows = len(parsed_rows)
             periods = sorted({int(row["accounting_period"]) for row in parsed_rows})
+            partition_started = perf_counter()
             for period in periods:
                 for partition_spec in (
                     RECONCILIATION_CHECKLIST_PARTITION,
@@ -570,14 +609,21 @@ class ReconciliationChecklistService:
                     RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION,
                 ):
                     await ensure_month_partition(db, spec=partition_spec, period=period)
+            partition_seconds = perf_counter() - partition_started
+            build_started = perf_counter()
             details = await ReconciliationChecklistService._build_detail_rows(
                 db,
                 task=task,
                 upload_file=upload_file,
                 rows=parsed_rows,
             )
+            build_seconds = perf_counter() - build_started
+            replace_started = perf_counter()
             inserted_rows, deleted_rows, scopes = await ReconciliationChecklistService._replace_detail_rows(db, details)
+            replace_seconds = perf_counter() - replace_started
+            summary_started = perf_counter()
             await ReconciliationChecklistService._rebuild_summary_rows(db, scopes)
+            summary_seconds = perf_counter() - summary_started
             await db.flush()
 
         summary = {
@@ -597,6 +643,23 @@ class ReconciliationChecklistService:
         warnings = parse_result.get("warnings", [])
         if warnings:
             summary["处理提示"] = warnings
+        total_seconds = perf_counter() - persist_started
+        logger.info(
+            "reconciliation_checklist.persist_task_result_perf task_id=%s file_id=%s raw_rows=%s deduped_rows=%s fatal_error=%s periods=%s scopes=%s parse_seconds=%.3f ensure_partition_seconds=%.3f build_details_seconds=%.3f replace_details_seconds=%.3f rebuild_summary_seconds=%.3f total_seconds=%.3f",
+            task.id,
+            upload_file.id,
+            len(parse_result.get("rows", [])),
+            deduped_rows,
+            bool(parse_result.get("fatal_error")),
+            len(periods),
+            len(scopes),
+            parse_seconds,
+            partition_seconds,
+            build_seconds,
+            replace_seconds,
+            summary_seconds,
+            total_seconds,
+        )
         return summary
 
     @staticmethod

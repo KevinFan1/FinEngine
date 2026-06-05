@@ -364,6 +364,12 @@ def test_celery_imports_include_bic_task_module() -> None:
     assert "app.tasks.bic_accounting" in celery_module.celery_app.conf.imports
 
 
+def test_celery_enables_worker_events_for_flower_monitoring() -> None:
+    assert celery_module.celery_app.conf.task_track_started is True
+    assert celery_module.celery_app.conf.worker_send_task_events is True
+    assert celery_module.celery_app.conf.task_send_sent_event is True
+
+
 class _ExpiredTaskIdAccessError(RuntimeError):
     pass
 

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -60,6 +61,7 @@ class _ChecklistExecuteSession:
         self.task = task
         self.upload_file = upload_file
         self.rollback_count = 0
+        self.commit_count = 0
 
     async def get(self, model: type, _item_id: int):
         if model is ReconciliationChecklistTask:
@@ -73,6 +75,9 @@ class _ChecklistExecuteSession:
 
     async def rollback(self) -> None:
         self.rollback_count += 1
+
+    async def commit(self) -> None:
+        self.commit_count += 1
 
     async def refresh(self, _instance: object) -> None:
         return None
@@ -409,7 +414,8 @@ async def test_ensure_reconciliation_checklist_partitions_for_year_creates_full_
 
 
 @pytest.mark.asyncio
-async def test_execute_task_precreates_current_year_partition_window_once(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_execute_task_precreates_current_year_partition_window_once(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="finengine.reconciliation_checklist")
     task = ReconciliationChecklistTask(
         id=1,
         file_id=2,
@@ -463,6 +469,63 @@ async def test_execute_task_precreates_current_year_partition_window_once(monkey
     assert ensure_calls == [datetime.now().year]
     assert result.status == "success"
     assert upload_file.status == "processed"
+    assert sum("reconciliation_checklist.task_perf" in record.message for record in caplog.records) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_task_commits_running_state_before_heavy_processing(monkeypatch: pytest.MonkeyPatch) -> None:
+    task = ReconciliationChecklistTask(
+        id=1,
+        file_id=2,
+        org_id=3,
+        user_id=4,
+        status="queued",
+        progress=0,
+    )
+    upload_file = ReconciliationChecklistUploadFile(
+        id=2,
+        org_id=3,
+        user_id=4,
+        original_name="对账清单.xlsx",
+        oss_key="oss-key",
+        status="uploaded",
+    )
+    session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
+
+    async def fake_ensure_year(*_args, **_kwargs) -> dict[str, int]:
+        assert session.commit_count == 1
+        assert task.status == "running"
+        assert task.progress == 5
+        assert task.started_at is not None
+        return {"start_period": 202601, "end_period": 202612, "year": 2026}
+
+    async def fake_persist_task_result(*_args, **_kwargs) -> dict:
+        return {
+            "总行数": 0,
+            "成功行数": 0,
+            "失败行数": 0,
+            "新增行数": 0,
+            "更新行数": 0,
+        }
+
+    monkeypatch.setattr(
+        "app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_year",
+        fake_ensure_year,
+    )
+    monkeypatch.setattr(
+        "app.services.reconciliation_checklist_service.oss_service.download_to_temp",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        ReconciliationChecklistService,
+        "persist_task_result",
+        staticmethod(fake_persist_task_result),
+    )
+
+    result = await ReconciliationChecklistService.execute_task(session, task_id=1)  # type: ignore[arg-type]
+
+    assert session.commit_count == 1
+    assert result.status == "success"
 
 
 @pytest.mark.asyncio
@@ -516,6 +579,53 @@ async def test_execute_task_marks_source_file_expired_and_preserves_previous_res
     assert task.result_summary == {"old": True}
     assert upload_file.status == "expired"
     assert upload_file.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_persist_task_result_emits_perf_log(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="finengine.reconciliation_checklist")
+    task = ReconciliationChecklistTask(
+        id=1,
+        file_id=2,
+        org_id=3,
+        user_id=4,
+        status="running",
+        progress=5,
+    )
+    upload_file = ReconciliationChecklistUploadFile(
+        id=2,
+        org_id=3,
+        user_id=4,
+        original_name="对账清单.xlsx",
+        oss_key="oss-key",
+        status="uploaded",
+    )
+    session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
+
+    monkeypatch.setattr(
+        ReconciliationChecklistService,
+        "parse_file",
+        staticmethod(
+            lambda _path: {
+                "rows": [],
+                "total_rows": 0,
+                "success_rows": 0,
+                "failed_rows": 0,
+                "errors": [],
+                "warnings": [],
+            }
+        ),
+    )
+
+    summary = await ReconciliationChecklistService.persist_task_result(
+        session,  # type: ignore[arg-type]
+        task=task,
+        upload_file=upload_file,
+        file_path="/tmp/checklist.xlsx",
+    )
+
+    assert summary["总行数"] == 0
+    assert sum("reconciliation_checklist.persist_task_result_perf" in record.message for record in caplog.records) == 1
 
 
 @pytest.mark.asyncio
