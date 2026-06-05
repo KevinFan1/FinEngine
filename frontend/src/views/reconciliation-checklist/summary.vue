@@ -205,7 +205,7 @@
                 />
                 <el-table-column
                     prop="product_quantity"
-                    label="货品数量"
+                    label="明细数量"
                     width="110"
                     align="right"
                 />

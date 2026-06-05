@@ -136,6 +136,8 @@ and then avoid also wrapping it with multiple supervisor API programs.
 Flower is managed as `finengine-flower` by the supervisor example and listens on
 `127.0.0.1:5555` by default. Keep it private; expose it through an SSH tunnel or
 nginx with authentication. Set `FLOWER_BASIC_AUTH=user:password` if you proxy it.
+If you mount Flower under `/flower`, keep `FLOWER_URL_PREFIX=flower` so the app
+generates the correct links behind nginx.
 
 ## Routine updates
 

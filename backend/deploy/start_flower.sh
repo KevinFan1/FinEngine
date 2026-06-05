@@ -21,10 +21,12 @@ source "${SCRIPT_DIR}/load_deploy_env.sh"
 load_deploy_env "${BACKEND_DIR}/.env" \
   FLOWER_HOST \
   FLOWER_PORT \
-  FLOWER_BASIC_AUTH
+  FLOWER_BASIC_AUTH \
+  FLOWER_URL_PREFIX
 
 FLOWER_HOST="${FLOWER_HOST:-127.0.0.1}"
 FLOWER_PORT="${FLOWER_PORT:-5555}"
+FLOWER_URL_PREFIX="${FLOWER_URL_PREFIX:-}"
 
 FLOWER_ARGS=(
   -m celery
@@ -36,6 +38,10 @@ FLOWER_ARGS=(
 
 if [[ -n "${FLOWER_BASIC_AUTH:-}" ]]; then
   FLOWER_ARGS+=(--basic-auth="${FLOWER_BASIC_AUTH}")
+fi
+
+if [[ -n "${FLOWER_URL_PREFIX}" ]]; then
+  FLOWER_ARGS+=(--url_prefix="${FLOWER_URL_PREFIX}")
 fi
 
 exec "${PYTHON_BIN}" "${FLOWER_ARGS[@]}"
