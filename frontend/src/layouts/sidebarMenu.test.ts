@@ -17,8 +17,6 @@ test("flattens common functions above the sidebar divider", () => {
             "对账清单任务",
             "对账清单汇总",
             "下载中心",
-            "店铺管理",
-            "用户管理",
         ],
     );
     assert.equal(primaryMenus[0]?.path, "/dashboard");
@@ -56,17 +54,37 @@ test("promotes accounting upload center to a top-level menu item", () => {
                 !item.children?.length,
         ),
     );
+    const uploadIndex = sidebarMenuItems.findIndex((item) => item.path === "/upload");
+    const shopsIndex = sidebarMenuItems.findIndex((item) => item.path === "/shops");
+    assert.ok(uploadIndex >= 0);
+    assert.equal(shopsIndex, uploadIndex + 1);
 });
 
-test("keeps user management visible only for admin roles after promotion", () => {
+test("keeps user management under system management and only visible for admin roles", () => {
     const orgAdminMenus = filterSidebarMenuByRole(sidebarMenuItems, "org_admin");
     const regularMenus = filterSidebarMenuByRole(sidebarMenuItems, "operator");
+    const orgSystemManagement = orgAdminMenus.find(
+        (item) => item.type !== "divider" && item.title === "系统管理",
+    );
+    const regularSystemManagement = regularMenus.find(
+        (item) => item.type !== "divider" && item.title === "系统管理",
+    );
 
     assert.ok(
-        orgAdminMenus.some((item) => item.title === "用户管理"),
+        orgSystemManagement &&
+            "children" in orgSystemManagement &&
+            orgSystemManagement.children?.some((item) => item.title === "用户管理"),
     );
     assert.equal(
         regularMenus.some((item) => item.title === "用户管理"),
+        false,
+    );
+    assert.equal(
+        Boolean(
+            regularSystemManagement &&
+                "children" in regularSystemManagement &&
+                regularSystemManagement.children?.some((item) => item.title === "用户管理"),
+        ),
         false,
     );
 });

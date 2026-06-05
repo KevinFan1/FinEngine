@@ -68,17 +68,6 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
         icon: "Download",
     },
     {
-        path: "/shops",
-        title: "店铺管理",
-        icon: "Shop",
-    },
-    {
-        path: "/users",
-        title: "用户管理",
-        icon: "User",
-        roles: ["superadmin", "org_admin"],
-    },
-    {
         type: "divider",
         path: "/sidebar-primary-divider",
     },
@@ -86,6 +75,11 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
         path: "/upload",
         title: "核算上传中心",
         icon: "Upload",
+    },
+    {
+        path: "/shops",
+        title: "店铺管理",
+        icon: "Shop",
     },
     {
         path: "/order-accounting",
@@ -246,6 +240,12 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
                 path: "/audit-logs",
                 title: "操作日志",
                 icon: "Document",
+                roles: ["superadmin", "org_admin"],
+            },
+            {
+                path: "/users",
+                title: "用户管理",
+                icon: "User",
                 roles: ["superadmin", "org_admin"],
             },
         ],

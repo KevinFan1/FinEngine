@@ -512,6 +512,9 @@ usePageRefresh(fetchMetrics);
     --dashboard-warning: #f59e0b;
     --dashboard-text: #1e293b;
     --dashboard-muted: #64748b;
+    display: block;
+    height: auto;
+    min-height: 100%;
     max-width: none;
     background: var(--dashboard-bg);
 }
@@ -831,14 +834,42 @@ usePageRefresh(fetchMetrics);
     }
 }
 
-@media (max-width: 760px) {
+@container (max-width: 1120px) {
     .dashboard-hero {
         align-items: flex-start;
         flex-direction: column;
+        overflow: visible;
     }
 
     .hero-meta {
         justify-content: flex-start;
+        width: 100%;
+    }
+}
+
+@media (max-width: 1120px) {
+    .dashboard-hero {
+        align-items: flex-start;
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    .hero-meta {
+        justify-content: flex-start;
+        width: 100%;
+    }
+}
+
+@media (max-width: 760px) {
+    .dashboard-hero {
+        align-items: flex-start;
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    .hero-meta {
+        justify-content: flex-start;
+        width: 100%;
     }
 
     .dashboard-metrics {
