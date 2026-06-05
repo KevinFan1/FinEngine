@@ -65,7 +65,7 @@ class AuthService:
     @staticmethod
     async def create_default_superadmin(db: AsyncSession, password: str) -> None:
         """Create default superadmin account if it doesn't exist."""
-        stmt = select(User).where(User.role == "superadmin", User.is_deleted.is_(False))
+        stmt = select(User).where(User.username == "superadmin", User.is_deleted.is_(False))
         result = await db.execute(stmt)
         existing = result.scalar_one_or_none()
 
