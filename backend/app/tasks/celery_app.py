@@ -13,6 +13,7 @@ from celery.schedules import crontab
 from celery.signals import worker_process_shutdown
 
 from app.core.config import settings
+from app.core.logging import setup_logging
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error
 from app.services.upload_period_service import EmptyTabularDataError, extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import normalize_positive_summary_fields, safe_str
@@ -55,6 +56,13 @@ FILENAME_TYPE_PATTERN = re.compile(
     r"^(?:\d{2,4}年\d{1,2}月[ _])?(动账|gmv|bic|BIC|运费险|订单|其他服务款|GMV订单货款|GMV其他服务款|退货费用及其他|银行流水)[ _].+\.(?:xlsx|xlsm|xls|csv)$",
     re.IGNORECASE,
 )
+
+
+def _configure_worker_logging() -> None:
+    setup_logging()
+
+
+_configure_worker_logging()
 
 
 def _get_worker_loop() -> asyncio.AbstractEventLoop:

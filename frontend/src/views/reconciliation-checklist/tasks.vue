@@ -287,7 +287,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
@@ -334,6 +334,13 @@ const TASK_QUERY_KEYS = [
     "status",
     "keyword",
 ] as const;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+const hasRunningTasks = computed(() => {
+    return rows.value.some((task) =>
+        ["queued", "running"].includes(task.status),
+    );
+});
 
 function taskStatusLabel(status: string) {
     return (
@@ -502,12 +509,14 @@ async function retry(row: ReconciliationChecklistTask) {
         { type: "warning" },
     );
     rerunningTaskId.value = row.id;
+    stopAutoRefresh();
     try {
         await retryReconciliationChecklistTask(row.id);
         ElMessage.success("已提交重新统计");
         await fetchData();
     } finally {
         rerunningTaskId.value = null;
+        startAutoRefresh();
     }
 }
 
@@ -528,6 +537,7 @@ async function handleBatchRecalculate() {
         return;
     }
     batchRecalculating.value = true;
+    stopAutoRefresh();
     try {
         const result = await batchRecalculateReconciliationChecklistTasks(
             selectedRows.value.map((row) => row.id),
@@ -536,6 +546,23 @@ async function handleBatchRecalculate() {
         await fetchData();
     } finally {
         batchRecalculating.value = false;
+        startAutoRefresh();
+    }
+}
+
+function startAutoRefresh() {
+    stopAutoRefresh();
+    refreshTimer = setInterval(() => {
+        if (hasRunningTasks.value) {
+            fetchData();
+        }
+    }, 5000);
+}
+
+function stopAutoRefresh() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
     }
 }
 
@@ -568,6 +595,11 @@ onMounted(async () => {
     restorePageState();
     await fetchOrgs();
     await fetchData();
+    startAutoRefresh();
+});
+
+onUnmounted(() => {
+    stopAutoRefresh();
 });
 
 watch(

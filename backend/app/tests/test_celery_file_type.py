@@ -370,6 +370,19 @@ def test_celery_enables_worker_events_for_flower_monitoring() -> None:
     assert celery_module.celery_app.conf.task_send_sent_event is True
 
 
+def test_celery_initializes_backend_logging_for_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"count": 0}
+
+    def fake_setup_logging() -> None:
+        called["count"] += 1
+
+    monkeypatch.setattr(celery_module, "setup_logging", fake_setup_logging)
+
+    celery_module._configure_worker_logging()
+
+    assert called["count"] == 1
+
+
 class _ExpiredTaskIdAccessError(RuntimeError):
     pass
 
