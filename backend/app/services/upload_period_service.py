@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Iterable
 
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app.models.platform import Platform
 from app.tasks.processors.base import (
     HEADER_SCAN_LIMIT,
     canonical_header,
+    detect_csv_encoding,
     open_tabular_rows,
     parse_datetime,
     safe_str,
@@ -178,11 +180,17 @@ def extract_upload_period(
     if not resolved_header_name:
         raise ValueError(f"未配置所属时间规则：平台 [{platform_code or '-'}]，类别 [{type_code or '-'}]")
 
+    csv_encoding = _detect_tabular_csv_encoding(file_path)
     with open_tabular_rows(file_path) as rows:
         if rows is None:
             raise ValueError("无法打开表格文件")
         row_iter = iter(rows)
-        header_row, header_row_number = _find_period_header_row(row_iter, resolved_header_name)
+        header_row, header_row_number = _find_period_header_row(
+            row_iter,
+            resolved_header_name,
+            file_path=file_path,
+            csv_encoding=csv_encoding,
+        )
         target_index = _resolve_single_header_index(header_row, resolved_header_name)
 
         period_counts: Counter[str] = Counter()
@@ -269,6 +277,9 @@ def _parse_excel_serial_period(value: object) -> tuple[int, int] | None:
 def _find_period_header_row(
     row_iter: Iterable[tuple[object, ...] | list[str]],
     header_name: str,
+    *,
+    file_path: str | None = None,
+    csv_encoding: str | None = None,
 ) -> tuple[list[str], int]:
     target = canonical_header(header_name)
     last_headers: list[str] = []
@@ -278,12 +289,39 @@ def _find_period_header_row(
             last_headers = headers
             canonical_headers = [canonical_header(cell) for cell in headers]
             if target in canonical_headers:
+                logger.info(
+                    "所属时间表头识别成功 file={} encoding={} header={} row={} headers={}",
+                    file_path or "-",
+                    csv_encoding or "-",
+                    header_name,
+                    row_number,
+                    headers,
+                )
                 return headers, row_number
         if row_number >= HEADER_SCAN_LIMIT:
             break
     if last_headers:
+        logger.warning(
+            "所属时间表头识别失败 file={} encoding={} expected={} target={} scanned_rows={} last_headers={} canonical_headers={}",
+            file_path or "-",
+            csv_encoding or "-",
+            header_name,
+            target,
+            min(HEADER_SCAN_LIMIT, row_number),
+            last_headers,
+            [canonical_header(cell) for cell in last_headers],
+        )
         raise ValueError(f"前 {HEADER_SCAN_LIMIT} 行未找到所属时间表头：{header_name}")
     raise ValueError("无法读取表头")
+
+
+def _detect_tabular_csv_encoding(file_path: str) -> str | None:
+    if not file_path.lower().endswith(".csv"):
+        return None
+    try:
+        return detect_csv_encoding(file_path)
+    except OSError:
+        return None
 
 
 def _resolve_single_header_index(headers: list[str], header_name: str) -> int:

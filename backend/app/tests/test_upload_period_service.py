@@ -98,6 +98,29 @@ def test_extract_upload_period_supports_header_aliases_and_type_aliases(tmp_path
     assert get_upload_period_header("视频号小店", "订单") == "订单下单时间"
 
 
+def test_extract_upload_period_handles_utf8_bom_csv_when_sample_ends_mid_character(tmp_path: Path) -> None:
+    file_path = tmp_path / "运费险_云上珠宝圈.csv"
+    sample_size = 63 * 1024
+    header = "\ufeff投保单号,订单编号,下单时间,承保时间\n".encode("utf-8")
+    row = "10202605310846212765210660613,6926769166113800132,2026-05-31,2026-05-31\n".encode("utf-8")
+    content = bytearray(header)
+    while len(content) + len(row) <= sample_size - 1:
+        content.extend(row)
+    content.extend(b"x" * (sample_size - 1 - len(content)))
+    content.extend("珠宝\n".encode("utf-8"))
+    file_path.write_bytes(content)
+
+    result = extract_upload_period(
+        str(file_path),
+        platform_code="douyin",
+        type_code="运费险",
+    )
+
+    assert result.year == 2026
+    assert result.month == 5
+    assert result.header == "承保时间"
+
+
 def test_parse_period_value_rejects_invalid_month_codes() -> None:
     assert parse_period_value("202613") is None
     assert parse_period_value("2026-13-01") is None

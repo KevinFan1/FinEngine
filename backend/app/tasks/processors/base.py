@@ -6,6 +6,7 @@ field formulas.
 """
 
 import csv
+import codecs
 from html.parser import HTMLParser
 import logging
 import re
@@ -66,6 +67,7 @@ POSITIVE_SUMMARY_FIELDS: frozenset[str] = frozenset(
     )
 )
 CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gb18030")
+CSV_UTF8_BOMS: tuple[bytes, ...] = (codecs.BOM_UTF8,)
 HEADER_SCAN_LIMIT = 20
 HEADER_NORMALIZE_PATTERN = re.compile(r"[\s　\uFEFF\u200B-\u200D]+")
 ZIP_SIGNATURES: tuple[bytes, ...] = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
@@ -133,9 +135,13 @@ def detect_csv_encoding(file_path: str) -> str:
     with path.open("rb") as file:
         sample = file.read(63 * 1024)
 
+    if sample.startswith(CSV_UTF8_BOMS):
+        return "utf-8-sig"
+
     for encoding in CSV_ENCODINGS:
         try:
-            sample.decode(encoding)
+            decoder = codecs.getincrementaldecoder(encoding)("strict")
+            decoder.decode(sample, final=False)
         except UnicodeDecodeError:
             continue
         return encoding
