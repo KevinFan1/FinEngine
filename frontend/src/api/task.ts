@@ -30,6 +30,7 @@ export interface Task {
     action_expire_reason?: string | null;
     result_summary?: {
         errors?: unknown;
+        错误明细?: unknown;
         [key: string]: unknown;
     } | null;
     started_at: string | null;

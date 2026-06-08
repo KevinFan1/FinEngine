@@ -281,6 +281,25 @@
                     </div>
                     <p class="detail-error">{{ currentTask.error_message }}</p>
                 </section>
+
+                <section
+                    v-if="taskSummaryItems(currentTask).length"
+                    class="detail-card"
+                >
+                    <div class="detail-card-header">
+                        <span>结果摘要</span>
+                    </div>
+                    <div class="detail-summary-list">
+                        <div
+                            v-for="item in taskSummaryItems(currentTask)"
+                            :key="item.key"
+                            class="detail-summary-item"
+                        >
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.value }}</strong>
+                        </div>
+                    </div>
+                </section>
             </div>
         </el-drawer>
     </div>
@@ -300,6 +319,7 @@ import {
 } from "@/api/reconciliationChecklist";
 import { useUserStore } from "@/stores/user";
 import { formatDateTime } from "@/utils/format";
+import { resultSummaryItems } from "@/utils/resultSummary";
 import {
     DEFAULT_PAGE_SIZE,
     PAGE_SIZE_OPTIONS,
@@ -569,6 +589,12 @@ function stopAutoRefresh() {
 function openDetails(row: ReconciliationChecklistTask) {
     currentTask.value = row;
     detailVisible.value = true;
+}
+
+function taskSummaryItems(task: ReconciliationChecklistTask) {
+    return resultSummaryItems(task.result_summary, {
+        excludeKeys: task.error_message ? ["错误明细", "errors"] : [],
+    });
 }
 
 async function downloadSource(row: ReconciliationChecklistTask) {
@@ -921,6 +947,37 @@ watch(
     line-height: 1.6;
 }
 
+.detail-summary-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.detail-summary-item {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--border-color-light);
+    border-radius: calc(var(--radius-card) - 2px);
+    background: var(--bg-elevated);
+}
+
+.detail-summary-item span {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.detail-summary-item strong {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .text-tertiary {
     color: var(--text-tertiary);
 }
@@ -938,6 +995,12 @@ watch(
     :deep(.checklist-filter-card .filter-form .el-input),
     :deep(.checklist-filter-card .filter-form .el-select) {
         width: 100% !important;
+    }
+
+    .detail-hero-card,
+    .detail-grid,
+    .detail-summary-list {
+        grid-template-columns: 1fr;
     }
 }
 </style>

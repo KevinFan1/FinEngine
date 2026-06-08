@@ -575,6 +575,7 @@ import PlatformBadge from "@/components/PlatformBadge.vue";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import { useUserStore } from "@/stores/user";
+import { decodeCsvBuffer } from "@/utils/csvEncoding";
 
 interface ParsedTransactionFileName {
     year: number;
@@ -1057,18 +1058,6 @@ function parseCsvPreviewRows(text: string, maxRows: number): string[][] {
         rows.push(row);
     }
     return rows;
-}
-
-function decodeCsvBuffer(buffer: ArrayBuffer): string {
-    const encodings = ["utf-8", "gb18030"];
-    for (const encoding of encodings) {
-        try {
-            return new TextDecoder(encoding, { fatal: true }).decode(buffer);
-        } catch {
-            // Try the next common CSV export encoding.
-        }
-    }
-    return new TextDecoder("utf-8").decode(buffer);
 }
 
 function loadXlsx() {

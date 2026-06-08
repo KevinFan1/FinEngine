@@ -206,11 +206,11 @@ def test_order_dependency_summary_counts_missing_rows_not_unique_orders() -> Non
         missing_order_nos=["same-order", "same-order"],
     )
 
-    assert summary["total_rows"] == 3
-    assert summary["success_rows"] == 1
-    assert summary["failed_rows"] == 2
-    assert summary["missing_order_count"] == 2
-    assert summary["missing_order_samples"] == ["same-order"]
+    assert summary["总行数"] == 3
+    assert summary["成功行数"] == 1
+    assert summary["失败行数"] == 2
+    assert summary["缺少订单创建时间行数"] == 2
+    assert summary["缺少订单创建时间订单样例"] == ["same-order"]
 
 
 def test_order_or_fallback_time_summary_reports_fallback_time() -> None:
@@ -224,12 +224,12 @@ def test_order_or_fallback_time_summary_reports_fallback_time() -> None:
         fallback_label="生效时间",
     )
 
-    assert summary["success_rows"] == 3
-    assert summary["failed_rows"] == 0
-    assert summary["fallback_time_label"] == "生效时间"
-    assert summary["fallback_time_count"] == 1
-    assert summary["fallback_time_samples"] == ["fallback-order"]
-    assert summary["errors"] == ["订单索引未命中 1 条，已使用生效时间归属年月；订单号: fallback-order"]
+    assert summary["成功行数"] == 3
+    assert summary["失败行数"] == 0
+    assert summary["兜底时间字段"] == "生效时间"
+    assert summary["兜底归属年月行数"] == 1
+    assert summary["兜底归属年月订单样例"] == ["fallback-order"]
+    assert summary["错误明细"] == ["订单索引未命中 1 条，已使用生效时间归属年月；订单号: fallback-order"]
 
 
 def test_order_or_fallback_time_summary_reports_entry_time_compatibility() -> None:
@@ -243,10 +243,10 @@ def test_order_or_fallback_time_summary_reports_entry_time_compatibility() -> No
         fallback_label="入账时间",
     )
 
-    assert summary["fallback_time_label"] == "入账时间"
-    assert summary["fallback_time_count"] == 1
-    assert summary["fallback_time_samples"] == ["fallback-order"]
-    assert summary["errors"] == ["订单索引未命中 1 条，已使用入账时间归属年月；订单号: fallback-order"]
+    assert summary["兜底时间字段"] == "入账时间"
+    assert summary["兜底归属年月行数"] == 1
+    assert summary["兜底归属年月订单样例"] == ["fallback-order"]
+    assert summary["错误明细"] == ["订单索引未命中 1 条，已使用入账时间归属年月；订单号: fallback-order"]
 
 
 def test_order_or_fallback_time_summary_counts_fallback_rows_with_unique_samples() -> None:
@@ -260,15 +260,16 @@ def test_order_or_fallback_time_summary_counts_fallback_rows_with_unique_samples
         fallback_label="入账时间",
     )
 
-    assert summary["fallback_time_count"] == 2
-    assert summary["fallback_time_samples"] == ["same-order"]
-    assert summary["errors"] == ["订单索引未命中 2 条，已使用入账时间归属年月；订单号: same-order"]
+    assert summary["兜底归属年月行数"] == 2
+    assert summary["兜底归属年月订单样例"] == ["same-order"]
+    assert summary["错误明细"] == ["订单索引未命中 2 条，已使用入账时间归属年月；订单号: same-order"]
 
 
 def test_result_task_status_uses_partial_success_when_failed_rows_exist() -> None:
     assert _result_task_status_from_processor_result({"failed_rows": 0}) == "success"
     assert _result_task_status_from_processor_result({"failed_rows": 2}) == "partial_success"
     assert _result_task_status_from_summary({"failed_rows": 1, "success_rows": 3}) == "partial_success"
+    assert _result_task_status_from_summary({"失败行数": 1, "成功行数": 3}) == "partial_success"
 
 
 def test_mark_task_failed_sets_task_and_upload_file_state() -> None:
@@ -346,12 +347,12 @@ def test_mark_task_empty_success_keeps_success_status_with_empty_reason() -> Non
     assert task.failed_rows == 0
     assert task.error_message == "空表，没有数据"
     assert task.result_summary == {
-        "type": "动账",
-        "total_rows": 0,
-        "success_rows": 0,
-        "failed_rows": 0,
-        "groups": 0,
-        "errors": ["空表，没有数据"],
+        "文件类型": "动账",
+        "总行数": 0,
+        "成功行数": 0,
+        "失败行数": 0,
+        "汇总分组数": 0,
+        "错误明细": ["空表，没有数据"],
     }
     assert task.finished_at is not None
     assert upload_file.status == "success"

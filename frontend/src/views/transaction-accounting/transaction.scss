@@ -711,6 +711,9 @@
         color: var(--text-primary);
         font-size: 14px;
         font-weight: 700;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
     }
 }
 

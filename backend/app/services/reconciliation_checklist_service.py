@@ -632,9 +632,19 @@ class ReconciliationChecklistService:
             "总行数": parse_result.get("total_rows", 0),
             "成功行数": parse_result.get("success_rows", 0),
             "失败行数": parse_result.get("failed_rows", 0),
+            "原始明细行数": len(parse_result.get("rows", [])),
+            "去重后明细行数": deduped_rows,
             "新增行数": inserted_rows,
             "更新行数": 0,
             "覆盖删除行数": deleted_rows,
+            "覆盖范围数": len(scopes),
+            "涉及年月": periods,
+            "重建汇总行范围数": len(scopes),
+            "解析耗时秒": round(parse_seconds, 3),
+            "分区检查耗时秒": round(partition_seconds, 3),
+            "明细构建耗时秒": round(build_seconds, 3),
+            "明细替换耗时秒": round(replace_seconds, 3),
+            "汇总重建耗时秒": round(summary_seconds, 3),
         }
         errors = parse_result.get("errors", [])[:CHECKLIST_ERROR_SAMPLE_LIMIT]
         if errors:

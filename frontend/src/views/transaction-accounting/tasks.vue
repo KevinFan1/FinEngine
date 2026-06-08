@@ -360,12 +360,15 @@
                     <p class="detail-error">{{ taskDetail.error_message }}</p>
                 </section>
 
-                <section v-if="taskDetail.result_summary" class="detail-card">
+                <section
+                    v-if="taskSummaryItems(taskDetail.result_summary).length"
+                    class="detail-card"
+                >
                     <div class="detail-card-header">
                         <span>结果摘要</span>
                     </div>
                     <div class="detail-summary-list">
-                        <div v-for="item in taskSummaryItems(taskDetail.result_summary)" :key="item.label" class="detail-summary-item">
+                        <div v-for="item in taskSummaryItems(taskDetail.result_summary)" :key="item.key" class="detail-summary-item">
                             <span>{{ item.label }}</span>
                             <strong>{{ item.value }}</strong>
                         </div>
@@ -401,6 +404,7 @@ import { formatDateTime, getPlatformLabel } from "@/utils/format";
 import { dateRangeLabel, taskCreatedTimeShortcuts } from "@/utils/dateRange";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
+import { resultSummaryItems } from "@/utils/resultSummary";
 import {
     getFallbackPlatforms,
     getReportPlatformCode,
@@ -535,20 +539,8 @@ function canRecalculate(row: TransactionTask) {
     return !["queued", "processing", "expired"].includes(row.status);
 }
 
-const resultSummaryLabels: Record<string, string> = {
-    total_rows: "总行数",
-    success_rows: "成功行数",
-    matched_rows: "匹配明细数",
-    unmatched_rows: "未匹配行数",
-    failed_rows: "失败行数",
-    summary_groups: "汇总分组数",
-};
-
-function taskSummaryItems(value: Record<string, any>) {
-    return Object.entries(value).map(([key, itemValue]) => ({
-        label: resultSummaryLabels[key] || key,
-        value: itemValue ?? "-",
-    }));
+function taskSummaryItems(value: TransactionTask["result_summary"]) {
+    return resultSummaryItems(value);
 }
 
 function queryParams() {

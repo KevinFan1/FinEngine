@@ -561,13 +561,23 @@
                     </p>
                 </section>
 
-                <section v-if="taskDetail.result_summary" class="detail-card">
+                <section
+                    v-if="taskSummaryItems(taskDetail.result_summary).length"
+                    class="detail-card"
+                >
                     <div class="detail-card-header">
                         <span>结果摘要</span>
                     </div>
-                    <pre class="detail-summary-json">{{
-                        formatJson(taskDetail.result_summary)
-                    }}</pre>
+                    <div class="detail-summary-list">
+                        <div
+                            v-for="item in taskSummaryItems(taskDetail.result_summary)"
+                            :key="item.key"
+                            class="detail-summary-item"
+                        >
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.value }}</strong>
+                        </div>
+                    </div>
                 </section>
             </div>
         </el-drawer>
@@ -601,6 +611,7 @@ import { getPlatformList, type Platform } from "@/api/platform";
 import { getShopList, type Shop } from "@/api/shop";
 import { formatDateTime, getPlatformLabel } from "@/utils/format";
 import { dateRangeLabel, taskCreatedTimeShortcuts } from "@/utils/dateRange";
+import { resultSummaryItems } from "@/utils/resultSummary";
 import { usePageRefresh } from "@/composables/pageRefresh";
 import {
     getFallbackPlatforms,
@@ -808,7 +819,7 @@ function taskErrorReason(row: Task) {
     return (
         row.error_reason ||
         row.error_message ||
-        formatSummaryErrors(row.result_summary?.errors)
+        formatSummaryErrors(row.result_summary?.错误明细 ?? row.result_summary?.errors)
     );
 }
 
@@ -820,8 +831,8 @@ function formatSummaryErrors(errors: unknown) {
     return JSON.stringify(errors);
 }
 
-function formatJson(value: unknown) {
-    return JSON.stringify(value, null, 2);
+function taskSummaryItems(value: Task["result_summary"]) {
+    return resultSummaryItems(value);
 }
 
 function openTaskDetail(row: Task) {
@@ -1382,24 +1393,41 @@ usePageRefresh(fetchData);
     word-break: break-word;
 }
 
-.detail-summary-json {
-    margin: 0;
-    max-height: 280px;
-    overflow: auto;
-    border: 1px solid var(--border-light);
-    border-radius: calc(var(--radius-card) - 2px);
-    background: var(--code-bg);
-    color: var(--code-text);
+.detail-summary-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.detail-summary-item {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
     padding: 10px;
-    font-size: 12px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
+    border: 1px solid var(--border-color-light);
+    border-radius: calc(var(--radius-card) - 2px);
+    background: var(--bg-elevated);
+
+    span {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    strong {
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
 }
 
 @media (max-width: 768px) {
     .detail-hero-card,
-    .detail-grid {
+    .detail-grid,
+    .detail-summary-list {
         grid-template-columns: 1fr;
     }
 }

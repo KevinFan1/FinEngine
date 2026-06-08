@@ -141,7 +141,7 @@ def _result_task_status_from_processor_result(proc_result: dict) -> str:
 
 
 def _result_task_status_from_summary(summary: dict) -> str:
-    return _result_task_status_from_failed_rows(summary.get("failed_rows"))
+    return _result_task_status_from_failed_rows(summary.get("失败行数", summary.get("failed_rows")))
 
 
 def _set_task_result_from_processor(task, proc_result: dict) -> None:
@@ -151,9 +151,9 @@ def _set_task_result_from_processor(task, proc_result: dict) -> None:
 
 
 def _set_task_result_from_summary(task, summary: dict) -> None:
-    task.processed_rows = int(summary.get("total_rows") or 0)
-    task.success_rows = int(summary.get("success_rows") or 0)
-    task.failed_rows = int(summary.get("failed_rows") or 0)
+    task.processed_rows = int(summary.get("总行数", summary.get("total_rows")) or 0)
+    task.success_rows = int(summary.get("成功行数", summary.get("success_rows")) or 0)
+    task.failed_rows = int(summary.get("失败行数", summary.get("failed_rows")) or 0)
 
 
 def _mark_task_empty_success(task, upload_file, *, file_type: str) -> None:
@@ -164,12 +164,12 @@ def _mark_task_empty_success(task, upload_file, *, file_type: str) -> None:
     task.failed_rows = 0
     task.error_message = "空表，没有数据"
     task.result_summary = {
-        "type": file_type,
-        "total_rows": 0,
-        "success_rows": 0,
-        "failed_rows": 0,
-        "groups": 0,
-        "errors": ["空表，没有数据"],
+        "文件类型": file_type,
+        "总行数": 0,
+        "成功行数": 0,
+        "失败行数": 0,
+        "汇总分组数": 0,
+        "错误明细": ["空表，没有数据"],
     }
     task.finished_at = datetime.now(timezone.utc)
     if upload_file:
@@ -273,18 +273,18 @@ def _build_order_dependency_summary(
         errors.append(f"缺少订单创建时间 {missing_order_count} 条，已按 0 统计；订单号: {sample_text}")
 
     return {
-        "type": type_code,
-        "dependency_type": "order_index",
-        "summary_ids": summary_ids,
-        "total_rows": proc_result.get("total_rows", 0),
-        "success_rows": effective_success_rows,
-        "failed_rows": effective_failed_rows,
-        "parse_success_rows": proc_result.get("success_rows", 0),
-        "parse_failed_rows": proc_result.get("failed_rows", 0),
-        "missing_order_count": missing_order_count,
-        "missing_order_samples": missing_order_samples,
-        "groups": groups,
-        "errors": _json_safe(errors),
+        "文件类型": type_code,
+        "依赖数据": "订单索引",
+        "汇总记录ID": summary_ids,
+        "总行数": proc_result.get("total_rows", 0),
+        "成功行数": effective_success_rows,
+        "失败行数": effective_failed_rows,
+        "解析成功行数": proc_result.get("success_rows", 0),
+        "解析失败行数": proc_result.get("failed_rows", 0),
+        "缺少订单创建时间行数": missing_order_count,
+        "缺少订单创建时间订单样例": missing_order_samples,
+        "汇总分组数": groups,
+        "错误明细": _json_safe(errors),
     }
 
 
@@ -307,14 +307,14 @@ def _build_order_or_fallback_time_summary(
     )
     fallback_count = len(fallback_order_nos)
     fallback_samples = list(dict.fromkeys(fallback_order_nos))[:20]
-    summary["fallback_time_label"] = fallback_label
-    summary["fallback_time_count"] = fallback_count
-    summary["fallback_time_samples"] = fallback_samples
+    summary["兜底时间字段"] = fallback_label
+    summary["兜底归属年月行数"] = fallback_count
+    summary["兜底归属年月订单样例"] = fallback_samples
     if fallback_order_nos:
         sample_text = "、".join(fallback_samples)
-        errors = list(summary.get("errors") or [])
+        errors = list(summary.get("错误明细") or [])
         errors.append(f"订单索引未命中 {fallback_count} 条，已使用{fallback_label}归属年月；订单号: {sample_text}")
-        summary["errors"] = _json_safe(errors)
+        summary["错误明细"] = _json_safe(errors)
     return summary
 
 
@@ -729,15 +729,15 @@ async def _process_merchant_red_sheet_async(
             task.failed_rows = 0
             task.error_message = None
             task.result_summary = {
-                "type": "红单",
-                "red_sheet_id": result.red_sheet_id,
-                "total_rows": total_rows,
-                "success_rows": total_rows,
-                "failed_rows": 0,
-                "purchase_rows": result.purchase_rows,
-                "payment_rows": result.payment_rows,
-                "warnings": _json_safe(result.warnings[:50]),
-                "errors": _json_safe(result.errors[:10]),
+                "文件类型": "红单",
+                "红单文件ID": result.red_sheet_id,
+                "总行数": total_rows,
+                "成功行数": total_rows,
+                "失败行数": 0,
+                "采购明细行数": result.purchase_rows,
+                "货款明细行数": result.payment_rows,
+                "处理提示": _json_safe(result.warnings[:50]),
+                "错误明细": _json_safe(result.errors[:10]),
             }
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "success"
@@ -837,14 +837,14 @@ async def _process_merchant_bank_flow_async(
             task.failed_rows = 0
             task.error_message = None
             task.result_summary = {
-                "type": "银行流水",
-                "bank_flow_file_id": result.bank_flow_file_id,
-                "total_rows": result.row_count,
-                "success_rows": result.row_count,
-                "failed_rows": 0,
-                "matched_row_count": result.matched_row_count,
-                "warnings": _json_safe(result.warnings[:50]),
-                "errors": _json_safe(result.errors[:10]),
+                "文件类型": "银行流水",
+                "银行流水文件ID": result.bank_flow_file_id,
+                "总行数": result.row_count,
+                "成功行数": result.row_count,
+                "失败行数": 0,
+                "匹配行数": result.matched_row_count,
+                "处理提示": _json_safe(result.warnings[:50]),
+                "错误明细": _json_safe(result.errors[:10]),
             }
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "success"
@@ -1050,12 +1050,12 @@ async def _process_file_platform_async(
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.result_summary = {
-                            "type": "订单",
-                            "order_index_rows": upserted_rows,
-                            "total_rows": proc_result["total_rows"],
-                            "success_rows": proc_result["success_rows"],
-                            "failed_rows": proc_result["failed_rows"],
-                            "errors": _json_safe(proc_result["errors"][:10]),
+                            "文件类型": "订单",
+                            "订单索引写入行数": upserted_rows,
+                            "总行数": proc_result["total_rows"],
+                            "成功行数": proc_result["success_rows"],
+                            "失败行数": proc_result["failed_rows"],
+                            "错误明细": _json_safe(proc_result["errors"][:10]),
                         }
                         _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
@@ -1083,14 +1083,14 @@ async def _process_file_platform_async(
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.result_summary = {
-                            "type": "动账",
-                            "summary_ids": [],
-                            "total_rows": proc_result["total_rows"],
-                            "success_rows": proc_result["success_rows"],
-                            "failed_rows": proc_result["failed_rows"],
-                            "missing_order_count": 0,
-                            "groups": 0,
-                            "errors": _json_safe(proc_result["errors"][:10]),
+                            "文件类型": "动账",
+                            "汇总记录ID": [],
+                            "总行数": proc_result["total_rows"],
+                            "成功行数": proc_result["success_rows"],
+                            "失败行数": proc_result["failed_rows"],
+                            "缺少订单创建时间行数": 0,
+                            "汇总分组数": 0,
+                            "错误明细": _json_safe(proc_result["errors"][:10]),
                         }
                         _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
@@ -1170,14 +1170,14 @@ async def _process_file_platform_async(
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.result_summary = {
-                            "type": file_type,
-                            "summary_ids": [],
-                            "total_rows": proc_result["total_rows"],
-                            "success_rows": proc_result["success_rows"],
-                            "failed_rows": proc_result["failed_rows"],
-                            "missing_order_count": 0,
-                            "groups": 0,
-                            "errors": _json_safe(proc_result["errors"][:10]),
+                            "文件类型": file_type,
+                            "汇总记录ID": [],
+                            "总行数": proc_result["total_rows"],
+                            "成功行数": proc_result["success_rows"],
+                            "失败行数": proc_result["failed_rows"],
+                            "缺少订单创建时间行数": 0,
+                            "汇总分组数": 0,
+                            "错误明细": _json_safe(proc_result["errors"][:10]),
                         }
                         _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
@@ -1248,14 +1248,14 @@ async def _process_file_platform_async(
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.result_summary = {
-                            "type": "运费险",
-                            "summary_ids": [],
-                            "total_rows": proc_result["total_rows"],
-                            "success_rows": proc_result["success_rows"],
-                            "failed_rows": proc_result["failed_rows"],
-                            "missing_order_count": 0,
-                            "groups": 0,
-                            "errors": _json_safe(proc_result["errors"][:10]),
+                            "文件类型": "运费险",
+                            "汇总记录ID": [],
+                            "总行数": proc_result["total_rows"],
+                            "成功行数": proc_result["success_rows"],
+                            "失败行数": proc_result["failed_rows"],
+                            "缺少订单创建时间行数": 0,
+                            "汇总分组数": 0,
+                            "错误明细": _json_safe(proc_result["errors"][:10]),
                         }
                         _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
@@ -1329,14 +1329,14 @@ async def _process_file_platform_async(
                         task.status = _result_task_status_from_processor_result(proc_result)
                         task.progress = 100
                         task.result_summary = {
-                            "type": "动账",
-                            "summary_ids": [],
-                            "total_rows": proc_result["total_rows"],
-                            "success_rows": proc_result["success_rows"],
-                            "failed_rows": proc_result["failed_rows"],
-                            "missing_order_count": 0,
-                            "groups": 0,
-                            "errors": _json_safe(proc_result["errors"][:10]),
+                            "文件类型": "动账",
+                            "汇总记录ID": [],
+                            "总行数": proc_result["total_rows"],
+                            "成功行数": proc_result["success_rows"],
+                            "失败行数": proc_result["failed_rows"],
+                            "缺少订单创建时间行数": 0,
+                            "汇总分组数": 0,
+                            "错误明细": _json_safe(proc_result["errors"][:10]),
                         }
                         _set_task_result_from_processor(task, proc_result)
                         task.finished_at = datetime.now(timezone.utc)
@@ -1401,12 +1401,12 @@ async def _process_file_platform_async(
                     task.status = _result_task_status_from_processor_result(proc_result)
                     task.progress = 100
                     task.result_summary = {
-                        "summary_ids": [],
-                        "total_rows": proc_result["total_rows"],
-                        "success_rows": proc_result["success_rows"],
-                        "failed_rows": proc_result["failed_rows"],
-                        "groups": 0,
-                        "errors": [],
+                        "汇总记录ID": [],
+                        "总行数": proc_result["total_rows"],
+                        "成功行数": proc_result["success_rows"],
+                        "失败行数": proc_result["failed_rows"],
+                        "汇总分组数": 0,
+                        "错误明细": [],
                     }
                     _set_task_result_from_processor(task, proc_result)
                     task.finished_at = datetime.now(timezone.utc)
@@ -1478,12 +1478,12 @@ async def _process_file_platform_async(
                 task.status = _result_task_status_from_processor_result(proc_result)
                 task.progress = 100
                 task.result_summary = {
-                    "summary_ids": summary_ids,
-                    "total_rows": proc_result["total_rows"],
-                    "success_rows": proc_result["success_rows"],
-                    "failed_rows": proc_result["failed_rows"],
-                    "groups": len(proc_result["groups"]),
-                    "errors": _json_safe(proc_result["errors"][:10]),
+                    "汇总记录ID": summary_ids,
+                    "总行数": proc_result["total_rows"],
+                    "成功行数": proc_result["success_rows"],
+                    "失败行数": proc_result["failed_rows"],
+                    "汇总分组数": len(proc_result["groups"]),
+                    "错误明细": _json_safe(proc_result["errors"][:10]),
                 }
                 _set_task_result_from_processor(task, proc_result)
                 task.finished_at = datetime.now(timezone.utc)

@@ -672,6 +672,11 @@ async def test_persist_task_result_emits_perf_log(monkeypatch: pytest.MonkeyPatc
     )
 
     assert summary["总行数"] == 0
+    assert summary["原始明细行数"] == 0
+    assert summary["去重后明细行数"] == 0
+    assert summary["覆盖范围数"] == 0
+    assert summary["涉及年月"] == []
+    assert summary["重建汇总行范围数"] == 0
     assert sum("reconciliation_checklist.persist_task_result_perf" in record.message for record in caplog.records) == 1
 
 

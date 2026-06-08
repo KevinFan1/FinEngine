@@ -1109,6 +1109,7 @@ import {
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { TableInstance } from "element-plus";
 import { parseFileName, type ParsedFileName } from "@/utils/format";
+import { decodeCsvBuffer } from "@/utils/csvEncoding";
 import { getFileSpecs, type FileSpec } from "@/api/file_spec";
 import {
     createBatch,
