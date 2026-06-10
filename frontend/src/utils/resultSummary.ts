@@ -6,6 +6,7 @@ export interface ResultSummaryItem {
 
 export interface ResultSummaryOptions {
     excludeKeys?: string[];
+    showPerformanceMetrics?: boolean;
 }
 
 const RESULT_SUMMARY_LABELS: Record<string, string> = {
@@ -80,6 +81,21 @@ const SEMICOLON_LIST_KEYS = new Set([
     "兜底归属年月订单样例",
 ]);
 
+const PERFORMANCE_SUMMARY_KEYS = new Set([
+    "文件下载耗时秒",
+    "解析耗时秒",
+    "明细入库耗时秒",
+    "汇总重建耗时秒",
+    "分区检查耗时秒",
+    "明细构建耗时秒",
+    "明细替换耗时秒",
+    "parse_seconds",
+    "partition_seconds",
+    "build_details_seconds",
+    "replace_details_seconds",
+    "rebuild_summary_seconds",
+]);
+
 function summaryLabel(key: string) {
     return RESULT_SUMMARY_LABELS[key] || key;
 }
@@ -144,8 +160,13 @@ export function resultSummaryItems(
 ): ResultSummaryItem[] {
     if (!value) return [];
     const excluded = new Set(options.excludeKeys || []);
+    const showPerformanceMetrics = options.showPerformanceMetrics ?? true;
     return Object.entries(value)
-        .filter(([key]) => !excluded.has(key))
+        .filter(
+            ([key]) =>
+                !excluded.has(key) &&
+                (showPerformanceMetrics || !PERFORMANCE_SUMMARY_KEYS.has(key)),
+        )
         .map(([key, itemValue]) => ({
             key,
             label: summaryLabel(key),

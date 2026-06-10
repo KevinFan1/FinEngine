@@ -664,6 +664,7 @@ function openDetails(row: ReconciliationChecklistTask) {
 function taskSummaryItems(task: ReconciliationChecklistTask) {
     return resultSummaryItems(task.result_summary, {
         excludeKeys: task.error_message ? ["错误明细", "errors"] : [],
+        showPerformanceMetrics: userStore.isSuperAdmin,
     });
 }
 

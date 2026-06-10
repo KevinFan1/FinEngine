@@ -18,7 +18,7 @@ from typing import Any
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment, Border, Font, Side
-from sqlalchemy import and_, cast, column, delete, func, or_, select, text, tuple_, update, values
+from sqlalchemy import cast, column, delete, func, or_, select, text, tuple_, update, values
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,15 +37,6 @@ from app.models.upload import UploadFile
 from app.models.user import User
 from app.services.audit_service import AuditService
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
-from app.services.partition_maintenance_service import ensure_reconciliation_checklist_partitions_for_year
-from app.services.partition_maintenance_service import ensure_reconciliation_checklist_partitions_for_window
-from app.services.partition_service import (
-    RECONCILIATION_CHECKLIST_PAYABLE_BALANCE_SUMMARY_PARTITION,
-    RECONCILIATION_CHECKLIST_PARTITION,
-    RECONCILIATION_CHECKLIST_SUMMARY_PARTITION,
-    RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION,
-    ensure_month_partition,
-)
 from app.tasks.processors.base import open_tabular_rows, parse_datetime, safe_str
 from app.utils.money import safe_decimal
 from app.utils.query_filters import resolve_org_ids
@@ -69,7 +60,7 @@ CHECKLIST_ERROR_SAMPLE_LIMIT = 20
 CHECKLIST_ERROR_ROW_SAMPLE_LIMIT = 10
 CHECKLIST_BATCH_MAX_QUERY_ARGS = 30000
 CHECKLIST_ORDER_KEY_LOOKUP_CHUNK_SIZE = CHECKLIST_BATCH_MAX_QUERY_ARGS
-CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE = 1000
+CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE = CHECKLIST_BATCH_MAX_QUERY_ARGS // 2
 CHECKLIST_MANUAL_EDIT_MAX_SUB_ORDERS = 100
 CHECKLIST_MANUAL_EDIT_SAMPLE_LIMIT = 10
 CHECKLIST_COMMISSION_RATE_MAX = Decimal("9999.999999")
@@ -424,8 +415,8 @@ def _period_filters(
 
 
 def _apply_export_sheet_style(sheet) -> None:
-    for column, width in {"A": 10, "B": 36, "C": 18, "D": 18, "E": 18}.items():
-        sheet.column_dimensions[column].width = width
+    for column_name, width in {"A": 10, "B": 36, "C": 18, "D": 18, "E": 18}.items():
+        sheet.column_dimensions[column_name].width = width
 
 
 def _export_cell(sheet, value: object, *, bold: bool = False, font_size: int | None = None) -> WriteOnlyCell:
@@ -463,6 +454,46 @@ def _chunk_tuple_lookup_records(records: Sequence[Any]) -> list[Sequence[Any]]:
         records[start : start + CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE]
         for start in range(0, len(records), CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE)
     ]
+
+
+SOURCE_DETAIL_COMPARE_FIELDS = (
+    "org_id",
+    "accounting_year",
+    "accounting_month",
+    "accounting_period",
+    "live_platform",
+    "settlement_time",
+    "sub_order_no",
+    "order_time",
+    "product_id",
+    "product_name",
+    "product_quantity",
+    "talent_name",
+    "platform_subsidy",
+    "talent_subsidy",
+    "douyin_pay_subsidy",
+    "douyin_monthly_pay_subsidy",
+    "bank_subsidy",
+    "user_paid_amount",
+    "platform_service_fee",
+    "talent_commission",
+    "investment_service_fee",
+    "merchant_subject_name",
+    "customer_service_code",
+    "receipt_merchant",
+    "live_commission",
+    "commission_rate",
+    "merchant_net_amount",
+    "payment_amount",
+    "merchant_net_balance",
+    "merchant_payment_time",
+    "invoice_time",
+    "invoice_number",
+)
+
+
+def _source_detail_key(row: dict[str, object]) -> tuple[int, str]:
+    return int(row["accounting_period"]), safe_str(row.get("row_fingerprint"))
 
 
 class ReconciliationChecklistService:
@@ -1095,15 +1126,21 @@ class ReconciliationChecklistService:
         try:
             suffix = Path(upload_file.original_name).suffix or ".xlsx"
             with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+                download_started = perf_counter()
                 oss_service.download_to_temp(upload_file.oss_key, tmp.name)
+                download_seconds = perf_counter() - download_started
                 await db.commit()
                 try:
                     if hasattr(db, "allow_db_get"):
                         setattr(db, "allow_db_get", False)
+                    parse_started = perf_counter()
                     parse_result = ReconciliationChecklistService.parse_file(tmp.name)
+                    parse_seconds = perf_counter() - parse_started
                 finally:
                     if hasattr(db, "allow_db_get"):
                         setattr(db, "allow_db_get", True)
+                parse_result["parse_seconds"] = parse_seconds
+                parse_result["download_seconds"] = download_seconds
                 task_type = safe_str(getattr(task, "task_type", "")) or CHECKLIST_TASK_TYPE_SOURCE_IMPORT
                 if task_type in CHECKLIST_MANUAL_EDIT_TASK_TYPES:
                     expected_file_type = CHECKLIST_MANUAL_EDIT_TASK_TYPES[task_type]
@@ -1111,21 +1148,6 @@ class ReconciliationChecklistService:
                         parse_result["fatal_error"] = True
                         parse_result["failed_rows"] = max(1, int(parse_result.get("failed_rows") or 0))
                         parse_result["errors"].append("上传文件类型与任务类型不一致")
-                periods = sorted(
-                    {
-                        int(row["accounting_period"])
-                        for row in parse_result.get("rows", [])
-                        if row.get("accounting_period")
-                    }
-                )
-                if periods:
-                    await ensure_reconciliation_checklist_partitions_for_window(
-                        db,
-                        start_period=periods[0],
-                        end_period=periods[-1],
-                    )
-                else:
-                    await ensure_reconciliation_checklist_partitions_for_year(db, year=datetime.now().year)
                 summary = await ReconciliationChecklistService.persist_parsed_result(
                     db,
                     task=task,
@@ -1171,16 +1193,22 @@ class ReconciliationChecklistService:
             upload_file.error_message = task.error_message
 
         logger.info(
-            "reconciliation_checklist.task_perf task_id=%s file_id=%s status=%s total_rows=%s inserted_rows=%s updated_rows=%s total_seconds=%.3f",
+            "reconciliation_checklist.task_perf task_id=%s file_id=%s status=%s total_rows=%s inserted_rows=%s updated_rows=%s unchanged_rows=%s download_seconds=%.3f parse_seconds=%.3f persist_seconds=%.3f summary_seconds=%.3f total_seconds=%.3f",
             task.id,
             task.file_id,
             task.status,
             task.total_rows,
             task.inserted_rows,
             task.updated_rows,
+            int((task.result_summary or {}).get("未变更行数") or 0),
+            float((task.result_summary or {}).get("文件下载耗时秒") or 0),
+            float((task.result_summary or {}).get("解析耗时秒") or 0),
+            float((task.result_summary or {}).get("明细入库耗时秒") or 0),
+            float((task.result_summary or {}).get("汇总重建耗时秒") or 0),
             perf_counter() - task_started,
         )
         await db.flush()
+        await db.commit()
         await db.refresh(task)
         return task
 
@@ -1210,6 +1238,9 @@ class ReconciliationChecklistService:
     ) -> dict:
         inserted_rows = 0
         updated_rows = 0
+        unchanged_rows = 0
+        persist_seconds = 0.0
+        summary_seconds = 0.0
         affected_periods: set[int] = set()
         if not parse_result.get("fatal_error") and parse_result.get("rows"):
             affected_periods.update(
@@ -1220,22 +1251,29 @@ class ReconciliationChecklistService:
                 }
             )
             if parse_result["file_type"] == CHECKLIST_FILE_TYPE_SOURCE:
-                inserted_rows, updated_rows, moved_periods = await ReconciliationChecklistService._persist_source_rows(db, task=task, upload_file=upload_file, rows=parse_result["rows"])
+                persist_started = perf_counter()
+                inserted_rows, updated_rows, unchanged_rows, moved_periods = await ReconciliationChecklistService._persist_source_rows(db, task=task, upload_file=upload_file, rows=parse_result["rows"])
+                persist_seconds += perf_counter() - persist_started
                 affected_periods.update(moved_periods)
             elif parse_result["file_type"] == CHECKLIST_FILE_TYPE_INVOICE:
+                persist_started = perf_counter()
                 updated_rows, failed_rows, errors, periods = await ReconciliationChecklistService._apply_invoice_rows(db, task=task, upload_file=upload_file, rows=parse_result["rows"])
+                persist_seconds += perf_counter() - persist_started
                 parse_result["failed_rows"] = int(parse_result["failed_rows"]) + failed_rows
                 parse_result["success_rows"] = max(0, int(parse_result["success_rows"]) - failed_rows)
                 parse_result["errors"].extend(errors)
                 affected_periods.update(periods)
             elif parse_result["file_type"] == CHECKLIST_FILE_TYPE_MERCHANT:
+                persist_started = perf_counter()
                 updated_rows, failed_rows, errors, periods = await ReconciliationChecklistService._apply_merchant_rows(db, task=task, upload_file=upload_file, rows=parse_result["rows"])
+                persist_seconds += perf_counter() - persist_started
                 parse_result["failed_rows"] = int(parse_result["failed_rows"]) + failed_rows
                 parse_result["success_rows"] = max(0, int(parse_result["success_rows"]) - failed_rows)
                 parse_result["errors"].extend(errors)
                 affected_periods.update(periods)
-            await ReconciliationChecklistService._ensure_period_partitions(db, periods=affected_periods)
+            summary_started = perf_counter()
             await ReconciliationChecklistService._rebuild_summaries(db, org_id=task.org_id, periods=affected_periods)
+            summary_seconds += perf_counter() - summary_started
             await db.flush()
 
         summary = {
@@ -1246,7 +1284,12 @@ class ReconciliationChecklistService:
             "失败行数": parse_result.get("failed_rows", 0),
             "新增行数": inserted_rows,
             "更新行数": updated_rows,
+            "未变更行数": unchanged_rows,
             "涉及年月": sorted(affected_periods),
+            "文件下载耗时秒": round(float(parse_result.get("download_seconds") or 0), 3),
+            "解析耗时秒": round(float(parse_result.get("parse_seconds") or 0), 3),
+            "明细入库耗时秒": round(persist_seconds, 3),
+            "汇总重建耗时秒": round(summary_seconds, 3),
         }
         errors = ReconciliationChecklistService._summarize_errors(parse_result.get("errors", []))
         if errors:
@@ -1295,14 +1338,6 @@ class ReconciliationChecklistService:
             if len(summarized) >= CHECKLIST_ERROR_SAMPLE_LIMIT:
                 break
         return summarized
-
-    @staticmethod
-    async def _ensure_period_partitions(db: AsyncSession, *, periods: Iterable[int]) -> None:
-        for period in sorted({int(period) for period in periods if int(period) > 0}):
-            await ensure_month_partition(db, spec=RECONCILIATION_CHECKLIST_PARTITION, period=period)
-            await ensure_month_partition(db, spec=RECONCILIATION_CHECKLIST_SUMMARY_PARTITION, period=period)
-            await ensure_month_partition(db, spec=RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION, period=period)
-            await ensure_month_partition(db, spec=RECONCILIATION_CHECKLIST_PAYABLE_BALANCE_SUMMARY_PARTITION, period=period)
 
     @staticmethod
     def parse_file(file_path: str) -> dict:
@@ -1653,10 +1688,10 @@ class ReconciliationChecklistService:
         task: ReconciliationChecklistTask,
         upload_file: ReconciliationChecklistUploadFile,
         rows: Iterable[dict[str, object]],
-    ) -> tuple[int, int, set[int]]:
+    ) -> tuple[int, int, int, set[int]]:
         deduped = ReconciliationChecklistService._dedupe_rows(rows)
         if not deduped:
-            return 0, 0, set()
+            return 0, 0, 0, set()
         moved_periods: set[int] = set()
         detail_rows = [ReconciliationChecklistService._detail_values(task=task, upload_file=upload_file, row=row) for row in deduped]
         unique_pairs = [
@@ -1664,33 +1699,54 @@ class ReconciliationChecklistService:
             for row in detail_rows
             if int(row.get("accounting_period") or 0) > 0 and safe_str(row.get("row_fingerprint"))
         ]
-        existing_pairs: set[tuple[int, str]] = set()
+        existing_details: dict[tuple[int, str], dict[str, object]] = {}
         for chunk in _chunk_tuple_lookup_records(unique_pairs):
+            lookup = values(
+                column("accounting_period", ReconciliationChecklistDetail.accounting_period.type),
+                column("row_fingerprint", ReconciliationChecklistDetail.row_fingerprint.type),
+                name="reconciliation_detail_lookup",
+            ).data(list(chunk)).alias("reconciliation_detail_lookup")
+            lookup_columns = [
+                ReconciliationChecklistDetail.row_fingerprint,
+                *(getattr(ReconciliationChecklistDetail, field_name) for field_name in SOURCE_DETAIL_COMPARE_FIELDS),
+            ]
             result = await db.execute(
-                select(
-                    ReconciliationChecklistDetail.accounting_period,
-                    ReconciliationChecklistDetail.row_fingerprint,
-                ).where(
+                select(*lookup_columns)
+                .select_from(ReconciliationChecklistDetail)
+                .join(
+                    lookup,
+                    (ReconciliationChecklistDetail.accounting_period == lookup.c.accounting_period)
+                    & (ReconciliationChecklistDetail.row_fingerprint == lookup.c.row_fingerprint),
+                )
+                .where(
                     ReconciliationChecklistDetail.org_id == task.org_id,
                     ReconciliationChecklistDetail.is_deleted.is_(False),
-                    tuple_(
-                        ReconciliationChecklistDetail.accounting_period,
-                        ReconciliationChecklistDetail.row_fingerprint,
-                    ).in_(chunk),
                 )
             )
-            existing_pairs.update(
-                (int(accounting_period), safe_str(row_fingerprint))
-                for accounting_period, row_fingerprint in result.all()
+            existing_details.update(
+                {
+                    (int(detail["accounting_period"]), safe_str(detail.get("row_fingerprint"))): detail
+                    for detail in result.mappings().all()
+                }
             )
 
-        insert_count = sum(
-            1
-            for row in detail_rows
-            if (int(row["accounting_period"]), safe_str(row.get("row_fingerprint"))) not in existing_pairs
-        )
-        update_count = len(detail_rows) - insert_count
-        for chunk in _chunk_records(detail_rows):
+        upsert_rows: list[dict[str, object]] = []
+        insert_count = 0
+        update_count = 0
+        unchanged_count = 0
+        for row in detail_rows:
+            existing_detail = existing_details.get(_source_detail_key(row))
+            if existing_detail is None:
+                insert_count += 1
+                upsert_rows.append(row)
+                continue
+            if ReconciliationChecklistService._source_detail_has_business_changes(existing_detail, row):
+                update_count += 1
+                upsert_rows.append(row)
+            else:
+                unchanged_count += 1
+
+        for chunk in _chunk_records(upsert_rows):
             stmt = insert(ReconciliationChecklistDetail).values(list(chunk))
             update_values = {key: stmt.excluded[key] for key in chunk[0] if key not in {"id", "created_at"}}
             update_values["updated_at"] = func.now()
@@ -1701,7 +1757,14 @@ class ReconciliationChecklistService:
             )
             await db.execute(stmt)
 
-        return insert_count, update_count, moved_periods
+        return insert_count, update_count, unchanged_count, moved_periods
+
+    @staticmethod
+    def _source_detail_has_business_changes(existing_detail: dict[str, object], row: dict[str, object]) -> bool:
+        return any(
+            existing_detail.get(field_name) != row.get(field_name)
+            for field_name in SOURCE_DETAIL_COMPARE_FIELDS
+        )
 
     @staticmethod
     def _detail_values(*, task: ReconciliationChecklistTask, upload_file: ReconciliationChecklistUploadFile, row: dict[str, object]) -> dict[str, object]:
@@ -2026,7 +2089,7 @@ class ReconciliationChecklistService:
             updates = values(*update_columns, name="reconciliation_invoice_manual_updates").data(update_rows).alias(
                 "reconciliation_invoice_manual_updates"
             )
-            result = await db.execute(
+            await db.execute(
                 update(ReconciliationChecklistDetail)
                 .where(
                     ReconciliationChecklistDetail.org_id == org_id,
@@ -2229,7 +2292,7 @@ class ReconciliationChecklistService:
             updates = values(*update_columns, name="reconciliation_merchant_manual_updates").data(update_rows).alias(
                 "reconciliation_merchant_manual_updates"
             )
-            result = await db.execute(
+            await db.execute(
                 update(ReconciliationChecklistDetail)
                 .where(
                     ReconciliationChecklistDetail.org_id == org_id,
@@ -2254,7 +2317,6 @@ class ReconciliationChecklistService:
         period_list = sorted({int(period) for period in periods if int(period) > 0})
         if not period_list:
             return
-        await ReconciliationChecklistService._ensure_period_partitions(db, periods=period_list)
         await db.execute(delete(ReconciliationChecklistProductSummaryRow).where(ReconciliationChecklistProductSummaryRow.org_id == org_id, ReconciliationChecklistProductSummaryRow.accounting_period.in_(period_list)))
         await db.execute(delete(ReconciliationChecklistReceiptSummaryRow).where(ReconciliationChecklistReceiptSummaryRow.org_id == org_id, ReconciliationChecklistReceiptSummaryRow.accounting_period.in_(period_list)))
         await db.execute(delete(ReconciliationChecklistPayableBalanceSummaryRow).where(ReconciliationChecklistPayableBalanceSummaryRow.org_id == org_id, ReconciliationChecklistPayableBalanceSummaryRow.accounting_period.in_(period_list)))
@@ -2964,8 +3026,8 @@ class ReconciliationChecklistService:
         _apply_export_sheet_style(sheet)
         headers = ["商户主体名称", "结算时间（年月）", "收款商家", "用户实付 （订单金额）", "应付商家净额", "付款金额", "应付商家净额余额"]
         sheet.append(_export_row(sheet, headers, bold=True))
-        for column, width in {"A": 28, "B": 18, "C": 28, "D": 18, "E": 18, "F": 18, "G": 20}.items():
-            sheet.column_dimensions[column].width = width
+        for column_name, width in {"A": 28, "B": 18, "C": 28, "D": 18, "E": 18, "F": 18, "G": 20}.items():
+            sheet.column_dimensions[column_name].width = width
         row_count = 0
         total_user_paid = Decimal("0.00")
         total_net = Decimal("0.00")

@@ -32,7 +32,6 @@ from app.services.reconciliation_checklist_service import (
     CHECKLIST_TASK_TYPE_MERCHANT_EDIT,
     SOURCE_HEADERS,
     ReconciliationChecklistService,
-    _accounting_period,
     _canonical_header,
     _detect_checklist_type,
     _row_fingerprint,
@@ -124,11 +123,13 @@ class _PartitionSession:
 
 class _OrderLookupSession:
     def __init__(self) -> None:
+        self.statements: list[str] = []
         self.param_counts: list[int] = []
         self.tuple_param_counts: list[int] = []
 
     async def execute(self, statement: object):
         compiled = statement.compile(dialect=postgresql.dialect())
+        self.statements.append(str(compiled))
         expanded_count = 0
         tuple_count = 0
         for value in compiled.params.values():
@@ -143,9 +144,11 @@ class _OrderLookupSession:
         self.param_counts.append(expanded_count)
         if tuple_count:
             self.tuple_param_counts.append(tuple_count)
+        empty_result = _BatchWriteResult()
         return SimpleNamespace(
-            scalars=lambda: SimpleNamespace(all=lambda: []),
-            all=lambda: [],
+            scalars=empty_result.scalars,
+            mappings=empty_result.mappings,
+            all=empty_result.all,
         )
 
 
@@ -262,28 +265,52 @@ class _BatchWriteResult:
     def all(self):
         return self._all_rows
 
+    def scalars(self):
+        rows = self._all_rows
+
+        class _Scalars:
+            @staticmethod
+            def all():
+                return rows
+
+        return _Scalars()
+
+    def mappings(self):
+        rows = self._all_rows
+
+        class _Mappings:
+            @staticmethod
+            def all():
+                return [row if isinstance(row, dict) else vars(row) for row in rows]
+
+        return _Mappings()
+
 
 class _BatchWriteSession:
-    def __init__(self) -> None:
+    def __init__(self, *, existing_detail_pairs: list[tuple[object, ...]] | None = None, existing_details: list[object] | None = None) -> None:
         self.statements: list[str] = []
         self.detail_insert_calls = 0
+        self.detail_lookup_calls = 0
         self.order_key_insert_calls = 0
         self.update_calls = 0
         self.delete_calls = 0
+        self.existing_detail_pairs = existing_detail_pairs or []
+        self.existing_details = existing_details or []
 
     async def execute(self, statement: object, params: dict[str, object] | None = None):
         sql = _compile_sql(statement)
         self.statements.append(sql)
         _ = params
 
+        if "FROM fin_reconciliation_checklist_details JOIN (VALUES" in sql:
+            self.detail_lookup_calls += 1
+            if self.existing_details:
+                return _BatchWriteResult(all_rows=list(self.existing_details))
+            return _BatchWriteResult(all_rows=list(self.existing_detail_pairs))
         if "INSERT INTO fin_reconciliation_checklist_details" in sql:
             self.detail_insert_calls += 1
             return _BatchWriteResult(
                 scalar_one_value=1000 + self.detail_insert_calls,
-                all_rows=[
-                    (101, "SO-1", 202606),
-                    (102, "SO-2", 202607),
-                ],
                 rowcount=2,
             )
         if "INSERT INTO fin_reconciliation_checklist_order_keys" in sql:
@@ -428,6 +455,26 @@ def _compile_sql(statement: object) -> str:
 def _parsed_source_detail_row(*, sub_order_no: str, settlement_time: datetime, source_row_number: int = 2, **overrides: object) -> dict[str, object]:
     values = dict(zip(SOURCE_HEADERS, _source_row(子订单号=sub_order_no, 结算时间=settlement_time, **overrides)))
     return ReconciliationChecklistService._parse_source_row(values, source_row_number)
+
+
+def _existing_detail_lookup_row(row: dict[str, object], *, org_id: int = 3) -> SimpleNamespace:
+    detail = SimpleNamespace(**row)
+    detail.org_id = org_id
+    detail.row_fingerprint = _row_fingerprint(
+        org_id=org_id,
+        settlement_time=row["settlement_time"],
+        sub_order_no=row["sub_order_no"],
+        platform_subsidy=row["platform_subsidy"],
+        talent_subsidy=row["talent_subsidy"],
+        douyin_pay_subsidy=row["douyin_pay_subsidy"],
+        douyin_monthly_pay_subsidy=row["douyin_monthly_pay_subsidy"],
+        bank_subsidy=row["bank_subsidy"],
+        user_paid_amount=row["user_paid_amount"],
+        platform_service_fee=row["platform_service_fee"],
+        talent_commission=row["talent_commission"],
+        investment_service_fee=row["investment_service_fee"],
+    )
+    return detail
 
 
 def test_models_define_order_key_and_hash_partitioned_summary_tables() -> None:
@@ -842,26 +889,61 @@ async def test_persist_parsed_result_uses_grouped_error_summary() -> None:
 
 @pytest.mark.asyncio
 async def test_persist_source_rows_batches_detail_and_order_key_upserts(monkeypatch: pytest.MonkeyPatch) -> None:
-    session = _BatchWriteSession()
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
     rows = [
         _parsed_source_detail_row(sub_order_no="SO-1", settlement_time=datetime(2026, 6, 1, 8, 0, 0), source_row_number=2),
         _parsed_source_detail_row(sub_order_no="SO-2", settlement_time=datetime(2026, 7, 1, 8, 0, 0), source_row_number=3),
     ]
+    existing_row = dict(rows[1])
+    existing_row["receipt_merchant"] = "旧收款商家"
+    session = _BatchWriteSession(existing_details=[_existing_detail_lookup_row(existing_row)])
 
-    inserted, updated, moved_periods = await ReconciliationChecklistService._persist_source_rows(
+    inserted, updated, unchanged, moved_periods = await ReconciliationChecklistService._persist_source_rows(
         session,  # type: ignore[arg-type]
         task=task,
         upload_file=upload_file,
         rows=rows,
     )
 
-    assert inserted == 2
-    assert updated == 0
+    assert inserted == 1
+    assert updated == 1
+    assert unchanged == 0
     assert moved_periods == set()
     assert session.detail_insert_calls == 1
+    assert session.detail_lookup_calls == 1
     assert session.order_key_insert_calls == 0
+    assert "RETURNING xmax" not in "\n".join(session.statements)
+
+
+@pytest.mark.asyncio
+async def test_persist_source_rows_skips_upsert_when_existing_rows_are_unchanged() -> None:
+    task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
+    upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
+    rows = [
+        _parsed_source_detail_row(sub_order_no="SO-1", settlement_time=datetime(2026, 6, 1, 8, 0, 0), source_row_number=2),
+        _parsed_source_detail_row(sub_order_no="SO-2", settlement_time=datetime(2026, 7, 1, 8, 0, 0), source_row_number=3),
+    ]
+    session = _BatchWriteSession(existing_details=[_existing_detail_lookup_row(row) for row in rows])
+
+    inserted, updated, unchanged, moved_periods = await ReconciliationChecklistService._persist_source_rows(
+        session,  # type: ignore[arg-type]
+        task=task,
+        upload_file=upload_file,
+        rows=rows,
+    )
+
+    assert inserted == 0
+    assert updated == 0
+    assert unchanged == 2
+    assert moved_periods == set()
+    assert session.detail_lookup_calls == 1
+    assert session.detail_insert_calls == 0
+    lookup_sql = next(statement for statement in session.statements if "FROM fin_reconciliation_checklist_details JOIN (VALUES" in statement)
+    assert "fin_reconciliation_checklist_details.raw_row" not in lookup_sql
+    assert "fin_reconciliation_checklist_details.source_row_number" not in lookup_sql
+    assert "fin_reconciliation_checklist_details.task_id" not in lookup_sql
+    assert "fin_reconciliation_checklist_details.receipt_merchant" in lookup_sql
 
 
 @pytest.mark.asyncio
@@ -1024,9 +1106,6 @@ async def test_execute_task_marks_empty_file_success(monkeypatch: pytest.MonkeyP
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="empty.xlsx", oss_key="oss-key", status="uploaded")
     session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
 
-    async def fake_ensure_year(*_args, **_kwargs) -> dict[str, int]:
-        return {"start_period": 202601, "end_period": 202612, "year": 2026}
-
     def fake_parse_file(*_args, **_kwargs) -> dict:
         return {
             "file_type": CHECKLIST_FILE_TYPE_SOURCE,
@@ -1052,7 +1131,6 @@ async def test_execute_task_marks_empty_file_success(monkeypatch: pytest.MonkeyP
         }
 
     monkeypatch.setattr("app.services.reconciliation_checklist_service.oss_service.download_to_temp", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_year", fake_ensure_year)
     monkeypatch.setattr(ReconciliationChecklistService, "parse_file", staticmethod(fake_parse_file))
     monkeypatch.setattr(ReconciliationChecklistService, "persist_parsed_result", staticmethod(fake_persist_parsed_result))
 
@@ -1062,6 +1140,7 @@ async def test_execute_task_marks_empty_file_success(monkeypatch: pytest.MonkeyP
     assert result.error_message is None
     assert result.result_summary["处理结果"] == CHECKLIST_EMPTY_SUMMARY_MESSAGE
     assert upload_file.status == "processed"
+    assert session.commit_count == 3
 
 
 @pytest.mark.asyncio
@@ -1069,9 +1148,6 @@ async def test_execute_task_masks_internal_exception_and_logs_details(monkeypatc
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="queued", progress=0)
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="large.xlsx", oss_key="oss-key", status="uploaded")
     session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
-
-    async def fake_ensure_year(*_args, **_kwargs) -> dict[str, int]:
-        return {"start_period": 202601, "end_period": 202612, "year": 2026}
 
     def fake_parse_file(*_args, **_kwargs) -> dict:
         return {
@@ -1090,7 +1166,6 @@ async def test_execute_task_masks_internal_exception_and_logs_details(monkeypatc
         raise RuntimeError("the number of query arguments cannot exceed 32767")
 
     monkeypatch.setattr("app.services.reconciliation_checklist_service.oss_service.download_to_temp", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_window", fake_ensure_year)
     monkeypatch.setattr(ReconciliationChecklistService, "parse_file", staticmethod(fake_parse_file))
     monkeypatch.setattr(ReconciliationChecklistService, "persist_parsed_result", staticmethod(fake_persist_parsed_result))
 
@@ -1112,9 +1187,6 @@ async def test_execute_task_parses_file_before_reentering_database_work(monkeypa
     session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
     parse_called = False
 
-    async def fake_ensure_year(*_args, **_kwargs) -> dict[str, int]:
-        return {"start_period": 202601, "end_period": 202612, "year": 2026}
-
     def fake_parse_file(_file_path: str) -> dict:
         nonlocal parse_called
         parse_called = True
@@ -1131,9 +1203,10 @@ async def test_execute_task_parses_file_before_reentering_database_work(monkeypa
             "result_message": CHECKLIST_EMPTY_SUMMARY_MESSAGE,
         }
 
-    async def fake_persist_parsed_result(*_args, **_kwargs) -> dict:
+    async def fake_persist_parsed_result(*_args, **kwargs) -> dict:
         assert parse_called is True
         assert session.allow_db_get is True
+        assert kwargs["parse_result"]["download_seconds"] >= 0
         return {
             "文件类型": CHECKLIST_FILE_TYPE_SOURCE,
             "处理结果": CHECKLIST_EMPTY_SUMMARY_MESSAGE,
@@ -1142,10 +1215,10 @@ async def test_execute_task_parses_file_before_reentering_database_work(monkeypa
             "失败行数": 0,
             "新增行数": 0,
             "更新行数": 0,
+            "文件下载耗时秒": kwargs["parse_result"]["download_seconds"],
         }
 
     monkeypatch.setattr("app.services.reconciliation_checklist_service.oss_service.download_to_temp", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_year", fake_ensure_year)
     monkeypatch.setattr(ReconciliationChecklistService, "parse_file", staticmethod(fake_parse_file))
     monkeypatch.setattr(ReconciliationChecklistService, "persist_parsed_result", staticmethod(fake_persist_parsed_result))
 
@@ -1156,18 +1229,13 @@ async def test_execute_task_parses_file_before_reentering_database_work(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_execute_task_precreates_partitions_for_parsed_cross_year_periods(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_execute_task_skips_partition_precreate_for_parsed_cross_year_periods(monkeypatch: pytest.MonkeyPatch) -> None:
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="queued", progress=0)
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
     session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
-    ensured_windows: list[tuple[int, int]] = []
 
-    async def fake_ensure_year(*_args, **_kwargs) -> dict[str, int]:
-        raise AssertionError("should not precreate only current year when parsed rows contain explicit periods")
-
-    async def fake_ensure_window(*_args, start_period: int, end_period: int, **_kwargs) -> dict[str, int]:
-        ensured_windows.append((start_period, end_period))
-        return {"start_period": start_period, "end_period": end_period}
+    async def fail_partition_precreate(*_args, **_kwargs) -> None:
+        raise AssertionError("import task must not check or create partitions")
 
     def fake_parse_file(_file_path: str) -> dict:
         return {
@@ -1198,15 +1266,14 @@ async def test_execute_task_precreates_partitions_for_parsed_cross_year_periods(
         }
 
     monkeypatch.setattr("app.services.reconciliation_checklist_service.oss_service.download_to_temp", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_year", fake_ensure_year)
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_window", fake_ensure_window)
+    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_year", fail_partition_precreate, raising=False)
+    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_reconciliation_checklist_partitions_for_window", fail_partition_precreate, raising=False)
     monkeypatch.setattr(ReconciliationChecklistService, "parse_file", staticmethod(fake_parse_file))
     monkeypatch.setattr(ReconciliationChecklistService, "persist_parsed_result", staticmethod(fake_persist_parsed_result))
 
     result = await ReconciliationChecklistService.execute_task(session, task_id=1)  # type: ignore[arg-type]
 
     assert result.status == "success"
-    assert ensured_windows == [(202512, 202602)]
 
 
 @pytest.mark.asyncio
@@ -1222,7 +1289,7 @@ async def test_order_key_lookup_chunks_large_sub_order_lists() -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_source_rows_uses_small_tuple_lookup_batches() -> None:
+async def test_persist_source_rows_uses_large_tuple_lookup_batches() -> None:
     session = _OrderLookupSession()
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
@@ -1242,8 +1309,47 @@ async def test_persist_source_rows_uses_small_tuple_lookup_batches() -> None:
         rows=rows,
     )
 
-    assert len(session.param_counts) >= 3
-    assert max(session.tuple_param_counts) <= 2001
+    assert session.tuple_param_counts == []
+    assert any("JOIN (VALUES" in statement for statement in session.statements)
+
+
+@pytest.mark.asyncio
+async def test_persist_parsed_result_reports_unchanged_source_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _PersistTaskSession()
+    task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
+    upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
+
+    async def fake_persist_source_rows(*_args, **_kwargs):
+        return 1, 2, 2, set()
+
+    async def fake_rebuild_summaries(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ReconciliationChecklistService, "_persist_source_rows", staticmethod(fake_persist_source_rows))
+    monkeypatch.setattr(ReconciliationChecklistService, "_rebuild_summaries", staticmethod(fake_rebuild_summaries))
+
+    summary = await ReconciliationChecklistService.persist_parsed_result(
+        session,  # type: ignore[arg-type]
+        task=task,
+        upload_file=upload_file,
+        parse_result={
+            "file_type": CHECKLIST_FILE_TYPE_SOURCE,
+            "total_rows": 5,
+            "success_rows": 5,
+            "failed_rows": 0,
+            "download_seconds": 4.321,
+            "errors": [],
+            "warnings": [],
+            "fatal_error": False,
+            "rows": [{"accounting_period": 202606} for _ in range(5)],
+            "result_message": "处理完成",
+        },
+    )
+
+    assert summary["新增行数"] == 1
+    assert summary["更新行数"] == 2
+    assert summary["未变更行数"] == 2
+    assert summary["文件下载耗时秒"] == 4.321
 
 
 @pytest.mark.asyncio
@@ -1259,7 +1365,7 @@ async def test_lookup_existing_receipt_merchants_chunks_large_pair_lists() -> No
 
     assert result == {}
     assert len(session.param_counts) > 1
-    assert max(session.tuple_param_counts) <= 2001
+    assert max(session.tuple_param_counts) <= 30000
 
 
 @pytest.mark.asyncio
@@ -2415,11 +2521,10 @@ async def test_reconciliation_partition_maintenance_repairs_legacy_parent_primar
 
 
 @pytest.mark.asyncio
-async def test_persist_task_result_precreates_summary_partitions_for_update_periods(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_persist_task_result_does_not_check_partitions_for_update_periods(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _PersistTaskSession()
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="invoice.xlsx", oss_key="oss-key", status="uploaded")
-    ensured: list[tuple[str, int]] = []
     rebuilt: list[int] = []
 
     parse_result = {
@@ -2445,8 +2550,8 @@ async def test_persist_task_result_precreates_summary_partitions_for_update_peri
     def fake_parse_file(*_args, **_kwargs):
         return parse_result
 
-    async def fake_ensure_month_partition(_db, *, spec, period: int):
-        ensured.append((spec.table_name, period))
+    async def fail_ensure_month_partition(*_args, **_kwargs):
+        raise AssertionError("import persistence must not check or create partitions")
 
     async def fake_apply_invoice_rows(*_args, **_kwargs):
         return 1, 0, [], {202602}
@@ -2456,7 +2561,7 @@ async def test_persist_task_result_precreates_summary_partitions_for_update_peri
         rebuilt.extend(sorted(periods))
 
     monkeypatch.setattr(ReconciliationChecklistService, "parse_file", staticmethod(fake_parse_file))
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_month_partition", fake_ensure_month_partition)
+    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_month_partition", fail_ensure_month_partition, raising=False)
     monkeypatch.setattr(ReconciliationChecklistService, "_apply_invoice_rows", staticmethod(fake_apply_invoice_rows))
     monkeypatch.setattr(ReconciliationChecklistService, "_rebuild_summaries", staticmethod(fake_rebuild_summaries))
 
@@ -2470,23 +2575,16 @@ async def test_persist_task_result_precreates_summary_partitions_for_update_peri
     assert summary["更新行数"] == 1
     assert summary["涉及年月"] == [202602]
     assert rebuilt == [202602]
-    assert {
-        ("fin_reconciliation_checklist_details", 202602),
-        ("fin_reconciliation_checklist_receipt_summary_rows", 202602),
-        ("fin_reconciliation_checklist_product_summary_rows", 202602),
-        ("fin_reconciliation_checklist_payable_balance_summary_rows", 202602),
-    }.issubset(set(ensured))
 
 
 @pytest.mark.asyncio
-async def test_rebuild_summaries_precreates_target_period_partitions(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_rebuild_summaries_does_not_check_target_period_partitions(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _RebuildSummarySession()
-    ensured: list[tuple[str, int]] = []
 
-    async def fake_ensure_month_partition(_db, *, spec, period: int):
-        ensured.append((spec.table_name, period))
+    async def fail_ensure_month_partition(*_args, **_kwargs):
+        raise AssertionError("summary rebuild must not check or create partitions")
 
-    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_month_partition", fake_ensure_month_partition)
+    monkeypatch.setattr("app.services.reconciliation_checklist_service.ensure_month_partition", fail_ensure_month_partition, raising=False)
 
     await ReconciliationChecklistService._rebuild_summaries(
         session,  # type: ignore[arg-type]
@@ -2494,12 +2592,9 @@ async def test_rebuild_summaries_precreates_target_period_partitions(monkeypatch
         periods={202602},
     )
 
-    assert {
-        ("fin_reconciliation_checklist_details", 202602),
-        ("fin_reconciliation_checklist_receipt_summary_rows", 202602),
-        ("fin_reconciliation_checklist_product_summary_rows", 202602),
-        ("fin_reconciliation_checklist_payable_balance_summary_rows", 202602),
-    }.issubset(set(ensured))
+    sql = "\n".join(session.statements)
+    assert "DELETE FROM fin_reconciliation_checklist_product_summary_rows" in sql
+    assert "INSERT INTO fin_reconciliation_checklist_product_summary_rows" in sql
 
 
 def test_summary_export_specs_are_registered() -> None:

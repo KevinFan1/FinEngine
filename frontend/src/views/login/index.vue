@@ -160,7 +160,6 @@ import type {
     FormInstance,
     FormRules,
 } from "element-plus/es/components/form/index.mjs";
-import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { Key, RefreshRight, User, Lock, Moon, Sunny, Check } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/user";
 import { useThemeStore } from "@/stores/theme";
@@ -172,7 +171,6 @@ const themeStore = useThemeStore();
 const formRef = ref<FormInstance>();
 const loading = ref(false);
 const captchaImage = ref("");
-const captchaExpectedCode = ref("");
 const loginError = ref("");
 
 const loginForm = reactive({
@@ -203,36 +201,24 @@ async function loadCaptcha() {
         loginForm.captcha_id = captcha.captcha_id;
         loginForm.captcha_code = "";
         captchaImage.value = captcha.image;
-        captchaExpectedCode.value = extractCaptchaCode(captcha.image);
     } catch (error) {
         loginForm.captcha_id = "";
         captchaImage.value = "";
-        captchaExpectedCode.value = "";
         const message = getLoginErrorMessage(
             error,
             "验证码加载失败，请刷新页面重试",
         );
         loginError.value = message;
-        if (!isApiMessageShown(error)) {
-            ElMessage.error(message);
-        }
     }
 }
 
 async function handleLogin() {
+    if (loading.value) return;
     loginError.value = "";
     const valid = await formRef.value?.validate().catch(() => false);
     if (!valid) return;
 
     const normalizedCaptcha = loginForm.captcha_code.trim().toUpperCase();
-    if (
-        captchaExpectedCode.value &&
-        normalizedCaptcha !== captchaExpectedCode.value
-    ) {
-        loginError.value = "验证码不正确";
-        return;
-    }
-
     loading.value = true;
     try {
         await userStore.login({
@@ -244,9 +230,6 @@ async function handleLogin() {
     } catch (error) {
         const message = getLoginErrorMessage(error, "登录失败，请稍后重试");
         loginError.value = message;
-        if (!isApiMessageShown(error)) {
-            ElMessage.error(message);
-        }
         await loadCaptcha().catch(() => undefined);
     } finally {
         loading.value = false;
@@ -256,30 +239,6 @@ async function handleLogin() {
 onMounted(() => {
     loadCaptcha().catch(() => undefined);
 });
-
-function extractCaptchaCode(image: string): string {
-    const marker = "base64,";
-    const markerIndex = image.indexOf(marker);
-    if (markerIndex === -1) return "";
-
-    try {
-        const svg = atob(image.slice(markerIndex + marker.length));
-        const textMatches = Array.from(
-            svg.matchAll(/<text\b[^>]*>([^<]+)<\/text>/g),
-        );
-        return textMatches.map((match) => match[1].trim()).join("").toUpperCase();
-    } catch {
-        return "";
-    }
-}
-
-function isApiMessageShown(error: unknown): boolean {
-    return Boolean(
-        error &&
-        typeof error === "object" &&
-        (error as { __apiMessageShown?: boolean }).__apiMessageShown,
-    );
-}
 
 function getLoginErrorMessage(error: unknown, fallback: string): string {
     if (error && typeof error === "object") {

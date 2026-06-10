@@ -148,6 +148,7 @@
                         trigger="click"
                         :width="520"
                         popper-class="download-center-popover"
+                        @show="handleDownloadCenterShow"
                         @update:visible="downloadCenterPopoverVisible = $event"
                     >
                         <template #reference>
@@ -164,10 +165,10 @@
                                 ></span>
                                 <el-icon><Download /></el-icon>
                                 <span
-                                    v-if="activeDownloadJobCount > 0"
+                                    v-if="headerDownloadJobsLoaded && headerActiveJobCount > 0"
                                     class="download-center-count"
                                 >
-                                    {{ activeDownloadJobCount }}
+                                    {{ headerActiveJobCount }}
                                 </span>
                             </button>
                         </template>
@@ -179,18 +180,35 @@
                                     <strong>最近导出任务</strong>
                                     <p>查看最近生成结果，完成后可直接下载</p>
                                 </div>
-                                <span class="download-center-panel__summary">
-                                    {{
-                                        hasActiveDownloadJobs
-                                            ? `${activeDownloadJobCount} 个任务处理中`
-                                            : "全部任务已完成"
-                                    }}
-                                </span>
+                                <div class="download-center-panel__header-actions">
+                                    <span class="download-center-panel__summary">
+                                        {{
+                                            headerActiveJobCount > 0
+                                                ? `${headerActiveJobCount} 个任务处理中`
+                                                : "全部任务已完成"
+                                        }}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        class="download-center-panel__refresh"
+                                        :disabled="headerDownloadJobsLoading"
+                                        aria-label="刷新下载列表"
+                                        @click="refreshHeaderDownloadJobs"
+                                    >
+                                        <el-icon><RefreshRight /></el-icon>
+                                    </button>
+                                </div>
                             </div>
 
                             <div class="download-center-panel__body">
+                                <div
+                                    v-if="headerDownloadJobsLoading && !recentDownloadJobs.length"
+                                    class="download-center-panel__empty"
+                                >
+                                    正在加载导出任务...
+                                </div>
                                 <el-scrollbar
-                                    v-if="recentDownloadJobs.length"
+                                    v-else-if="recentDownloadJobs.length"
                                     class="download-center-panel__scroll"
                                 >
                                     <div class="download-center-panel__list">
@@ -241,7 +259,7 @@
                                     v-else
                                     class="download-center-panel__empty"
                                 >
-                                    暂无导出任务
+                                    {{ headerDownloadJobsError || "暂无导出任务" }}
                                 </div>
                             </div>
 
@@ -570,7 +588,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type Component } from "vue";
+import { computed, nextTick, provide, ref, watch, type Component } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -585,6 +603,7 @@ import {
     OfficeBuilding,
     QuestionFilled,
     Refresh,
+    RefreshRight,
     Setting,
     Shop,
     Upload,
@@ -626,16 +645,22 @@ const userStore = useUserStore();
 const themeStore = useThemeStore();
 const guideDrawerVisible = ref(false);
 const forcePasswordVisible = ref(false);
-const activeDownloadJobCount = ref(0);
 const recentDownloadJobs = ref<ExportJob[]>([]);
+const headerDownloadJobsLoaded = ref(false);
+const headerDownloadJobsLoading = ref(false);
+const headerDownloadJobsError = ref("");
 const downloadingHeaderJobId = ref<number | null>(null);
 const downloadCenterPopoverVisible = ref(false);
-let downloadJobPollTimer: ReturnType<typeof setInterval> | null = null;
 
-const hasActiveDownloadJobs = computed(() => activeDownloadJobCount.value > 0);
+const headerActiveJobCount = computed(() =>
+    recentDownloadJobs.value.filter(
+        (job) => job.status === "queued" || job.status === "running",
+    ).length,
+);
+const hasActiveDownloadJobs = computed(() => headerActiveJobCount.value > 0);
 const downloadCenterTooltip = computed(() =>
-    hasActiveDownloadJobs.value
-        ? `下载中心：有 ${activeDownloadJobCount.value} 个导出任务处理中`
+    headerDownloadJobsLoaded.value && hasActiveDownloadJobs.value
+        ? `下载中心：有 ${headerActiveJobCount.value} 个导出任务处理中`
         : "打开下载中心",
 );
 const routeRefreshNonce = ref(0);
@@ -1106,14 +1131,6 @@ watch(
     { immediate: true },
 );
 
-onMounted(() => {
-    startDownloadJobPolling();
-});
-
-onUnmounted(() => {
-    stopDownloadJobPolling();
-});
-
 function openTab(tab: Tab) {
     hideTabContextMenu();
     if (tab.path === route.path) return;
@@ -1218,31 +1235,33 @@ function handleCommand(command: string) {
     }
 }
 
-async function fetchActiveDownloadJobs() {
+async function fetchHeaderDownloadJobs() {
+    headerDownloadJobsLoading.value = true;
+    headerDownloadJobsError.value = "";
     try {
-        const [queuedResult, runningResult, recentResult] = await Promise.all([
-            listExportJobs({
-                page: 1,
-                page_size: 1,
-                status: "queued",
-            }),
-            listExportJobs({
-                page: 1,
-                page_size: 1,
-                status: "running",
-            }),
-            listExportJobs({
-                page: 1,
-                page_size: 6,
-            }),
-        ]);
-        activeDownloadJobCount.value =
-            Number(queuedResult.total || 0) + Number(runningResult.total || 0);
+        const recentResult = await listExportJobs({
+            page: 1,
+            page_size: 6,
+            mine_only: true,
+        });
         recentDownloadJobs.value = recentResult.items || [];
+        headerDownloadJobsLoaded.value = true;
     } catch {
-        activeDownloadJobCount.value = 0;
         recentDownloadJobs.value = [];
+        headerDownloadJobsError.value = "加载失败，请点击刷新重试";
+    } finally {
+        headerDownloadJobsLoading.value = false;
     }
+}
+
+async function handleDownloadCenterShow() {
+    downloadCenterPopoverVisible.value = true;
+    if (headerDownloadJobsLoaded.value) return;
+    await fetchHeaderDownloadJobs();
+}
+
+async function refreshHeaderDownloadJobs() {
+    await fetchHeaderDownloadJobs();
 }
 
 async function openDownloadCenterEntry() {
@@ -1285,20 +1304,6 @@ async function downloadHeaderJob(job: ExportJob) {
     }
 }
 
-function startDownloadJobPolling() {
-    stopDownloadJobPolling();
-    fetchActiveDownloadJobs();
-    downloadJobPollTimer = setInterval(() => {
-        fetchActiveDownloadJobs();
-    }, 15000);
-}
-
-function stopDownloadJobPolling() {
-    if (downloadJobPollTimer) {
-        clearInterval(downloadJobPollTimer);
-        downloadJobPollTimer = null;
-    }
-}
 </script>
 
 <style scoped lang="scss">
@@ -1789,6 +1794,13 @@ function stopDownloadJobPolling() {
     min-width: 0;
 }
 
+:global(.download-center-popover .download-center-panel__header-actions) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
 :global(.download-center-popover .download-center-panel__eyebrow) {
     display: inline-block;
     margin-bottom: 4px;
@@ -1809,6 +1821,41 @@ function stopDownloadJobPolling() {
     border: 1px solid color-mix(in srgb, var(--primary-light-7) 60%, transparent);
     backdrop-filter: blur(8px);
     white-space: nowrap;
+}
+
+:global(.download-center-popover .download-center-panel__refresh) {
+    width: 32px;
+    height: 32px;
+    border: 1px solid color-mix(in srgb, var(--primary-light-6) 56%, var(--border-light));
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition:
+        background-color 0.14s ease,
+        border-color 0.14s ease,
+        color 0.14s ease,
+        transform 0.14s ease,
+        box-shadow 0.14s ease;
+}
+
+:global(.download-center-popover .download-center-panel__refresh:hover) {
+    background: #ffffff;
+    border-color: color-mix(in srgb, var(--primary) 36%, var(--primary-light-6));
+    box-shadow: 0 6px 14px rgba(22, 119, 255, 0.12);
+    transform: translateY(-1px);
+}
+
+:global(.download-center-popover .download-center-panel__refresh:disabled) {
+    cursor: wait;
+    color: var(--text-disabled);
+    border-color: var(--border-light);
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: none;
+    transform: none;
 }
 
 :global(.download-center-popover .download-center-panel__body) {

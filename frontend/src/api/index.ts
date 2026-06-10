@@ -63,7 +63,7 @@ service.interceptors.request.use(
         try {
             return await encryptRequest(config);
         } catch (error) {
-            showRequestError("请求加密失败，请刷新页面后重试", error);
+            showRequestError("请求加密失败，请刷新页面后重试", error, config.url);
             return Promise.reject(error);
         }
     },
@@ -88,7 +88,7 @@ service.interceptors.response.use(
         try {
             response = await decryptResponse(rawResponse);
         } catch (error) {
-            showRequestError("响应解密失败，请刷新页面后重试", error);
+            showRequestError("响应解密失败，请刷新页面后重试", error, rawResponse.config.url);
             return Promise.reject(error);
         }
         const res = response.data;
@@ -96,10 +96,11 @@ service.interceptors.response.use(
         // Backend returns HTTP 200 for business errors and exposes the real state in code/message.
         if (res.code !== undefined && res.code !== 200) {
             const message = userFacingApiMessage(res.code, res.message || "请求失败");
+            const isPublicRequest = isAuthPublicRequest(response.config.url);
 
-            if (res.code === 401) {
+            if (res.code === 401 && !isPublicRequest) {
                 forceLogout({ message });
-            } else {
+            } else if (!isPublicRequest) {
                 ElMessage.error(message);
             }
 
@@ -118,32 +119,42 @@ service.interceptors.response.use(
         if (error.response) {
             const status = error.response.status;
             const data = error.response.data;
+            const isPublicRequest = isAuthPublicRequest(error.config?.url);
 
             const backendMessage = await responseErrorMessage(data);
             const message = userFacingApiMessage(status, backendMessage || `请求失败 (${status})`);
             markRequestErrorShown(error, message);
 
-            if (status === 401 || (data && typeof data === "object" && "code" in data && data.code === 401)) {
+            if (
+                (status === 401 || (data && typeof data === "object" && "code" in data && data.code === 401)) &&
+                !isPublicRequest
+            ) {
                 forceLogout({ message });
-            } else {
+            } else if (!isPublicRequest) {
                 ElMessage.error(message);
             }
         } else if (error.message?.includes("timeout")) {
             const message = "请求超时，请稍后重试";
-            ElMessage.error(message);
             markRequestErrorShown(error, message);
+            if (!isAuthPublicRequest(error.config?.url)) {
+                ElMessage.error(message);
+            }
         } else {
             const message = "网络异常，请检查网络连接";
-            ElMessage.error(message);
             markRequestErrorShown(error, message);
+            if (!isAuthPublicRequest(error.config?.url)) {
+                ElMessage.error(message);
+            }
         }
 
         return Promise.reject(error);
     },
 );
 
-function showRequestError(message: string, error: unknown) {
-    ElMessage.error(message);
+function showRequestError(message: string, error: unknown, requestUrl?: string) {
+    if (!isAuthPublicRequest(requestUrl)) {
+        ElMessage.error(message);
+    }
     markRequestErrorShown(error, message);
 }
 

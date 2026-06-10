@@ -28,15 +28,25 @@ test("removes the top-right global refresh button", () => {
 });
 
 test("counts queued and running jobs for the header activity badge", () => {
-    assert.match(source, /status:\s*"queued"/);
-    assert.match(source, /status:\s*"running"/);
-    assert.match(source, /个导出任务处理中/);
+    assert.match(source, /headerActiveJobCount/);
+    assert.match(source, /job\.status === "queued" \|\| job\.status === "running"/);
+    assert.match(source, /个任务处理中/);
 });
 
 test("allows direct download from the header panel", () => {
     assert.match(source, /downloadHeaderJob/);
     assert.match(source, /downloadExportJobFile/);
     assert.match(source, /下载中/);
+});
+
+test("header download panel fetches only after opening and offers manual refresh", () => {
+    assert.match(source, /@show="handleDownloadCenterShow"/);
+    assert.doesNotMatch(source, /onMounted\(\(\) => \{\s*startDownloadJobPolling\(\)/);
+    assert.doesNotMatch(source, /setInterval\(/);
+    assert.match(source, /fetchHeaderDownloadJobs\(\)/);
+    assert.match(source, /mine_only:\s*true/);
+    assert.match(source, /download-center-panel__refresh/);
+    assert.match(source, /RefreshRight/);
 });
 
 test("header panel keeps only file name, status, and download action for each job", () => {

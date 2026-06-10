@@ -37,6 +37,7 @@ export interface ExportJobListParams {
     page_size?: number;
     status?: ExportJobStatus | "";
     module?: string;
+    mine_only?: boolean;
 }
 
 export interface ExportDownloadCredential {

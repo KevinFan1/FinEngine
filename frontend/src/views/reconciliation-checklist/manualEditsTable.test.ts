@@ -134,6 +134,37 @@ test("missing sub order alerts stay outside of the table", () => {
     }
 });
 
+test("manual edit filter layout keeps organization aligned with the sub order field", () => {
+    for (const [name, source] of [
+        ["invoice-edits.vue", invoiceSource],
+        ["merchant-edits.vue", merchantSource],
+    ] as const) {
+        assert.match(source, /class="filter-field manual-edit-filter-org"/, `${name} should mark the organization field`);
+        assert.match(source, /class="manual-edit-filter-draft-layout"/, `${name} should wrap textarea and actions together`);
+        assert.match(source, /grid-template-columns:\s*minmax\(0,\s*1fr\);/, `${name} should let non-admin users use the full width without an empty organization gap`);
+        assert.match(source, /\.manual-edit-filter-grid--superadmin\s*{[\s\S]*grid-template-columns:\s*220px minmax\(0,\s*1fr\);/, `${name} should define a dedicated superadmin layout`);
+        assert.match(source, /\.manual-edit-filter-grid--superadmin\s*{[\s\S]*grid-template-areas:\s*"org draft";/, `${name} should keep organization and draft fields aligned for admins`);
+        assert.match(source, /\.manual-edit-filter-org\s*{\s*grid-area:\s*org;/, `${name} should pin organization field to org area`);
+        assert.match(source, /\.manual-edit-filter-draft\s*{\s*grid-area:\s*draft;/, `${name} should pin sub order field to draft area`);
+        assert.match(source, /\.manual-edit-filter-draft-layout\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/, `${name} should place actions to the right of the textarea`);
+        assert.match(source, /\.manual-edit-filter-draft-layout\s*{[\s\S]*grid-template-areas:\s*"textarea actions"\s*"meta \.";/, `${name} should keep meta under the textarea while actions stay beside it`);
+        assert.match(source, /\.manual-edit-filter-actions\s*{[\s\S]*grid-area:\s*actions;/, `${name} should pin actions to the textarea action area`);
+        assert.match(source, /\.manual-edit-filter-actions\s*{[\s\S]*align-self:\s*end;/, `${name} actions should align with the textarea bottom edge`);
+        assert.match(source, /\.manual-edit-filter-meta\s*{[\s\S]*grid-area:\s*meta;/, `${name} meta should stay under the textarea`);
+    }
+});
+
+test("manual edit pages avoid duplicate empty states between the table and external placeholder", () => {
+    for (const [name, source] of [
+        ["invoice-edits.vue", invoiceSource],
+        ["merchant-edits.vue", merchantSource],
+    ] as const) {
+        assert.match(source, /<el-table[\s\S]*<template #empty>/, `${name} should define a single table empty slot`);
+        assert.match(source, /<el-empty[\s\S]*description="请先输入子订单号并查询"/, `${name} should keep the guided empty state`);
+        assert.doesNotMatch(source, /<\/el-table>[\s\S]*<el-empty/, `${name} should not render an extra external empty placeholder`);
+    }
+});
+
 function readView(filename: string) {
     return fs.readFileSync(new URL(`./${filename}`, import.meta.url), "utf8");
 }

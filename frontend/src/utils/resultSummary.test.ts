@@ -58,6 +58,35 @@ test("resultSummaryItems can omit summary keys that are shown elsewhere", () => 
     ]);
 });
 
+test("resultSummaryItems hides performance metrics when not allowed", () => {
+    const summary = {
+        总行数: 10,
+        文件下载耗时秒: 1.23,
+        解析耗时秒: 2.34,
+        明细入库耗时秒: 3.45,
+        汇总重建耗时秒: 4.56,
+        parse_seconds: 5.67,
+    };
+
+    assert.deepEqual(resultSummaryItems(summary, { showPerformanceMetrics: false }), [
+        { key: "总行数", label: "总行数", value: "10" },
+    ]);
+
+    assert.deepEqual(
+        resultSummaryItems(summary, { showPerformanceMetrics: true }).map(
+            (item) => item.key,
+        ),
+        [
+            "总行数",
+            "文件下载耗时秒",
+            "解析耗时秒",
+            "明细入库耗时秒",
+            "汇总重建耗时秒",
+            "parse_seconds",
+        ],
+    );
+});
+
 test("formatResultSummaryValue formats empty and complex values", () => {
     assert.equal(formatResultSummaryValue("涉及年月", []), "无");
     assert.equal(formatResultSummaryValue("处理提示", null), "-");

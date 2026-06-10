@@ -565,7 +565,9 @@ class ExportJobService:
             await session.commit()
 
     @staticmethod
-    def _visibility_filters(user: User) -> list[Any]:
+    def _visibility_filters(user: User, *, mine_only: bool = False) -> list[Any]:
+        if mine_only:
+            return [ExportJob.user_id == user.id]
         if user.role == "superadmin":
             return []
         if user.role == "org_admin":
@@ -578,6 +580,7 @@ class ExportJobService:
         *,
         user: User,
         limit: int = 20,
+        mine_only: bool = False,
     ) -> int:
         from app.tasks.export_jobs import run_export_job
 
@@ -587,7 +590,7 @@ class ExportJobService:
                 ExportJob.status == "queued",
                 ExportJob.celery_task_id.is_(None),
                 ExportJob.is_deleted.is_(False),
-                *ExportJobService._visibility_filters(user),
+                *ExportJobService._visibility_filters(user, mine_only=mine_only),
             )
             .order_by(ExportJob.id.asc())
             .limit(limit)
@@ -664,14 +667,12 @@ class ExportJobService:
         module: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        mine_only: bool = False,
     ) -> tuple[list[ExportJob], int]:
-        filters = [ExportJob.is_deleted.is_(False)]
-        if user.role == "superadmin":
-            pass
-        elif user.role == "org_admin":
-            filters.append(ExportJob.org_id == user.org_id)
-        else:
-            filters.append(ExportJob.user_id == user.id)
+        filters = [
+            ExportJob.is_deleted.is_(False),
+            *ExportJobService._visibility_filters(user, mine_only=mine_only),
+        ]
         if status:
             filters.append(ExportJob.status == status)
         if module:

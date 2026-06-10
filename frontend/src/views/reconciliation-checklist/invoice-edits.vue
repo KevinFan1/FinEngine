@@ -16,11 +16,16 @@
                 class="manual-edit-filter-form"
                 @submit.prevent
             >
-                <div class="manual-edit-filter-grid">
+                <div
+                    class="manual-edit-filter-grid"
+                    :class="{
+                        'manual-edit-filter-grid--superadmin': userStore.isSuperAdmin,
+                    }"
+                >
                     <el-form-item
                         v-if="userStore.isSuperAdmin"
                         label="组织"
-                        class="filter-field"
+                        class="filter-field manual-edit-filter-org"
                     >
                         <el-select
                             v-model="form.org_id"
@@ -41,35 +46,37 @@
                         label="子订单号"
                         class="filter-field manual-edit-filter-draft"
                     >
-                        <el-input
-                            v-model="form.draft"
-                            type="textarea"
-                            :rows="3"
-                            resize="vertical"
-                            placeholder="支持换行、英文逗号、中文逗号分隔子订单号"
-                        />
-                        <div class="manual-edit-filter-meta">
-                            <span
-                                >已识别
-                                {{ parsedSubOrders.length }} 个子订单号</span
-                            >
-                            <span
-                                >单次最多
-                                {{ MANUAL_EDIT_MAX_SUB_ORDERS }} 个</span
-                            >
+                        <div class="manual-edit-filter-draft-layout">
+                            <el-input
+                                v-model="form.draft"
+                                type="textarea"
+                                :rows="3"
+                                resize="vertical"
+                                placeholder="支持换行、英文逗号、中文逗号分隔子订单号"
+                            />
+                            <div class="manual-edit-filter-actions">
+                                <el-button
+                                    type="primary"
+                                    :loading="loading"
+                                    :disabled="queryDisabled"
+                                    @click="handleQuery"
+                                >
+                                    查询
+                                </el-button>
+                                <el-button @click="handleReset">重置</el-button>
+                            </div>
+                            <div class="manual-edit-filter-meta">
+                                <span
+                                    >已识别
+                                    {{ parsedSubOrders.length }} 个子订单号</span
+                                >
+                                <span
+                                    >单次最多
+                                    {{ MANUAL_EDIT_MAX_SUB_ORDERS }} 个</span
+                                >
+                            </div>
                         </div>
                     </el-form-item>
-                    <div class="manual-edit-filter-actions">
-                        <el-button
-                            type="primary"
-                            :loading="loading"
-                            :disabled="queryDisabled"
-                            @click="handleQuery"
-                        >
-                            查询
-                        </el-button>
-                        <el-button @click="handleReset">重置</el-button>
-                    </div>
                 </div>
             </el-form>
         </el-card>
@@ -138,6 +145,12 @@
                 class="summary-table manual-edit-table manual-edit-table--dense"
                 style="width: 100%"
             >
+                <template #empty>
+                    <el-empty
+                        description="请先输入子订单号并查询"
+                        class="manual-edit-empty"
+                    />
+                </template>
                 <el-table-column
                     label="序号"
                     width="62"
@@ -208,12 +221,6 @@
                     </template>
                 </el-table-column>
             </el-table>
-
-            <el-empty
-                v-if="!loading && matchedItems.length === 0"
-                description="请先输入子订单号并查询"
-                class="manual-edit-empty"
-            />
         </el-card>
     </div>
 </template>
@@ -616,13 +623,38 @@ onMounted(async () => {
 
 .manual-edit-filter-grid {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "draft";
     gap: 12px;
-    align-items: end;
+    align-items: start;
+}
+
+.manual-edit-filter-grid--superadmin {
+    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-areas: "org draft";
+}
+
+.manual-edit-filter-org {
+    grid-area: org;
 }
 
 .manual-edit-filter-draft {
+    grid-area: draft;
     margin-bottom: 0;
+}
+
+.manual-edit-filter-draft-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "textarea actions"
+        "meta .";
+    gap: 6px 14px;
+    align-items: end;
+}
+
+.manual-edit-filter-draft-layout :deep(.el-textarea) {
+    grid-area: textarea;
 }
 
 .manual-edit-filter-form :deep(.el-form-item) {
@@ -655,20 +687,20 @@ onMounted(async () => {
 }
 
 .manual-edit-filter-meta {
+    grid-area: meta;
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    margin-top: 6px;
     font-size: 11px;
     color: var(--text-secondary);
 }
 
 .manual-edit-filter-actions {
     display: flex;
-    align-items: center;
-    justify-content: flex-end;
+    grid-area: actions;
+    align-self: end;
+    justify-self: end;
     gap: 8px;
-    padding-bottom: 2px;
     white-space: nowrap;
 }
 
@@ -742,6 +774,21 @@ onMounted(async () => {
 @media (max-width: 960px) {
     .manual-edit-filter-grid {
         grid-template-columns: 1fr;
+        grid-template-areas: "draft";
+    }
+
+    .manual-edit-filter-grid--superadmin {
+        grid-template-areas:
+            "org"
+            "draft";
+    }
+
+    .manual-edit-filter-draft-layout {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "textarea"
+            "meta"
+            "actions";
     }
 
     .manual-edit-filter-meta {

@@ -51,13 +51,14 @@ async def list_export_jobs(
     module: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    mine_only: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """分页查询当前用户可见的导出任务。"""
     if status and status not in EXPORT_JOB_STATUSES:
         return ApiResponse(code=400, message="导出状态不正确")
-    await ExportJobService.dispatch_unsubmitted_jobs(db, user=current_user)
+    await ExportJobService.dispatch_unsubmitted_jobs(db, user=current_user, mine_only=mine_only)
     jobs, total = await ExportJobService.list_jobs(
         db,
         user=current_user,
@@ -65,6 +66,7 @@ async def list_export_jobs(
         module=module,
         page=page,
         page_size=page_size,
+        mine_only=mine_only,
     )
     operator_name_map = await _load_operator_name_map(db, {job.user_id for job in jobs})
     return ApiResponse(
