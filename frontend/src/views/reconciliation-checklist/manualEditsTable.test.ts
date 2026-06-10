@@ -112,11 +112,13 @@ test("manual edit pages display all required amount columns", () => {
     }
 });
 
-test("manual edit pages format settlement time and compact amount headers", () => {
+test("manual edit pages format settlement time and show full amount headers without tooltip", () => {
     for (const source of [invoiceSource, merchantSource]) {
         assert.match(source, /formatRawDateTime\(row\.settlement_time\)/);
-        assert.match(source, /column\.shortLabel/);
-        assert.match(source, /manual-edit-compact-label/);
+        assert.match(source, /:label="column\.label"/);
+        assert.match(source, /:min-width="column\.minWidth"/);
+        assert.doesNotMatch(source, /manual-edit-compact-label/);
+        assert.doesNotMatch(source, /<el-tooltip[\s\S]*column\.label[\s\S]*<\/el-tooltip>/);
     }
 });
 

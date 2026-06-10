@@ -181,18 +181,10 @@
                     v-for="column in amountColumns"
                     :key="column.key"
                     :prop="column.key"
-                    :label="column.shortLabel"
-                    :width="column.width"
+                    :label="column.label"
+                    :min-width="column.minWidth"
                     align="right"
-                >
-                    <template #header>
-                        <el-tooltip :content="column.label" placement="top">
-                            <span class="manual-edit-compact-label">{{
-                                column.shortLabel
-                            }}</span>
-                        </el-tooltip>
-                    </template>
-                </el-table-column>
+                />
                 <el-table-column label="收款商家" min-width="240">
                     <template #default="{ row }">
                         <el-input
@@ -778,13 +770,6 @@ onMounted(async () => {
 .manual-edit-table--dense :deep(th.el-table__cell) {
     padding-top: 7px;
     padding-bottom: 7px;
-}
-
-.manual-edit-compact-label {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-end;
-    width: 100%;
 }
 
 .manual-edit-empty {

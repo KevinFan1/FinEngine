@@ -146,7 +146,6 @@ class ReconciliationChecklistDetail(SoftDeleteMixin, Base):
     merchant_payment_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="付款时间（商家）")
     invoice_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, comment="开票时间")
     invoice_number: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="发票号码")
-    raw_row: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, comment="原始行JSON")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
 

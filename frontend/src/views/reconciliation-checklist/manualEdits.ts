@@ -31,15 +31,15 @@ export function manualEditLimitMessage(count: number) {
 }
 
 export const MANUAL_EDIT_AMOUNT_COLUMNS = [
-    { key: "platform_subsidy", label: "平台补贴", shortLabel: "平台补", width: 92 },
-    { key: "talent_subsidy", label: "达人补贴", shortLabel: "达人补", width: 92 },
-    { key: "douyin_pay_subsidy", label: "抖音支付补贴", shortLabel: "支付补", width: 92 },
-    { key: "douyin_monthly_pay_subsidy", label: "抖音月付营销补贴", shortLabel: "月付补", width: 92 },
-    { key: "bank_subsidy", label: "银行补贴", shortLabel: "银行补", width: 92 },
-    { key: "user_paid_amount", label: "用户实付（订单金额）", shortLabel: "用户实付", width: 108 },
-    { key: "platform_service_fee", label: "平台服务费", shortLabel: "平台服", width: 92 },
-    { key: "talent_commission", label: "达人佣金", shortLabel: "达人佣", width: 92 },
-    { key: "investment_service_fee", label: "招商服务费", shortLabel: "招商服", width: 92 },
+    { key: "platform_subsidy", label: "平台补贴", minWidth: 116 },
+    { key: "talent_subsidy", label: "达人补贴", minWidth: 116 },
+    { key: "douyin_pay_subsidy", label: "抖音支付补贴", minWidth: 138 },
+    { key: "douyin_monthly_pay_subsidy", label: "抖音月付营销补贴", minWidth: 170 },
+    { key: "bank_subsidy", label: "银行补贴", minWidth: 116 },
+    { key: "user_paid_amount", label: "用户实付（订单金额）", minWidth: 178 },
+    { key: "platform_service_fee", label: "平台服务费", minWidth: 128 },
+    { key: "talent_commission", label: "达人佣金", minWidth: 116 },
+    { key: "investment_service_fee", label: "招商服务费", minWidth: 128 },
 ] as const;
 
 export async function validateManualEditUploadHeaders(file: File, expectedFileType: string) {
