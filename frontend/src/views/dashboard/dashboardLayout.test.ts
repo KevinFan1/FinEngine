@@ -26,6 +26,16 @@ test("dashboard hero stacks before tablet-width copy collides with metadata", as
     assert.match(heroMetaBlock, /width:\s*100%;/);
 });
 
+test("dashboard follows reconciliation checklist user-paid metric names", async () => {
+    const source = await readFile(dashboardFile, "utf8");
+
+    assert.match(source, /total_user_paid_amount/);
+    assert.match(source, /monthly_user_paid_amounts/);
+    assert.equal(source.includes("total_order_amount"), false);
+    assert.equal(source.includes("Monthly GMV"), false);
+    assert.equal(source.includes("累计 GMV"), false);
+});
+
 function mediaBlock(source: string, maxWidth: number) {
     return nestedBlock(source, `@media (max-width: ${maxWidth}px)`);
 }

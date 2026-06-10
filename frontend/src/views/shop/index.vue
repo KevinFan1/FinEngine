@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container">
+    <div class="page-container page-container--flow">
     <el-card shadow="never" class="search-card">
       <el-form :model="searchForm" inline>
         <el-form-item label="搜索">

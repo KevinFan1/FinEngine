@@ -321,7 +321,12 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         refund_amount = detail_logic["refund_to_compensation"] - order_refund
         gmv = order_paid_amount - refund_amount
 
-        platform_income = safe_decimal(vals.get("实际平台补贴")) + safe_decimal(vals.get("实际抖音支付补贴")) + safe_decimal(vals.get("实际抖音月付营销补贴"))
+        platform_income = (
+            safe_decimal(vals.get("实际平台补贴"))
+            + safe_decimal(vals.get("实际抖音支付补贴"))
+            + safe_decimal(vals.get("实际抖音月付营销补贴"))
+            + safe_decimal(vals.get("实际达人补贴"))
+        )
 
         return {
             "order_paid_amount": order_paid_amount,

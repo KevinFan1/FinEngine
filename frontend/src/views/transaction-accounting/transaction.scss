@@ -662,6 +662,37 @@
     font-weight: 600;
 }
 
+.detail-timeline {
+    display: grid;
+    gap: 10px;
+}
+
+.detail-time-item {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    min-width: 0;
+
+    strong {
+        display: block;
+        margin-top: 2px;
+        color: var(--text-primary);
+        font-family: "SF Mono", SFMono-Regular, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 700;
+    }
+}
+
+.detail-dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light-9);
+}
+
 .detail-error {
     margin: 0;
     color: var(--danger) !important;

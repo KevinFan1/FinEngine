@@ -40,6 +40,9 @@ const typeMap: Record<string, { label: string; typeClass: string; mark: string }
   红单: { label: '红单', typeClass: 'red-sheet', mark: '红' },
   银行流水: { label: '银行流水', typeClass: 'bank-flow', mark: '银' },
   对账清单: { label: '对账清单', typeClass: 'checklist', mark: '清' },
+  '对账清单-原始数据': { label: '原始数据', typeClass: 'checklist', mark: '底' },
+  '对账清单-发票更新': { label: '发票更新', typeClass: 'checklist', mark: '票' },
+  '对账清单-商家更新': { label: '商家更新', typeClass: 'checklist', mark: '商' },
 }
 
 const normalizedType = computed(() => String(props.type || '').trim())

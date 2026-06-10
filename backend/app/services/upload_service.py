@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import register_after_commit
-from app.models.organization import Organization
+from app.models.organization import ORG_TYPE_INTERNAL, Organization
 from app.models.task import ProcessingTask
 from app.models.upload import UploadBatch, UploadFile
 from app.models.user import User
@@ -15,7 +15,7 @@ from app.services.audit_service import AuditService
 from app.services.bic_accounting_service import BicAccountingService
 from app.services.platform_profile_service import resolve_platform_profile
 from app.services.quota_service import QuotaService
-from app.services.reconciliation_checklist_service import CHECKLIST_FILE_TYPE, ReconciliationChecklistService
+from app.services.reconciliation_checklist_service import CHECKLIST_FILE_TYPES, ReconciliationChecklistService
 from app.services.shop_service import ShopService
 from app.services.shop_visibility import active_shop_filter
 from app.services.transaction_accounting_service import TransactionAccountingService
@@ -23,6 +23,7 @@ from app.services.upload_period_service import resolve_upload_period_header
 
 MERCHANT_RED_SHEET_TYPE = "红单"
 MERCHANT_BANK_FLOW_TYPE = "银行流水"
+INTERNAL_ONLY_SHARED_UPLOAD_TYPES = {"动账", "bic"}
 
 
 def _format_file_size(bytes_size: int) -> str:
@@ -45,10 +46,35 @@ def _is_merchant_bank_flow_type(type_code: str | None) -> bool:
 
 
 def _is_reconciliation_checklist_type(type_code: str | None) -> bool:
-    return (type_code or "").strip() == CHECKLIST_FILE_TYPE
+    return (type_code or "").strip() in CHECKLIST_FILE_TYPES
+
+
+def _is_internal_only_shared_upload(*, platform_code: str | None, parsed_type: str | None) -> bool:
+    return (platform_code or "").strip().lower() == "douyin" and (parsed_type or "").strip().lower() in INTERNAL_ONLY_SHARED_UPLOAD_TYPES
 
 
 class UploadService:
+    @staticmethod
+    async def ensure_org_internal_for_shared_upload(
+        db: AsyncSession,
+        *,
+        org_id: int,
+        platform_code: str | None,
+        parsed_type: str | None,
+    ) -> None:
+        if not _is_internal_only_shared_upload(platform_code=platform_code, parsed_type=parsed_type):
+            return
+
+        result = await db.execute(
+            select(Organization.org_type).where(
+                Organization.id == org_id,
+                Organization.is_deleted.is_(False),
+            )
+        )
+        org_type = result.scalar_one_or_none()
+        if org_type != ORG_TYPE_INTERNAL:
+            raise ValueError("外部组织不能使用该核算功能")
+
     @staticmethod
     def validate_batch_scope(*, batch: UploadBatch, user: User) -> None:
         if user.role == "superadmin":
@@ -163,6 +189,13 @@ class UploadService:
         is_red_sheet = _is_merchant_red_sheet_type(data.parsed_type)
         is_bank_flow = _is_merchant_bank_flow_type(data.parsed_type)
         is_checklist = _is_reconciliation_checklist_type(data.parsed_type)
+
+        await UploadService.ensure_org_internal_for_shared_upload(
+            db,
+            org_id=batch.org_id,
+            platform_code=platform_profile.source_platform_code if platform_profile else data.detected_platform,
+            parsed_type=data.parsed_type,
+        )
 
         if data.parsed_month is not None and (data.parsed_month < 1 or data.parsed_month > 12):
             raise ValueError("所属月份不正确")
@@ -403,7 +436,7 @@ class UploadService:
                 user_agent=user_agent,
             )
 
-        if (upload_file.parsed_type or "").strip() == CHECKLIST_FILE_TYPE:
+        if (upload_file.parsed_type or "").strip() in CHECKLIST_FILE_TYPES:
             await ReconciliationChecklistService.create_from_shared_upload(
                 db,
                 upload_file=upload_file,

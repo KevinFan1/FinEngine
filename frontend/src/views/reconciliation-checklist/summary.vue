@@ -1,123 +1,91 @@
 <template>
-    <div class="page-container checklist-page">
+    <div class="page-container page-container--flow checklist-page">
         <el-card shadow="never" class="search-card checklist-filter-card">
             <el-form :model="filters" inline class="filter-form">
-                <el-form-item
-                    v-if="userStore.isSuperAdmin"
-                    label="组织"
-                    class="filter-field"
-                >
-                    <el-select
-                        v-model="filters.org_id"
-                        clearable
-                        filterable
-                        placeholder="组织"
-                    >
-                        <el-option
-                            v-for="org in orgOptions"
-                            :key="org.id"
-                            :label="org.name"
-                            :value="org.id"
-                        />
+                <el-form-item v-if="userStore.isSuperAdmin" label="组织" class="filter-field">
+                    <el-select v-model="filters.org_id" clearable filterable placeholder="组织">
+                        <el-option v-for="org in orgOptions" :key="org.id" :label="org.name" :value="org.id" />
                     </el-select>
                 </el-form-item>
-                <el-form-item
-                    label="数据年月"
-                    class="filter-field filter-field--month"
-                >
+                <el-form-item label="数据年月" class="filter-field filter-field--month">
                     <el-date-picker
                         v-model="filters.month"
                         type="month"
                         value-format="YYYY-MM"
                         placeholder="选择数据年月"
-                        :clearable="false"
-                        @change="handleMonthChange"
+                        clearable
+                        @change="handlePeriodChange"
                     />
                 </el-form-item>
-                <el-form-item label="直播推广方" class="filter-field">
+                <el-form-item label="商户主体名称" class="filter-field">
                     <el-select
-                        v-model="filters.live_promoter_ids"
+                        v-model="filters.merchant_subject_names"
                         multiple
                         clearable
                         filterable
                         remote
                         collapse-tags
                         collapse-tags-tooltip
-                        :remote-method="
-                            (keyword: string) =>
-                                fetchEntityOptions('live_promoter', keyword)
-                        "
-                        :loading="entityLoading.live_promoter"
-                        placeholder="先选数据年月，再选推广方"
+                        :remote-method="(keyword: string) => fetchOptions('merchant_subject', keyword)"
+                        :loading="optionLoading.merchant_subject"
+                        placeholder="商户主体名称"
                     >
-                        <el-option
-                            v-for="item in entityOptions.live_promoter"
-                            :key="item.id"
-                            :label="entityLabel(item)"
-                            :value="item.id"
-                        />
-                    </el-select>
-                </el-form-item>
-                <el-form-item label="商家" class="filter-field">
-                    <el-select
-                        v-model="filters.merchant_ids"
-                        multiple
-                        clearable
-                        filterable
-                        remote
-                        collapse-tags
-                        collapse-tags-tooltip
-                        :remote-method="
-                            (keyword: string) =>
-                                fetchEntityOptions('merchant', keyword)
-                        "
-                        :loading="entityLoading.merchant"
-                        placeholder="先选数据年月，再选商家"
-                    >
-                        <el-option
-                            v-for="item in entityOptions.merchant"
-                            :key="item.id"
-                            :label="entityLabel(item)"
-                            :value="item.id"
-                        />
+                        <el-option v-for="item in options.merchant_subject" :key="item.value" :label="item.label" :value="item.value" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="收款商家" class="filter-field">
                     <el-select
-                        v-model="filters.receipt_merchant_ids"
+                        v-model="filters.receipt_merchants"
                         multiple
                         clearable
                         filterable
                         remote
                         collapse-tags
                         collapse-tags-tooltip
-                        :remote-method="
-                            (keyword: string) =>
-                                fetchEntityOptions('receipt_merchant', keyword)
-                        "
-                        :loading="entityLoading.receipt_merchant"
-                        placeholder="先选数据年月，再选收款商家"
+                        :remote-method="(keyword: string) => fetchOptions('receipt_merchant', keyword)"
+                        :loading="optionLoading.receipt_merchant"
+                        placeholder="收款商家"
                     >
-                        <el-option
-                            v-for="item in entityOptions.receipt_merchant"
-                            :key="item.id"
-                            :label="entityLabel(item)"
-                            :value="item.id"
-                        />
+                        <el-option v-for="item in options.receipt_merchant" :key="item.value" :label="item.label" :value="item.value" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item v-if="summaryMode === 'product'" label="商品名称" class="filter-field">
+                    <el-select
+                        v-model="filters.product_names"
+                        multiple
+                        clearable
+                        filterable
+                        remote
+                        collapse-tags
+                        collapse-tags-tooltip
+                        :remote-method="(keyword: string) => fetchOptions('product_name', keyword)"
+                        :loading="optionLoading.product_name"
+                        placeholder="商品名称"
+                    >
+                        <el-option v-for="item in options.product_name" :key="item.value" :label="item.label" :value="item.value" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item v-if="summaryMode === 'receipt'" label="直播平台" class="filter-field">
+                    <el-select
+                        v-model="filters.live_platforms"
+                        multiple
+                        clearable
+                        filterable
+                        remote
+                        collapse-tags
+                        collapse-tags-tooltip
+                        :remote-method="(keyword: string) => fetchOptions('live_platform', keyword)"
+                        :loading="optionLoading.live_platform"
+                        placeholder="进驻的直播平台"
+                    >
+                        <el-option v-for="item in options.live_platform" :key="item.value" :label="item.label" :value="item.value" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="关键词" class="filter-field">
-                    <el-input
-                        v-model="filters.keyword"
-                        clearable
-                        placeholder="关键词：商品名称 / 店铺 / 商家"
-                        @keyup.enter="handleSearch"
-                    />
+                    <el-input v-model="filters.keyword" clearable :placeholder="keywordPlaceholder" @keyup.enter="handleSearch" />
                 </el-form-item>
                 <el-form-item class="filter-actions">
-                    <el-button type="primary" @click="handleSearch"
-                        >查询</el-button
-                    >
+                    <el-button type="primary" @click="handleSearch">查询</el-button>
                     <el-button @click="resetFilters">重置</el-button>
                 </el-form-item>
             </el-form>
@@ -127,120 +95,141 @@
             <template #header>
                 <div class="card-header">
                     <div class="summary-title-group">
-                        <span class="card-header-title">对账清单汇总</span>
-                        <span class="summary-count"
-                            >共 {{ pagination.total }} 条</span
-                        >
+                        <span class="card-header-title">{{ pageTitle }}</span>
+                        <span class="summary-count">共 {{ pagination.total }} 条 · 已选 {{ selectedCount }} 条</span>
                     </div>
                     <div class="card-header-actions">
+                        <el-button :disabled="selectedCount === 0" @click="clearSelectedRows">清空选中</el-button>
+                        <el-button :loading="exportSelectedLoading" :disabled="selectedCount === 0" @click="handleExport('selected')">导出选中</el-button>
                         <el-button @click="fetchData">刷新</el-button>
-                        <el-button
-                            :loading="exportCurrentPageLoading"
-                            @click="handleExport('current_page')"
-                            >导出当前页</el-button
-                        >
-                        <el-button
-                            :loading="exportAllLoading"
-                            @click="handleExport('all')"
-                            >全部导出</el-button
-                        >
-                        <el-button
-                            type="primary"
-                            :loading="exportSelectedLoading"
-                            :disabled="selectedRows.length === 0"
-                            @click="handleExport('selected')"
-                            >导出选中</el-button
-                        >
+                        <el-button :loading="exportCurrentPageLoading" @click="handleExport('current_page')">导出当前页</el-button>
+                        <el-button type="primary" :loading="exportAllLoading" @click="handleExport('all')">全部导出</el-button>
                     </div>
                 </div>
             </template>
 
             <el-table
-                ref="summaryTable"
+                v-if="summaryMode === 'product'"
                 v-loading="loading"
-                :data="rows"
+                :data="productRows"
                 border
                 stripe
                 row-key="key"
                 class="summary-table roomy-table"
+                style="width: 100%"
                 @selection-change="handleSelectionChange"
             >
-                <el-table-column
-                    type="selection"
-                    width="48"
-                    reserve-selection
-                />
+                <el-table-column type="selection" width="48" fixed="left" :reserve-selection="true" />
+                <el-table-column label="序号" width="70" align="center" fixed="left">
+                    <template #default="{ $index }">{{ rowIndex($index) }}</template>
+                </el-table-column>
                 <el-table-column label="数据年月" width="110">
-                    <template #default="{ row }">{{
-                        formatChecklistMonth(
-                            row.accounting_year,
-                            row.accounting_month,
-                        )
-                    }}</template>
+                    <template #default="{ row }">{{ formatChecklistMonth(row.accounting_year, row.accounting_month) }}</template>
+                </el-table-column>
+                <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="150" show-overflow-tooltip />
+                <el-table-column prop="receipt_merchant" label="收款商家" min-width="170" show-overflow-tooltip />
+                <el-table-column prop="merchant_subject_name" label="商户主体名称" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="product_name" label="商品名称" min-width="260" show-overflow-tooltip />
+                <el-table-column prop="product_quantity" label="商品数量" width="110" align="right" />
+                <el-table-column label="用户实付" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_user_paid_amount) }}</template>
+                </el-table-column>
+                <el-table-column label="直播推广佣金" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_live_commission) }}</template>
                 </el-table-column>
                 <el-table-column
-                    v-if="userStore.isSuperAdmin"
-                    prop="org_name"
-                    label="组织"
+                    label="应付商家净额"
                     width="150"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="live_promoter"
-                    label="直播推广方"
-                    min-width="170"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="merchant_name"
-                    label="商家"
-                    min-width="170"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="receipt_merchant"
-                    label="收款商家"
-                    min-width="180"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="product_quantity"
-                    label="明细数量"
-                    width="110"
                     align="right"
-                />
-                <el-table-column label="订单总金额" width="150" align="right">
-                    <template #default="{ row }">{{
-                        formatAmount(row.total_order_amount)
-                    }}</template>
-                </el-table-column>
-                <el-table-column
-                    label="直播佣金总金额"
-                    width="160"
-                    align="right"
+                    class-name="summary-edge-column"
+                    header-class-name="summary-edge-column"
                 >
-                    <template #default="{ row }">{{
-                        formatAmount(row.total_live_commission)
-                    }}</template>
-                </el-table-column>
-                <el-table-column
-                    label="应付商家净额总金额"
-                    width="180"
-                    align="right"
-                >
-                    <template #default="{ row }">{{
-                        formatAmount(row.total_merchant_net_amount)
-                    }}</template>
-                </el-table-column>
-                <el-table-column label="操作" width="110" fixed="right">
-                    <template #default="{ row }">
-                        <el-button link type="primary" @click="openDetails(row)"
-                            >查看明细</el-button
-                        >
-                    </template>
+                    <template #default="{ row }">{{ formatAmount(row.total_merchant_net_amount) }}</template>
                 </el-table-column>
             </el-table>
-            <div class="pagination-area">
+
+            <el-table
+                v-else-if="summaryMode === 'receipt'"
+                v-loading="loading"
+                :data="receiptRows"
+                border
+                stripe
+                row-key="key"
+                class="summary-table roomy-table"
+                style="width: 100%"
+                @selection-change="handleSelectionChange"
+            >
+                <el-table-column type="selection" width="48" fixed="left" :reserve-selection="true" />
+                <el-table-column label="序号" width="70" align="center" fixed="left">
+                    <template #default="{ $index }">{{ rowIndex($index) }}</template>
+                </el-table-column>
+                <el-table-column label="数据年月" width="110">
+                    <template #default="{ row }">{{ formatChecklistMonth(row.accounting_year, row.accounting_month) }}</template>
+                </el-table-column>
+                <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="150" show-overflow-tooltip />
+                <el-table-column prop="merchant_subject_name" label="商户主体名称" min-width="190" show-overflow-tooltip />
+                <el-table-column prop="live_platform" label="进驻的直播平台" min-width="150" show-overflow-tooltip />
+                <el-table-column prop="receipt_merchant" label="收款商家" min-width="190" show-overflow-tooltip />
+                <el-table-column prop="order_count" label="订单数" width="100" align="right" />
+                <el-table-column label="用户实付" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_user_paid_amount) }}</template>
+                </el-table-column>
+                <el-table-column label="直播推广佣金" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_live_commission) }}</template>
+                </el-table-column>
+                <el-table-column
+                    label="应付商家净额"
+                    width="150"
+                    align="right"
+                    class-name="summary-edge-column"
+                    header-class-name="summary-edge-column"
+                >
+                    <template #default="{ row }">{{ formatAmount(row.total_merchant_net_amount) }}</template>
+                </el-table-column>
+            </el-table>
+
+            <el-table
+                v-else
+                v-loading="loading"
+                :data="payableBalanceRows"
+                border
+                stripe
+                row-key="key"
+                class="summary-table roomy-table"
+                style="width: 100%"
+                @selection-change="handleSelectionChange"
+            >
+                <el-table-column type="selection" width="48" fixed="left" :reserve-selection="true" />
+                <el-table-column label="序号" width="70" align="center" fixed="left">
+                    <template #default="{ $index }">{{ rowIndex($index) }}</template>
+                </el-table-column>
+                <el-table-column v-if="userStore.isSuperAdmin" prop="org_name" label="组织" width="150" show-overflow-tooltip />
+                <el-table-column prop="merchant_subject_name" label="商户主体名称" min-width="210" show-overflow-tooltip />
+                <el-table-column label="结算时间（年月）" width="140">
+                    <template #default="{ row }">{{ formatChecklistMonth(row.accounting_year, row.accounting_month) }}</template>
+                </el-table-column>
+                <el-table-column prop="receipt_merchant" label="收款商家" min-width="210" show-overflow-tooltip />
+                <el-table-column label="用户实付" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_user_paid_amount) }}</template>
+                </el-table-column>
+                <el-table-column label="应付商家净额" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_merchant_net_amount) }}</template>
+                </el-table-column>
+                <el-table-column label="付款金额" width="150" align="right">
+                    <template #default="{ row }">{{ formatAmount(row.total_payment_amount) }}</template>
+                </el-table-column>
+                <el-table-column
+                    label="应付商家净额余额"
+                    width="180"
+                    align="right"
+                    class-name="summary-edge-column"
+                    header-class-name="summary-edge-column"
+                >
+                    <template #default="{ row }">{{ formatAmount(row.total_merchant_net_balance) }}</template>
+                </el-table-column>
+            </el-table>
+
+            <div class="pagination-area" style="padding: 12px 18px; margin-top: 0; border-top: 1px solid var(--border-light); background: var(--bg-elevated);">
                 <el-pagination
                     v-model:current-page="pagination.page"
                     v-model:page-size="pagination.pageSize"
@@ -253,122 +242,6 @@
                 />
             </div>
         </el-card>
-
-        <el-drawer
-            v-model="detailVisible"
-            title="商品汇总明细"
-            size="1080px"
-            class="checklist-detail-drawer"
-        >
-            <section v-if="currentSummary" class="detail-summary-card">
-                <div class="detail-summary-heading">
-                    <span>{{
-                        formatChecklistMonth(
-                            currentSummary.accounting_year,
-                            currentSummary.accounting_month,
-                        )
-                    }}</span>
-                    <strong>{{ currentSummary.merchant_name }}</strong>
-                </div>
-                <div class="detail-summary-grid">
-                    <div class="detail-summary-item">
-                        <span>收款商家</span>
-                        <strong>{{ currentSummary.receipt_merchant }}</strong>
-                    </div>
-                    <div class="detail-summary-item">
-                        <span>直播推广方</span>
-                        <strong>{{ currentSummary.live_promoter }}</strong>
-                    </div>
-                    <div class="detail-summary-item">
-                        <span>明细数量</span>
-                        <strong>{{ currentSummary.product_quantity }}</strong>
-                    </div>
-                    <div class="detail-summary-item">
-                        <span>订单总金额</span>
-                        <strong>{{
-                            formatAmount(currentSummary.total_order_amount)
-                        }}</strong>
-                    </div>
-                    <div class="detail-summary-item">
-                        <span>直播佣金总金额</span>
-                        <strong>{{
-                            formatAmount(currentSummary.total_live_commission)
-                        }}</strong>
-                    </div>
-                    <div class="detail-summary-item">
-                        <span>应付商家净额总金额</span>
-                        <strong>{{
-                            formatAmount(
-                                currentSummary.total_merchant_net_amount,
-                            )
-                        }}</strong>
-                    </div>
-                </div>
-            </section>
-            <div class="detail-toolbar">
-                <el-input
-                    v-model="detailKeyword"
-                    clearable
-                    placeholder="搜索商品名称"
-                    class="detail-keyword-input"
-                    @keyup.enter="handleDetailSearch"
-                    @clear="handleDetailSearch"
-                />
-                <el-button type="primary" @click="handleDetailSearch"
-                    >搜索</el-button
-                >
-                <el-button
-                    :loading="detailExportLoading"
-                    :disabled="!currentSummary"
-                    @click="exportCurrentDetail"
-                    >导出</el-button
-                >
-            </div>
-            <el-table
-                v-loading="detailLoading"
-                :data="detailRows"
-                border
-                stripe
-            >
-                <el-table-column
-                    prop="product_name"
-                    label="商品名称"
-                    min-width="520"
-                    show-overflow-tooltip
-                />
-                <el-table-column
-                    prop="product_quantity"
-                    label="明细数量"
-                    width="90"
-                    align="right"
-                />
-                <el-table-column label="订单金额" width="140" align="right">
-                    <template #default="{ row }">{{
-                        formatAmount(row.total_order_amount)
-                    }}</template>
-                </el-table-column>
-                <el-table-column label="直播佣金" width="140" align="right">
-                    <template #default="{ row }">{{
-                        formatAmount(row.total_live_commission)
-                    }}</template>
-                </el-table-column>
-                <el-table-column label="净额" width="140" align="right">
-                    <template #default="{ row }">{{
-                        formatAmount(row.total_merchant_net_amount)
-                    }}</template>
-                </el-table-column>
-            </el-table>
-            <el-pagination
-                v-model:current-page="detailPagination.page"
-                v-model:page-size="detailPagination.pageSize"
-                :total="detailPagination.total"
-                :page-sizes="PAGE_SIZE_OPTIONS"
-                :layout="PAGINATION_LAYOUT"
-                background
-                @size-change="fetchDetails"
-                @current-change="fetchDetails"
-            />
-        </el-drawer>
     </div>
 </template>
 
@@ -377,101 +250,121 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
-    listReconciliationChecklistEntityOptions,
-    listReconciliationChecklistSummary,
-    listReconciliationChecklistSummaryDetails,
-    type ReconciliationChecklistEntityOption,
-    type ReconciliationChecklistSummary,
-    type ReconciliationChecklistSummaryDetail,
+    listReconciliationChecklistOptions,
+    listReconciliationChecklistPayableBalanceSummary,
+    listReconciliationChecklistProductSummary,
+    listReconciliationChecklistReceiptSummary,
+    type ReconciliationChecklistOption,
+    type ReconciliationChecklistPayableBalanceSummary,
+    type ReconciliationChecklistProductSummary,
+    type ReconciliationChecklistReceiptSummary,
 } from "@/api/reconciliationChecklist";
 import { useUserStore } from "@/stores/user";
-import {
-    DEFAULT_PAGE_SIZE,
-    PAGE_SIZE_OPTIONS,
-    PAGINATION_LAYOUT,
-} from "@/utils/pagination";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PAGINATION_LAYOUT } from "@/utils/pagination";
 import { normalizeExportFilename, submitExportJob } from "@/utils/exportJobs";
 import { buildExportFilename } from "@/utils/format";
 import { formatAmount, formatChecklistMonth } from "./common";
 import { useRoute, useRouter } from "vue-router";
+
+type SummaryMode = "product" | "receipt" | "payable_balance";
+type ExportScope = "all" | "current_page" | "selected";
+type OptionKind = "merchant_subject" | "receipt_merchant" | "live_platform" | "product_name";
+type SummaryRow =
+    | ReconciliationChecklistProductSummary
+    | ReconciliationChecklistReceiptSummary
+    | ReconciliationChecklistPayableBalanceSummary;
 
 const userStore = useUserStore();
 const route = useRoute();
 const router = useRouter();
 const orgOptions = ref<Organization[]>([]);
 const loading = ref(false);
-const detailLoading = ref(false);
-const rows = ref<ReconciliationChecklistSummary[]>([]);
-const selectedRowMap = ref(new Map<string, ReconciliationChecklistSummary>());
-const selectedRows = ref<ReconciliationChecklistSummary[]>([]);
-const summaryTable = ref<{ clearSelection?: () => void } | null>(null);
-const detailRows = ref<ReconciliationChecklistSummaryDetail[]>([]);
-const detailVisible = ref(false);
-const currentSummary = ref<ReconciliationChecklistSummary | null>(null);
-const detailKeyword = ref("");
-type EntityType = ReconciliationChecklistEntityOption["entity_type"];
-
-const entityOptions = reactive<
-    Record<EntityType, ReconciliationChecklistEntityOption[]>
->({
-    live_promoter: [],
-    merchant: [],
-    receipt_merchant: [],
-});
-const entityLoading = reactive<Record<EntityType, boolean>>({
-    live_promoter: false,
-    merchant: false,
-    receipt_merchant: false,
-});
-const filters = reactive({
-    org_id: undefined as number | undefined,
-    month: "",
-    merchant_ids: [] as number[],
-    live_promoter_ids: [] as number[],
-    receipt_merchant_ids: [] as number[],
-    keyword: "",
-});
+const productRows = ref<ReconciliationChecklistProductSummary[]>([]);
+const receiptRows = ref<ReconciliationChecklistReceiptSummary[]>([]);
+const payableBalanceRows = ref<ReconciliationChecklistPayableBalanceSummary[]>([]);
 const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
-const detailPagination = reactive({
-    page: 1,
-    pageSize: DEFAULT_PAGE_SIZE,
-    total: 0,
-});
+const selectedRowMap = ref(new Map<string, SummaryRow>());
+const selectedCount = computed(() => selectedRowMap.value.size);
+const selectedRows = computed(() => Array.from(selectedRowMap.value.values()));
 const exportSelectedLoading = ref(false);
 const exportCurrentPageLoading = ref(false);
 const exportAllLoading = ref(false);
-const detailExportLoading = ref(false);
 const querySyncing = ref(false);
-const SUMMARY_PAGE_STATE_KEY = "reconciliation-checklist:summary";
+const SUMMARY_PAGE_STATE_KEY_PREFIX = "reconciliation-checklist:summary:";
 const SUMMARY_QUERY_KEYS = [
     "page",
     "page_size",
     "org_id",
     "month",
-    "merchant_ids",
-    "live_promoter_ids",
-    "receipt_merchant_ids",
+    "merchant_subject_name",
+    "receipt_merchant",
+    "product_name",
+    "live_platform",
     "keyword",
 ] as const;
 
-type ExportScope = "all" | "current_page" | "selected";
+const summaryMode = computed<SummaryMode>(() => {
+    const raw = route.meta.checklistSummaryMode;
+    return raw === "product" || raw === "payable_balance" ? raw : "receipt";
+});
+const pageTitle = computed(() => {
+    if (summaryMode.value === "product") return "商家明细";
+    if (summaryMode.value === "payable_balance") return "余额明细";
+    return "商家总表";
+});
+const keywordPlaceholder = computed(() => {
+    if (summaryMode.value === "product") return "主体 / 收款商家 / 商品";
+    if (summaryMode.value === "receipt") return "主体 / 收款商家 / 平台";
+    return "主体 / 收款商家";
+});
+
+const filters = reactive({
+    org_id: undefined as number | undefined,
+    month: "",
+    merchant_subject_names: [] as string[],
+    receipt_merchants: [] as string[],
+    product_names: [] as string[],
+    live_platforms: [] as string[],
+    keyword: "",
+});
+
+const options = reactive<Record<OptionKind, ReconciliationChecklistOption[]>>({
+    merchant_subject: [],
+    receipt_merchant: [],
+    live_platform: [],
+    product_name: [],
+});
+const optionLoading = reactive<Record<OptionKind, boolean>>({
+    merchant_subject: false,
+    receipt_merchant: false,
+    live_platform: false,
+    product_name: false,
+});
 
 const monthParts = computed(() => {
     if (!filters.month) return {};
     const [year, month] = filters.month.split("-").map(Number);
+    if (!year || !month) return {};
     return { accounting_year: year, accounting_month: month };
 });
 
-function baseParams() {
-    return {
-        org_id: filters.org_id,
-        ...monthParts.value,
-        merchant_ids: filters.merchant_ids.join(",") || undefined,
-        live_promoter_ids: filters.live_promoter_ids.join(",") || undefined,
-        receipt_merchant_ids:
-            filters.receipt_merchant_ids.join(",") || undefined,
-        keyword: filters.keyword || undefined,
-    };
+function currentMonth() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function currentRows(): SummaryRow[] {
+    if (summaryMode.value === "product") return productRows.value;
+    if (summaryMode.value === "payable_balance") return payableBalanceRows.value;
+    return receiptRows.value;
+}
+
+function joinValues(values: string[]) {
+    return values.map((item) => item.trim()).filter(Boolean).join(",") || undefined;
+}
+
+function rowIndex(index: number) {
+    return (pagination.page - 1) * pagination.pageSize + index + 1;
 }
 
 function queryString(value: unknown): string {
@@ -479,46 +372,46 @@ function queryString(value: unknown): string {
     return typeof value === "string" ? value : "";
 }
 
-function queryNumberList(value: unknown): number[] {
+function queryStringList(value: unknown): string[] {
     const text = queryString(value);
-    if (!text) return [];
-    return text
-        .split(",")
-        .map((item) => Number(item))
-        .filter((item) => Number.isFinite(item) && item > 0);
+    return text ? text.split(",").map((item) => item.trim()).filter(Boolean) : [];
 }
 
-function currentMonth() {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+function baseParams() {
+    return {
+        org_id: filters.org_id,
+        ...monthParts.value,
+        merchant_subject_name: joinValues(filters.merchant_subject_names),
+        receipt_merchant: joinValues(filters.receipt_merchants),
+        product_name: summaryMode.value === "product" ? joinValues(filters.product_names) : undefined,
+        live_platform: summaryMode.value === "receipt" ? joinValues(filters.live_platforms) : undefined,
+        keyword: filters.keyword || undefined,
+    };
 }
 
 function applyRouteQuery() {
     const page = Number(route.query.page);
     const pageSize = Number(route.query.page_size);
     const orgId = Number(route.query.org_id);
-
     pagination.page = Number.isFinite(page) && page > 0 ? page : 1;
-    pagination.pageSize =
-        Number.isFinite(pageSize) && pageSize > 0
-            ? pageSize
-            : DEFAULT_PAGE_SIZE;
+    pagination.pageSize = Number.isFinite(pageSize) && pageSize > 0 ? pageSize : DEFAULT_PAGE_SIZE;
     filters.org_id = Number.isFinite(orgId) && orgId > 0 ? orgId : undefined;
     filters.month = queryString(route.query.month) || currentMonth();
-    filters.merchant_ids = queryNumberList(route.query.merchant_ids);
-    filters.live_promoter_ids = queryNumberList(route.query.live_promoter_ids);
-    filters.receipt_merchant_ids = queryNumberList(
-        route.query.receipt_merchant_ids,
-    );
+    filters.merchant_subject_names = queryStringList(route.query.merchant_subject_name);
+    filters.receipt_merchants = queryStringList(route.query.receipt_merchant);
+    filters.product_names = queryStringList(route.query.product_name);
+    filters.live_platforms = queryStringList(route.query.live_platform);
     filters.keyword = queryString(route.query.keyword);
+}
+
+function pageStateKey() {
+    return `${SUMMARY_PAGE_STATE_KEY_PREFIX}${summaryMode.value}`;
 }
 
 function hasRouteState() {
     return SUMMARY_QUERY_KEYS.some((key) => {
         const value = route.query[key];
-        return Array.isArray(value)
-            ? value.some(Boolean)
-            : value !== undefined && value !== "";
+        return Array.isArray(value) ? value.some(Boolean) : value !== undefined && value !== "";
     });
 }
 
@@ -527,7 +420,7 @@ function restorePageState() {
         applyRouteQuery();
         return;
     }
-    const raw = sessionStorage.getItem(SUMMARY_PAGE_STATE_KEY);
+    const raw = sessionStorage.getItem(pageStateKey());
     if (!raw) {
         applyRouteQuery();
         return;
@@ -538,21 +431,20 @@ function restorePageState() {
             pageSize?: number;
             org_id?: number | null;
             month?: string;
-            merchant_ids?: number[];
-            live_promoter_ids?: number[];
-            receipt_merchant_ids?: number[];
+            merchant_subject_names?: string[];
+            receipt_merchants?: string[];
+            product_names?: string[];
+            live_platforms?: string[];
             keyword?: string;
         };
         pagination.page = state.page && state.page > 0 ? state.page : 1;
-        pagination.pageSize =
-            state.pageSize && state.pageSize > 0
-                ? state.pageSize
-                : DEFAULT_PAGE_SIZE;
+        pagination.pageSize = state.pageSize && state.pageSize > 0 ? state.pageSize : DEFAULT_PAGE_SIZE;
         filters.org_id = state.org_id || undefined;
         filters.month = state.month || currentMonth();
-        filters.merchant_ids = state.merchant_ids || [];
-        filters.live_promoter_ids = state.live_promoter_ids || [];
-        filters.receipt_merchant_ids = state.receipt_merchant_ids || [];
+        filters.merchant_subject_names = Array.isArray(state.merchant_subject_names) ? state.merchant_subject_names : [];
+        filters.receipt_merchants = Array.isArray(state.receipt_merchants) ? state.receipt_merchants : [];
+        filters.product_names = Array.isArray(state.product_names) ? state.product_names : [];
+        filters.live_platforms = Array.isArray(state.live_platforms) ? state.live_platforms : [];
         filters.keyword = state.keyword || "";
     } catch {
         applyRouteQuery();
@@ -561,15 +453,16 @@ function restorePageState() {
 
 function persistPageState() {
     sessionStorage.setItem(
-        SUMMARY_PAGE_STATE_KEY,
+        pageStateKey(),
         JSON.stringify({
             page: pagination.page,
             pageSize: pagination.pageSize,
             org_id: filters.org_id ?? null,
             month: filters.month,
-            merchant_ids: filters.merchant_ids,
-            live_promoter_ids: filters.live_promoter_ids,
-            receipt_merchant_ids: filters.receipt_merchant_ids,
+            merchant_subject_names: filters.merchant_subject_names,
+            receipt_merchants: filters.receipt_merchants,
+            product_names: filters.product_names,
+            live_platforms: filters.live_platforms,
             keyword: filters.keyword,
         }),
     );
@@ -577,15 +470,14 @@ function persistPageState() {
 
 function buildRouteQuery() {
     return {
-        ...route.query,
         page: String(pagination.page),
         page_size: String(pagination.pageSize),
         org_id: filters.org_id ? String(filters.org_id) : undefined,
         month: filters.month || undefined,
-        merchant_ids: filters.merchant_ids.join(",") || undefined,
-        live_promoter_ids: filters.live_promoter_ids.join(",") || undefined,
-        receipt_merchant_ids:
-            filters.receipt_merchant_ids.join(",") || undefined,
+        merchant_subject_name: joinValues(filters.merchant_subject_names),
+        receipt_merchant: joinValues(filters.receipt_merchants),
+        product_name: summaryMode.value === "product" ? joinValues(filters.product_names) : undefined,
+        live_platform: summaryMode.value === "receipt" ? joinValues(filters.live_platforms) : undefined,
         keyword: filters.keyword || undefined,
     };
 }
@@ -603,90 +495,34 @@ async function fetchOrgs() {
     if (userStore.isSuperAdmin) orgOptions.value = await getAllOrganizations();
 }
 
-function selectedPeriod() {
-    const parts = monthParts.value;
-    if (!parts.accounting_year || !parts.accounting_month) return null;
-    return parts as { accounting_year: number; accounting_month: number };
-}
-
-function entityLabel(item: ReconciliationChecklistEntityOption) {
-    return item.platform_code
-        ? `${item.platform_code} / ${item.name}`
-        : item.name;
-}
-
-function mergeEntityOption(
-    entityType: EntityType,
-    option: ReconciliationChecklistEntityOption,
-) {
-    if (
-        !option.id ||
-        entityOptions[entityType].some((item) => item.id === option.id)
-    )
-        return;
-    entityOptions[entityType].push(option);
-}
-
-function hydrateOptionsFromRows(items: ReconciliationChecklistSummary[]) {
-    for (const row of items) {
-        if (row.live_promoter_id) {
-            mergeEntityOption("live_promoter", {
-                id: row.live_promoter_id,
-                org_id: row.org_id,
-                platform_code: "",
-                entity_type: "live_promoter",
-                name: row.live_promoter,
-            });
-        }
-        if (row.merchant_id) {
-            mergeEntityOption("merchant", {
-                id: row.merchant_id,
-                org_id: row.org_id,
-                platform_code: "",
-                entity_type: "merchant",
-                name: row.merchant_name,
-            });
-        }
-        if (row.receipt_merchant_id) {
-            mergeEntityOption("receipt_merchant", {
-                id: row.receipt_merchant_id,
-                org_id: row.org_id,
-                platform_code: "",
-                entity_type: "receipt_merchant",
-                name: row.receipt_merchant,
-            });
-        }
-    }
-}
-
-async function fetchEntityOptions(entityType: EntityType, keyword = "") {
-    const period = selectedPeriod();
-    if (!period) {
-        entityOptions[entityType] = [];
-        return;
-    }
-    entityLoading[entityType] = true;
+async function fetchOptions(kind: OptionKind, keyword = "") {
+    optionLoading[kind] = true;
     try {
-        entityOptions[entityType] =
-            await listReconciliationChecklistEntityOptions({
-                entity_type: entityType,
-                accounting_year: period.accounting_year,
-                accounting_month: period.accounting_month,
-                org_id: filters.org_id,
-                keyword: keyword || undefined,
-                limit: 50,
-            });
+        options[kind] = await listReconciliationChecklistOptions({
+            kind,
+            ...monthParts.value,
+            org_id: filters.org_id,
+            keyword: keyword || undefined,
+            limit: 50,
+        });
     } finally {
-        entityLoading[entityType] = false;
+        optionLoading[kind] = false;
     }
 }
 
-async function fetchAllEntityOptions() {
+async function fetchAllOptions() {
     await Promise.all([
-        fetchEntityOptions("live_promoter"),
-        fetchEntityOptions("merchant"),
-        fetchEntityOptions("receipt_merchant"),
+        fetchOptions("merchant_subject"),
+        fetchOptions("receipt_merchant"),
+        fetchOptions("product_name"),
+        fetchOptions("live_platform"),
     ]);
+}
+
+function clearRows() {
+    productRows.value = [];
+    receiptRows.value = [];
+    payableBalanceRows.value = [];
 }
 
 async function fetchData() {
@@ -694,181 +530,120 @@ async function fetchData() {
     persistPageState();
     loading.value = true;
     try {
-        const res = await listReconciliationChecklistSummary({
+        const params = {
             ...baseParams(),
             page: pagination.page,
             page_size: pagination.pageSize,
-        });
-        rows.value = res.items;
-        hydrateOptionsFromRows(res.items);
-        pagination.total = res.total || 0;
+        };
+        clearRows();
+        if (summaryMode.value === "product") {
+            const res = await listReconciliationChecklistProductSummary(params);
+            productRows.value = res.items;
+            pagination.total = res.total || 0;
+        } else if (summaryMode.value === "payable_balance") {
+            const res = await listReconciliationChecklistPayableBalanceSummary(params);
+            payableBalanceRows.value = res.items;
+            pagination.total = res.total || 0;
+        } else {
+            const res = await listReconciliationChecklistReceiptSummary(params);
+            receiptRows.value = res.items;
+            pagination.total = res.total || 0;
+        }
     } finally {
         loading.value = false;
     }
 }
 
+function handleSelectionChange(rows: SummaryRow[]) {
+    const currentPageKeys = new Set(currentRows().map((row) => row.key));
+    const nextMap = new Map(selectedRowMap.value);
+    currentPageKeys.forEach((key) => nextMap.delete(key));
+    rows.forEach((row) => nextMap.set(row.key, row));
+    selectedRowMap.value = nextMap;
+}
+
+function clearSelectedRows() {
+    selectedRowMap.value = new Map();
+}
+
 function handleSearch() {
-    clearSelection();
     pagination.page = 1;
     fetchData();
+}
+
+function handlePeriodChange() {
+    filters.merchant_subject_names = [];
+    filters.receipt_merchants = [];
+    filters.product_names = [];
+    filters.live_platforms = [];
+    fetchAllOptions();
 }
 
 function resetFilters() {
     filters.org_id = undefined;
     filters.month = currentMonth();
-    filters.merchant_ids = [];
-    filters.live_promoter_ids = [];
-    filters.receipt_merchant_ids = [];
+    filters.merchant_subject_names = [];
+    filters.receipt_merchants = [];
+    filters.product_names = [];
+    filters.live_platforms = [];
     filters.keyword = "";
-    fetchAllEntityOptions();
+    clearSelectedRows();
+    fetchAllOptions();
     handleSearch();
 }
 
-function handleMonthChange() {
-    filters.merchant_ids = [];
-    filters.live_promoter_ids = [];
-    filters.receipt_merchant_ids = [];
-    fetchAllEntityOptions();
-}
-
-function handleSelectionChange(selection: ReconciliationChecklistSummary[]) {
-    const currentPageKeys = new Set(rows.value.map((row) => row.key));
-    for (const key of currentPageKeys) selectedRowMap.value.delete(key);
-    for (const row of selection) selectedRowMap.value.set(row.key, row);
-    selectedRows.value = Array.from(selectedRowMap.value.values());
-}
-
-function clearSelection() {
-    selectedRowMap.value.clear();
-    selectedRows.value = [];
-    summaryTable.value?.clearSelection?.();
-}
-
-function openDetails(row: ReconciliationChecklistSummary) {
-    currentSummary.value = row;
-    detailPagination.page = 1;
-    detailKeyword.value = "";
-    detailVisible.value = true;
-    fetchDetails();
-}
-
-function handleDetailSearch() {
-    detailPagination.page = 1;
-    fetchDetails();
-}
-
-async function fetchDetails() {
-    if (!currentSummary.value) return;
-    detailLoading.value = true;
-    try {
-        const row = currentSummary.value;
-        const res = await listReconciliationChecklistSummaryDetails({
-            org_id: row.org_id,
-            accounting_year: row.accounting_year,
-            accounting_month: row.accounting_month,
-            merchant_name: row.merchant_name,
-            live_promoter: row.live_promoter,
-            receipt_merchant: row.receipt_merchant,
-            merchant_id: row.merchant_id || undefined,
-            live_promoter_id: row.live_promoter_id || undefined,
-            receipt_merchant_id: row.receipt_merchant_id || undefined,
-            page: detailPagination.page,
-            page_size: detailPagination.pageSize,
-            keyword: detailKeyword.value || undefined,
-        });
-        detailRows.value = res.items;
-        detailPagination.total = res.total || 0;
-    } finally {
-        detailLoading.value = false;
+function exportMeta() {
+    if (summaryMode.value === "product") {
+        return {
+            exportType: "reconciliation_checklist.product_summary",
+            title: "商家明细导出",
+            filenamePrefix: "商家明细",
+        };
     }
+    if (summaryMode.value === "payable_balance") {
+        return {
+            exportType: "reconciliation_checklist.payable_balance_summary",
+            title: "商家应付余额明细导出",
+            filenamePrefix: "商家应付余额明细",
+        };
+    }
+    return {
+        exportType: "reconciliation_checklist.receipt_summary",
+        title: "商家总表导出",
+        filenamePrefix: "商家总表",
+    };
 }
 
 async function handleExport(scope: ExportScope) {
     if (scope === "selected" && selectedRows.value.length === 0) {
-        ElMessage.warning("请选择要导出的汇总行");
+        ElMessage.warning("请先选择要导出的汇总数据");
         return;
     }
-    const ids = selectedRows.value.map((row) => row.key);
-    const monthLabel = filters.month || "全部数据年月";
     const loadingRef =
-        scope === "selected"
-            ? exportSelectedLoading
-            : scope === "current_page"
-              ? exportCurrentPageLoading
-              : exportAllLoading;
+        scope === "selected" ? exportSelectedLoading : scope === "current_page" ? exportCurrentPageLoading : exportAllLoading;
+    const meta = exportMeta();
     loadingRef.value = true;
     try {
         await submitExportJob({
-            export_type: "reconciliation_checklist.summary",
-            title: "对账清单导出",
+            export_type: meta.exportType,
+            title: meta.title,
             filename: normalizeExportFilename(
                 buildExportFilename([
-                    "对账清单",
-                    monthLabel,
-                    scope === "all"
-                        ? "全部"
-                        : scope === "current_page"
-                          ? `第${pagination.page}页`
-                          : "选中",
+                    meta.filenamePrefix,
+                    filters.month || "全部年月",
+                    scope === "current_page" ? `第${pagination.page}页` : scope === "selected" ? "选中" : "全部",
                 ]),
             ),
             params: {
                 ...baseParams(),
                 scope,
-                ids: scope === "selected" ? ids : undefined,
+                ids: scope === "selected" ? selectedRows.value.map((row) => row.key) : undefined,
                 page: scope === "current_page" ? pagination.page : undefined,
-                page_size:
-                    scope === "current_page" ? pagination.pageSize : undefined,
+                page_size: scope === "current_page" ? pagination.pageSize : undefined,
             },
         });
-        ElMessage.success("已提交导出任务，请到下载中心查看");
     } finally {
         loadingRef.value = false;
-    }
-}
-
-async function exportCurrentDetail() {
-    if (!currentSummary.value) return;
-    const row = currentSummary.value;
-    detailExportLoading.value = true;
-    try {
-        await submitExportJob({
-            export_type: "reconciliation_checklist.summary",
-            title: "对账清单明细导出",
-            filename: normalizeExportFilename(
-                buildExportFilename([
-                    "对账清单明细",
-                    formatChecklistMonth(
-                        row.accounting_year,
-                        row.accounting_month,
-                    ),
-                    row.merchant_name,
-                    row.receipt_merchant,
-                ]),
-            ),
-            params: {
-                org_id: row.org_id,
-                accounting_year: row.accounting_year,
-                accounting_month: row.accounting_month,
-                merchant_name: row.merchant_name,
-                live_promoter: row.live_promoter,
-                receipt_merchant: row.receipt_merchant,
-                merchant_ids: row.merchant_id
-                    ? String(row.merchant_id)
-                    : undefined,
-                live_promoter_ids: row.live_promoter_id
-                    ? String(row.live_promoter_id)
-                    : undefined,
-                receipt_merchant_ids: row.receipt_merchant_id
-                    ? String(row.receipt_merchant_id)
-                    : undefined,
-                keyword: detailKeyword.value || undefined,
-                scope: "selected",
-                ids: [row.key],
-            },
-        });
-    } finally {
-        detailExportLoading.value = false;
     }
 }
 
@@ -876,16 +651,23 @@ onMounted(async () => {
     restorePageState();
     if (!filters.month) filters.month = currentMonth();
     await fetchOrgs();
-    await fetchAllEntityOptions();
+    await fetchAllOptions();
     await fetchData();
 });
 
 watch(
-    () => route.query,
+    () => summaryMode.value,
+    () => {
+        clearSelectedRows();
+    },
+);
+
+watch(
+    () => route.fullPath,
     async () => {
         if (querySyncing.value) return;
-        applyRouteQuery();
-        await fetchAllEntityOptions();
+        restorePageState();
+        await fetchAllOptions();
         await fetchData();
     },
 );
@@ -893,10 +675,10 @@ watch(
 
 <style scoped lang="scss">
 .checklist-page {
-    display: flex;
-    flex-direction: column;
+    display: block;
+    height: auto;
+    min-height: 100%;
     gap: 14px;
-    min-height: 0;
 }
 
 .card-header {
@@ -908,8 +690,7 @@ watch(
 
 .checklist-filter-card {
     display: block;
-    flex: 0 0 auto;
-    margin-bottom: 0;
+    margin-bottom: 14px;
     overflow: visible;
 }
 
@@ -922,7 +703,7 @@ watch(
 
 :deep(.checklist-filter-card .el-form.el-form--inline) {
     display: grid !important;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) auto;
     align-items: center;
     gap: 10px 12px;
 }
@@ -976,117 +757,54 @@ watch(
 .pagination-area {
     display: flex;
     justify-content: flex-end;
-    margin-top: 14px;
-}
-
-.detail-toolbar {
-    display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.detail-summary-card {
-    display: grid;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding: 14px;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-card);
-    background: var(--bg-card);
-}
-
-.detail-summary-heading {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
+    flex-shrink: 0;
     min-width: 0;
+    margin-top: 0;
+    padding: 12px 18px !important;
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-elevated);
+    overflow-x: auto;
+    overflow-y: hidden;
+
+    :deep(.el-pagination) {
+        flex-shrink: 0;
+        min-width: max-content;
+    }
 }
 
-.detail-summary-heading span {
+:deep(.table-card .el-card__body) {
+    overflow: hidden;
+}
+
+:deep(.table-card .el-table) {
     flex: 0 0 auto;
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.6;
 }
 
-.detail-summary-heading strong {
-    min-width: 0;
-    color: var(--text-primary);
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.5;
-    word-break: break-word;
+:deep(.summary-table .summary-edge-column .cell),
+:deep(.summary-table th.summary-edge-column .cell) {
+    padding-right: 18px !important;
 }
 
-.detail-summary-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px 14px;
+:deep(.table-card .pagination-area) {
+    padding: 12px 18px !important;
+    margin-top: 0;
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-elevated);
 }
 
-.detail-summary-item {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-}
-
-.detail-summary-item span {
-    color: var(--text-tertiary);
-    font-size: 12px;
-}
-
-.detail-summary-item strong {
-    min-width: 0;
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.45;
-    word-break: break-word;
-}
-
-.detail-keyword-input {
-    width: 360px;
-    max-width: 100%;
-}
-
-:deep(.checklist-detail-drawer .el-drawer__body) {
-    overflow: auto;
-}
-
-@media (max-width: 760px) {
-    :deep(.checklist-filter-card .el-form.el-form--inline) {
-        display: grid !important;
-        grid-template-columns: 1fr;
-    }
-
-    :deep(.checklist-filter-card .filter-form .el-form-item) {
-        width: 100%;
-    }
-
-    :deep(.checklist-filter-card .filter-form .el-input),
-    :deep(.checklist-filter-card .filter-form .el-select),
-    :deep(.checklist-filter-card .filter-form .el-date-editor) {
-        width: 100% !important;
-    }
-
+@media (max-width: 900px) {
     .card-header {
-        align-items: stretch;
+        align-items: flex-start;
         flex-direction: column;
     }
 
-    .detail-toolbar {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .detail-keyword-input {
-        width: 100%;
-    }
-
-    .detail-summary-grid {
+    :deep(.checklist-filter-card .el-form.el-form--inline) {
         grid-template-columns: 1fr;
+    }
+
+    .card-header-actions {
+        width: 100%;
     }
 }
 </style>

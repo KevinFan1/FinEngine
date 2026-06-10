@@ -22,6 +22,7 @@ class TokenResponse(BaseModel):
 class UserInfo(BaseModel):
     id: int
     org_id: int | None
+    org_type: str | None = None
     username: str
     phone: str
     display_name: str

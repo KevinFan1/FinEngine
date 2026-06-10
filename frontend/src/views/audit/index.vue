@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container">
+    <div class="page-container page-container--flow">
         <!-- Filter bar -->
         <el-card shadow="never" class="search-card audit-search-card">
             <el-form :model="searchForm" inline class="audit-filter-form">
@@ -404,6 +404,8 @@ const actionMap: Record<string, string> = {
     export: "导出",
     view: "查看",
     config_change: "配置变更",
+    merchant_edit: "商家修改",
+    invoice_edit: "发票修改",
 };
 
 const moduleOptions = Object.entries(moduleMap).map(([value, label]) => ({

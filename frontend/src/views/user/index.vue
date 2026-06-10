@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container">
+  <div class="page-container page-container--flow">
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
       <el-form :model="searchForm" inline>

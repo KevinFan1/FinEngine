@@ -88,12 +88,27 @@ def _structured_log_format(record: dict[str, Any]) -> str:
     return STANDARD_LOG_FORMAT
 
 
+def _add_handler_with_queue_fallback(sink: Any, **kwargs: Any) -> int:
+    try:
+        return logger.add(sink, **kwargs)
+    except OSError as exc:
+        if not kwargs.get("enqueue"):
+            raise
+
+        fallback_kwargs = dict(kwargs)
+        fallback_kwargs["enqueue"] = False
+        sys.stderr.write(
+            f"Log queue unavailable for {sink!s}: {exc}. Falling back to synchronous logging.\n"
+        )
+        return logger.add(sink, **fallback_kwargs)
+
+
 def setup_logging() -> None:
     log_dir = Path(settings.LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     logger.remove()
-    logger.add(
+    _add_handler_with_queue_fallback(
         log_dir / "api.log",
         level=settings.LOG_LEVEL,
         rotation=settings.LOG_ROTATION_TIME,
@@ -104,7 +119,7 @@ def setup_logging() -> None:
         diagnose=False,
         format=_structured_log_format,
     )
-    logger.add(
+    _add_handler_with_queue_fallback(
         log_dir / "api_error.log",
         level="ERROR",
         rotation=settings.LOG_ROTATION_TIME,

@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container file-spec-page">
+    <div class="page-container page-container--flow file-spec-page">
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" class="spec-filter-form">
                 <div class="spec-filter-grid">

@@ -7,6 +7,23 @@ import { useUserStore } from "@/stores/user";
 import { forceLogout } from "@/utils/authSession";
 import { getStoredAuthToken, isAuthTokenExpired } from "@/utils/authToken";
 
+const INTERNAL_ONLY_ROUTE_NAMES = new Set([
+    "UploadCenter",
+    "Shops",
+    "Tasks",
+    "Summaries",
+    "SummaryReport",
+    "TransactionUploadCenter",
+    "TransactionTasks",
+    "TransactionMajorCategories",
+    "TransactionRules",
+    "TransactionSummaries",
+    "TransactionSummaryReport",
+    "BicTasks",
+    "BicSummary",
+    "BicDetails",
+]);
+
 const routes: RouteRecordRaw[] = [
     {
         path: "/login",
@@ -185,19 +202,43 @@ const routes: RouteRecordRaw[] = [
                 path: "reconciliation-checklist/upload",
                 name: "ReconciliationChecklistUpload",
                 component: () => import("@/views/reconciliation-checklist/upload.vue"),
-                meta: { title: "对账清单上传", icon: "Upload" },
+                meta: { title: "底表上传", icon: "Upload" },
             },
             {
                 path: "reconciliation-checklist/tasks",
                 name: "ReconciliationChecklistTasks",
                 component: () => import("@/views/reconciliation-checklist/tasks.vue"),
-                meta: { title: "对账清单任务", icon: "List" },
+                meta: { title: "任务中心", icon: "List" },
             },
             {
                 path: "reconciliation-checklist/summary",
                 name: "ReconciliationChecklistSummary",
                 component: () => import("@/views/reconciliation-checklist/summary.vue"),
-                meta: { title: "对账清单汇总", icon: "DataAnalysis" },
+                meta: { title: "商家总表", icon: "DataAnalysis", checklistSummaryMode: "receipt" },
+            },
+            {
+                path: "reconciliation-checklist/merchant-details",
+                name: "ReconciliationChecklistMerchantDetails",
+                component: () => import("@/views/reconciliation-checklist/summary.vue"),
+                meta: { title: "商家明细", icon: "Document", checklistSummaryMode: "product" },
+            },
+            {
+                path: "reconciliation-checklist/payable-balance-details",
+                name: "ReconciliationChecklistPayableBalanceDetails",
+                component: () => import("@/views/reconciliation-checklist/summary.vue"),
+                meta: { title: "余额明细", icon: "Document", checklistSummaryMode: "payable_balance" },
+            },
+            {
+                path: "reconciliation-checklist/invoice-edits",
+                name: "ReconciliationChecklistInvoiceEdits",
+                component: () => import("@/views/reconciliation-checklist/invoice-edits.vue"),
+                meta: { title: "发票修改", icon: "Document" },
+            },
+            {
+                path: "reconciliation-checklist/merchant-edits",
+                name: "ReconciliationChecklistMerchantEdits",
+                component: () => import("@/views/reconciliation-checklist/merchant-edits.vue"),
+                meta: { title: "商家修改", icon: "Document" },
             },
             {
                 path: "merchant-reconciliation",
@@ -277,7 +318,10 @@ const router = createRouter({
 });
 
 // Navigation guards
-router.beforeEach((to, _from, next) => {
+let pendingUserInfoRefresh: Promise<void> | null = null;
+let hasSyncedUserInfo = false;
+
+router.beforeEach(async (to, _from, next) => {
     const token = getStoredAuthToken();
     const tokenExpired = Boolean(token && isAuthTokenExpired(token));
 
@@ -321,6 +365,27 @@ router.beforeEach((to, _from, next) => {
         return;
     }
 
+    if (!hasSyncedUserInfo) {
+        if (!pendingUserInfoRefresh) {
+            const userStore = useUserStore();
+            pendingUserInfoRefresh = userStore
+                .fetchAndStoreUserInfo()
+                .then(() => {
+                    hasSyncedUserInfo = true;
+                })
+                .finally(() => {
+                    pendingUserInfoRefresh = null;
+                });
+        }
+        try {
+            await pendingUserInfoRefresh;
+            const raw = localStorage.getItem("userInfo");
+            userInfo = raw && raw !== "undefined" ? JSON.parse(raw) : null;
+        } catch {
+            // Fall back to the cached profile when refresh fails.
+        }
+    }
+
     // Check role-based access
     const requiredRoles = to.meta.roles as string[] | undefined;
     if (requiredRoles && requiredRoles.length > 0) {
@@ -330,6 +395,14 @@ router.beforeEach((to, _from, next) => {
             next("/dashboard");
             return;
         }
+    }
+
+    const routeName = to.name ? String(to.name) : "";
+    const isInternalOrg =
+        userInfo?.role === "superadmin" || userInfo?.org_type === "internal";
+    if (INTERNAL_ONLY_ROUTE_NAMES.has(routeName) && !isInternalOrg) {
+        next("/dashboard");
+        return;
     }
 
     next();

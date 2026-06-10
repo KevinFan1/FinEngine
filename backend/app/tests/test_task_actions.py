@@ -135,7 +135,17 @@ async def test_requeue_bank_flow_uses_bank_flow_worker(monkeypatch: pytest.Monke
         async def refresh(self, _obj):
             return None
 
-    task = ProcessingTask(id=7, file_id=9, org_id=2, user_id=3, status="failed")
+    previous_updated_at = datetime.now(timezone.utc) - timedelta(days=1)
+    task = ProcessingTask(
+        id=7,
+        file_id=9,
+        org_id=2,
+        user_id=3,
+        status="failed",
+        started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        finished_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        updated_at=previous_updated_at,
+    )
     upload_file = SimpleNamespace(
         id=9,
         parsed_type="银行流水",
@@ -149,6 +159,10 @@ async def test_requeue_bank_flow_uses_bank_flow_worker(monkeypatch: pytest.Monke
 
     assert delay_calls == [{"task_id": 7, "file_id": 9, "oss_key": "bank-flow.xlsx"}]
     assert task.celery_task_id == "bank-flow-celery-id"
+    assert task.started_at is None
+    assert task.finished_at is None
+    assert task.updated_at is not None
+    assert task.updated_at > previous_updated_at
 
 
 @pytest.mark.asyncio

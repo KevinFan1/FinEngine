@@ -1,9 +1,10 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.core.database import run_after_commit_callbacks
-from app.models.bic_accounting import BicUploadFile
+from app.models.bic_accounting import BicTask, BicUploadFile
 from app.models.reconciliation_checklist import ReconciliationChecklistTask, ReconciliationChecklistUploadFile
 from app.models.task import ProcessingTask
 from app.models.transaction_accounting import TransactionTask, TransactionUploadFile
@@ -143,9 +144,9 @@ class _RerunSession:
         self.added.append(instance)
 
     async def get(self, model, item_id):
-        if model is TransactionTask and item_id == self.task.id:
+        if item_id == getattr(self.task, "id", None) and model is self.task.__class__:
             return self.task
-        if model is TransactionUploadFile and item_id == self.upload_file.id:
+        if item_id == getattr(self.upload_file, "id", None) and model is self.upload_file.__class__:
             return self.upload_file
         return None
 
@@ -195,6 +196,25 @@ def make_shared_upload(
 def test_upload_file_size_label_uses_real_binary_units() -> None:
     assert upload_service_module._format_file_size(40 * 1024 * 1024) == "40.00 MB"
     assert upload_service_module._format_file_size(4096) == "4.00 KB"
+
+
+def test_internal_only_shared_upload_detector_matches_douyin_dongzhang_and_bic() -> None:
+    assert upload_service_module._is_internal_only_shared_upload(
+        platform_code="douyin",
+        parsed_type="动账",
+    )
+    assert upload_service_module._is_internal_only_shared_upload(
+        platform_code="douyin",
+        parsed_type="bic",
+    )
+    assert not upload_service_module._is_internal_only_shared_upload(
+        platform_code="douyin",
+        parsed_type="对账清单",
+    )
+    assert not upload_service_module._is_internal_only_shared_upload(
+        platform_code="kuaishou",
+        parsed_type="动账",
+    )
 
 
 @pytest.mark.asyncio
@@ -302,6 +322,9 @@ async def test_transaction_accounting_reupload_creates_new_records_for_same_busi
 async def test_transaction_accounting_rerun_reuses_task_and_preserves_result_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    previous_started_at = datetime(2026, 2, 1, 8, 0, tzinfo=timezone.utc)
+    previous_finished_at = datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc)
+    previous_updated_at = datetime(2026, 2, 1, 9, 5, tzinfo=timezone.utc)
     old_task = TransactionTask(
         id=7,
         file_id=77,
@@ -314,6 +337,9 @@ async def test_transaction_accounting_rerun_reuses_task_and_preserves_result_sta
         unmatched_rows=0,
         failed_rows=0,
         result_summary={"ok": True},
+        started_at=previous_started_at,
+        finished_at=previous_finished_at,
+        updated_at=previous_updated_at,
     )
     upload_file = TransactionUploadFile(
         id=77,
@@ -366,6 +392,10 @@ async def test_transaction_accounting_rerun_reuses_task_and_preserves_result_sta
     assert old_task.failed_rows == 0
     assert old_task.error_message is None
     assert old_task.result_summary == {"ok": True}
+    assert old_task.started_at is None
+    assert old_task.finished_at is None
+    assert old_task.updated_at is not None
+    assert old_task.updated_at > previous_updated_at
     assert upload_file.status == "uploaded"
     assert upload_file.error_message is None
     executed_sql = "\n".join(str(stmt) for stmt in session.executed)
@@ -419,6 +449,85 @@ async def test_bic_accounting_creates_independent_records_from_shared_upload(
     assert task.org_id == shared_upload.org_id
     assert task.celery_task_id is None
     assert delay_calls == []
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
+    assert task.celery_task_id == f"bic-{task.id}"
+    assert delay_calls == [task.id]
+
+
+@pytest.mark.asyncio
+async def test_bic_accounting_rerun_resets_task_timestamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous_started_at = datetime(2026, 2, 1, 8, 0, tzinfo=timezone.utc)
+    previous_finished_at = datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc)
+    previous_updated_at = datetime(2026, 2, 1, 9, 5, tzinfo=timezone.utc)
+    task = BicTask(
+        id=17,
+        file_id=88,
+        org_id=9,
+        user_id=7,
+        status="success",
+        progress=100,
+        processed_rows=10,
+        success_rows=10,
+        failed_rows=0,
+        result_summary={"ok": True},
+        started_at=previous_started_at,
+        finished_at=previous_finished_at,
+        updated_at=previous_updated_at,
+    )
+    upload_file = BicUploadFile(
+        id=88,
+        org_id=9,
+        user_id=7,
+        shop_id=12,
+        source_upload_file_id=21,
+        original_name="26年02月_bic_抖音旗舰店.xlsx",
+        oss_key="bic-oss-key.xlsx",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+        status="processed",
+        error_message="old error",
+    )
+    session = _RerunSession(task=task, upload_file=upload_file)
+    user = make_user(user_id=7, org_id=9)
+    delay_calls: list[int] = []
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+    monkeypatch.setattr(
+        "app.tasks.bic_accounting.run_bic_accounting_task",
+        SimpleNamespace(
+            delay=lambda task_id: delay_calls.append(task_id)
+            or SimpleNamespace(id=f"bic-{task_id}"),
+        ),
+    )
+
+    rerun_task = await BicAccountingService.rerun_task(
+        session,  # type: ignore[arg-type]
+        task_id=task.id,
+        user=user,
+    )
+
+    assert rerun_task is task
+    assert task.status == "queued"
+    assert task.progress == 0
+    assert task.error_message is None
+    assert task.started_at is None
+    assert task.finished_at is None
+    assert task.updated_at is not None
+    assert task.updated_at > previous_updated_at
+    assert upload_file.status == "uploaded"
+    assert upload_file.error_message is None
 
     await run_after_commit_callbacks(session)  # type: ignore[arg-type]
 
@@ -565,6 +674,82 @@ async def test_reconciliation_checklist_creates_independent_records_from_shared_
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_checklist_rerun_resets_task_timestamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous_started_at = datetime(2026, 2, 1, 8, 0, tzinfo=timezone.utc)
+    previous_finished_at = datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc)
+    previous_updated_at = datetime(2026, 2, 1, 9, 5, tzinfo=timezone.utc)
+    task = ReconciliationChecklistTask(
+        id=27,
+        file_id=98,
+        org_id=9,
+        user_id=7,
+        status="success",
+        progress=100,
+        total_rows=10,
+        success_rows=10,
+        failed_rows=0,
+        inserted_rows=6,
+        updated_rows=4,
+        result_summary={"ok": True},
+        started_at=previous_started_at,
+        finished_at=previous_finished_at,
+        updated_at=previous_updated_at,
+    )
+    upload_file = ReconciliationChecklistUploadFile(
+        id=98,
+        org_id=9,
+        user_id=7,
+        source_upload_file_id=21,
+        original_name="26年02月_对账清单_抖音旗舰店.xlsx",
+        oss_key="checklist-oss-key.xlsx",
+        status="processed",
+        error_message="old error",
+    )
+    session = _RerunSession(task=task, upload_file=upload_file)
+    user = make_user(user_id=7, org_id=9)
+    delay_calls: list[int] = []
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.audit_service.AuditService.log",
+        fake_log,
+    )
+    monkeypatch.setattr(
+        "app.tasks.reconciliation_checklist.run_reconciliation_checklist_task",
+        SimpleNamespace(
+            delay=lambda task_id: delay_calls.append(task_id)
+            or SimpleNamespace(id=f"checklist-{task_id}"),
+        ),
+    )
+
+    rerun_task = await ReconciliationChecklistService.rerun_task(
+        session,  # type: ignore[arg-type]
+        task_id=task.id,
+        user=user,
+    )
+
+    assert rerun_task is task
+    assert task.status == "queued"
+    assert task.progress == 0
+    assert task.error_message is None
+    assert task.started_at is None
+    assert task.finished_at is None
+    assert task.updated_at is not None
+    assert task.updated_at > previous_updated_at
+    assert upload_file.status == "uploaded"
+    assert upload_file.error_message is None
+
+    await run_after_commit_callbacks(session)  # type: ignore[arg-type]
+
+    assert task.celery_task_id == f"checklist-{task.id}"
+    assert delay_calls == [task.id]
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_checklist_reuses_existing_source_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -611,9 +796,23 @@ class _UploadDispatchSession:
         self.added = []
         self._next_id = 1
         self.info = {}
+        self.org_type = "internal"
 
     def add(self, instance) -> None:
         self.added.append(instance)
+
+    async def execute(self, stmt):
+        class _Result:
+            def __init__(self, value):
+                self._value = value
+
+            def scalar_one_or_none(self):
+                return self._value
+
+        statement = str(stmt)
+        if "SELECT fin_organizations.org_type" in statement:
+            return _Result(self.org_type)
+        return _Result(None)
 
     async def flush(self) -> None:
         for instance in self.added:
@@ -639,6 +838,9 @@ class _UploadDispatchSession:
         ("动账", 2026, 2, 1, 0, 0),
         ("bic", 2026, 2, 0, 1, 0),
         ("对账清单", None, None, 0, 0, 1),
+        ("对账清单-原始数据", None, None, 0, 0, 1),
+        ("对账清单-发票更新", None, None, 0, 0, 1),
+        ("对账清单-商家更新", None, None, 0, 0, 1),
         ("订单", 2026, 2, 0, 0, 0),
         ("订单", None, None, 0, 0, 0),
     ],
@@ -763,8 +965,8 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
         parsed_year=parsed_year,
         parsed_month=parsed_month,
         parsed_type=parsed_type,
-        parsed_shop="" if parsed_type == "对账清单" else "抖音旗舰店",
-        detected_platform="" if parsed_type == "对账清单" else "douyin",
+        parsed_shop="" if parsed_type.startswith("对账清单") else "抖音旗舰店",
+        detected_platform="" if parsed_type.startswith("对账清单") else "douyin",
     )
 
     upload_file = await UploadService.handle_file_callback(
@@ -785,3 +987,65 @@ async def test_upload_service_dispatches_shared_upload_to_independent_flows(
     assert bic_calls == [upload_file.id] * expected_bic_calls
     assert checklist_calls == [upload_file.id] * expected_checklist_calls
     assert any("大小 4.00 KB" in description for description in audit_descriptions)
+
+
+@pytest.mark.asyncio
+async def test_upload_service_rejects_internal_only_shared_upload_for_external_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _UploadDispatchSession()
+    session.org_type = "external"
+    user = make_user(user_id=7, org_id=9)
+    batch = UploadBatch(id=1, org_id=9, user_id=7, file_count=1)
+
+    async def fake_get_batch_for_user(*args, **kwargs):
+        return batch
+
+    async def fake_check_storage_quota(*args, **kwargs):
+        return True, ""
+
+    async def fake_get_or_create_shop(*args, **kwargs):
+        return SimpleNamespace(id=12)
+
+    async def fake_resolve_platform_profile(*args, **kwargs):
+        return SimpleNamespace(
+            source_platform_code="douyin",
+            report_platform_code="douyin",
+            processor_code="douyin",
+            order_scope_code="douyin",
+        )
+
+    monkeypatch.setattr(UploadService, "get_batch_for_user", fake_get_batch_for_user)
+    monkeypatch.setattr(
+        "app.services.upload_service.QuotaService.check_storage_quota",
+        fake_check_storage_quota,
+    )
+    monkeypatch.setattr(
+        "app.services.upload_service.resolve_platform_profile",
+        fake_resolve_platform_profile,
+    )
+    monkeypatch.setattr(
+        "app.services.upload_service.ShopService.get_or_create_shop",
+        fake_get_or_create_shop,
+    )
+
+    callback_data = upload_service_module.UploadFileCallback(
+        batch_id=1,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="user-upload/test/current.xlsx",
+        file_size=4096,
+        file_hash="hash",
+        parsed_year=2026,
+        parsed_month=2,
+        parsed_type="动账",
+        parsed_shop="抖音旗舰店",
+        detected_platform="douyin",
+    )
+
+    with pytest.raises(ValueError, match="外部组织不能使用该核算功能"):
+        await UploadService.handle_file_callback(
+            session,  # type: ignore[arg-type]
+            batch_id=1,
+            data=callback_data,
+            user=user,
+        )

@@ -10,6 +10,7 @@ export interface ReconciliationChecklistTask {
     source_upload_file_id?: number | null;
     original_name: string;
     celery_task_id?: string | null;
+    task_type: string;
     status: string;
     progress: number;
     total_rows: number;
@@ -25,32 +26,55 @@ export interface ReconciliationChecklistTask {
     updated_at: string;
 }
 
-export interface ReconciliationChecklistSummary {
+export interface ReconciliationChecklistProductSummary {
     key: string;
     org_id: number;
     org_name?: string | null;
     accounting_year: number;
     accounting_month: number;
     accounting_period: number;
-    merchant_id?: number | null;
-    live_promoter_id?: number | null;
-    receipt_merchant_id?: number | null;
-    merchant_name: string;
-    live_promoter: string;
     receipt_merchant: string;
+    merchant_subject_name: string;
+    product_name: string;
     product_quantity: number;
-    total_order_amount: string;
+    total_user_paid_amount: string;
     total_live_commission: string;
     total_merchant_net_amount: string;
 }
 
-export interface ReconciliationChecklistSummaryDetail {
-    product_name: string;
-    product_quantity: number;
-    total_order_amount: string;
+export interface ReconciliationChecklistReceiptSummary {
+    key: string;
+    org_id: number;
+    org_name?: string | null;
+    accounting_year: number;
+    accounting_month: number;
+    accounting_period: number;
+    merchant_subject_name: string;
+    live_platform: string;
+    receipt_merchant: string;
+    order_count: number;
+    total_user_paid_amount: string;
     total_live_commission: string;
     total_merchant_net_amount: string;
 }
+
+export interface ReconciliationChecklistPayableBalanceSummary {
+    key: string;
+    org_id: number;
+    org_name?: string | null;
+    accounting_year: number;
+    accounting_month: number;
+    accounting_period: number;
+    merchant_subject_name: string;
+    receipt_merchant: string;
+    total_user_paid_amount: string;
+    total_merchant_net_amount: string;
+    total_payment_amount: string;
+    total_merchant_net_balance: string;
+}
+
+export type ReconciliationChecklistSummary = ReconciliationChecklistProductSummary;
+export type ReconciliationChecklistSummaryDetail = ReconciliationChecklistProductSummary;
 
 export interface ReconciliationChecklistTaskParams {
     page?: number;
@@ -77,7 +101,15 @@ export interface ReconciliationChecklistSummaryParams {
     merchant_ids?: string;
     live_promoter_ids?: string;
     receipt_merchant_ids?: string;
+    merchant_subject_name?: string;
+    product_name?: string;
+    live_platform?: string;
     keyword?: string;
+}
+
+export interface ReconciliationChecklistOption {
+    label: string;
+    value: string;
 }
 
 export interface ReconciliationChecklistEntityOption {
@@ -113,13 +145,12 @@ export interface ReconciliationChecklistDashboardMonthlyMetric {
 
 export interface ReconciliationChecklistDashboardMonthlyAmount {
     month: number;
-    total_order_amount: string;
+    total_user_paid_amount: string;
 }
 
 export interface ReconciliationChecklistDashboardMerchant {
-    merchant_id: number;
     merchant_name: string;
-    total_order_amount: string;
+    total_user_paid_amount: string;
 }
 
 export interface ReconciliationChecklistDashboardRecentTask {
@@ -138,19 +169,192 @@ export interface ReconciliationChecklistDashboardMetrics {
     total_task_count: number;
     failed_task_count: number;
     total_rows: number;
-    total_order_amount: string;
+    total_user_paid_amount: string;
     merchant_count: number;
     covered_month_count: number;
     completion_rate: string;
     year: number;
     monthly_task_counts: ReconciliationChecklistDashboardMonthlyMetric[];
-    monthly_order_amounts: ReconciliationChecklistDashboardMonthlyAmount[];
+    monthly_user_paid_amounts: ReconciliationChecklistDashboardMonthlyAmount[];
     top_merchants: ReconciliationChecklistDashboardMerchant[];
     recent_tasks: ReconciliationChecklistDashboardRecentTask[];
 }
 
+export interface ReconciliationChecklistManualEditQueryParams {
+    org_id: number;
+    sub_order_nos: string[];
+}
+
+export interface ReconciliationChecklistInvoiceEditItem {
+    unique_id?: string;
+    sub_order_no: string;
+    settlement_time?: string | null;
+    platform_subsidy?: string | null;
+    talent_subsidy?: string | null;
+    douyin_pay_subsidy?: string | null;
+    douyin_monthly_pay_subsidy?: string | null;
+    bank_subsidy?: string | null;
+    user_paid_amount?: string | null;
+    platform_service_fee?: string | null;
+    talent_commission?: string | null;
+    investment_service_fee?: string | null;
+    receipt_merchant: string;
+    invoice_time?: string | null;
+    invoice_number: string;
+}
+
+export interface ReconciliationChecklistMerchantEditItem {
+    unique_id?: string;
+    sub_order_no: string;
+    settlement_time?: string | null;
+    platform_subsidy?: string | null;
+    talent_subsidy?: string | null;
+    douyin_pay_subsidy?: string | null;
+    douyin_monthly_pay_subsidy?: string | null;
+    bank_subsidy?: string | null;
+    user_paid_amount?: string | null;
+    platform_service_fee?: string | null;
+    talent_commission?: string | null;
+    investment_service_fee?: string | null;
+    receipt_merchant: string;
+    merchant_net_amount?: string | null;
+    payment_amount?: string | null;
+    merchant_payment_time?: string | null;
+}
+
+export interface ReconciliationChecklistManualEditQueryResult<T> {
+    matched_items: T[];
+    missing_sub_order_nos: string[];
+}
+
+export interface ReconciliationChecklistManualEditSaveResult {
+    success_count: number;
+    failed_count: number;
+    unchanged_count: number;
+    missing_sub_order_nos: string[];
+    affected_periods: number[];
+    error_messages: string[];
+}
+
+export interface ReconciliationChecklistManualEditUploadFile {
+    id: number;
+    org_id: number;
+    user_id: number;
+    original_name: string;
+    oss_key: string;
+    file_size: number;
+    file_hash?: string | null;
+    status: string;
+}
+
+export interface ReconciliationChecklistManualEditOssCredential {
+    file_id: number;
+    access_key_id: string;
+    access_key_secret: string;
+    security_token: string;
+    expiration: string;
+    region: string;
+    bucket: string;
+    endpoint: string;
+    oss_key_prefix: string;
+}
+
+export interface ReconciliationChecklistManualEditUploadInitResponse {
+    file: ReconciliationChecklistManualEditUploadFile;
+    upload: ReconciliationChecklistManualEditOssCredential;
+}
+
+export interface ReconciliationChecklistManualEditUploadTask {
+    task_id: number;
+    status: string;
+}
+
 export function listReconciliationChecklistTasks(params: ReconciliationChecklistTaskParams) {
     return get<PaginatedData<ReconciliationChecklistTask>>("/reconciliation-checklist/tasks", params);
+}
+
+export function queryReconciliationChecklistInvoiceEdits(
+    data: ReconciliationChecklistManualEditQueryParams,
+) {
+    return post<ReconciliationChecklistManualEditQueryResult<ReconciliationChecklistInvoiceEditItem>>(
+        "/reconciliation-checklist/invoice-edits/query",
+        data,
+    );
+}
+
+export function saveReconciliationChecklistInvoiceEdits(data: {
+    org_id: number;
+    items: ReconciliationChecklistInvoiceEditItem[];
+}) {
+    return post<ReconciliationChecklistManualEditSaveResult>(
+        "/reconciliation-checklist/invoice-edits/save",
+        data,
+    );
+}
+
+export function uploadReconciliationChecklistInvoiceEdits(data: {
+    org_id: number;
+    original_name: string;
+    file_size: number;
+}) {
+    return post<ReconciliationChecklistManualEditUploadInitResponse>(
+        "/reconciliation-checklist/invoice-edits/upload-init",
+        data,
+    );
+}
+
+export function callbackReconciliationChecklistInvoiceEditsUpload(data: {
+    file_id: number;
+    oss_key: string;
+    file_size: number;
+    file_hash?: string;
+}) {
+    return post<ReconciliationChecklistManualEditUploadTask>(
+        "/reconciliation-checklist/invoice-edits/upload-callback",
+        data,
+    );
+}
+
+export function queryReconciliationChecklistMerchantEdits(
+    data: ReconciliationChecklistManualEditQueryParams,
+) {
+    return post<ReconciliationChecklistManualEditQueryResult<ReconciliationChecklistMerchantEditItem>>(
+        "/reconciliation-checklist/merchant-edits/query",
+        data,
+    );
+}
+
+export function saveReconciliationChecklistMerchantEdits(data: {
+    org_id: number;
+    items: ReconciliationChecklistMerchantEditItem[];
+}) {
+    return post<ReconciliationChecklistManualEditSaveResult>(
+        "/reconciliation-checklist/merchant-edits/save",
+        data,
+    );
+}
+
+export function uploadReconciliationChecklistMerchantEdits(data: {
+    org_id: number;
+    original_name: string;
+    file_size: number;
+}) {
+    return post<ReconciliationChecklistManualEditUploadInitResponse>(
+        "/reconciliation-checklist/merchant-edits/upload-init",
+        data,
+    );
+}
+
+export function callbackReconciliationChecklistMerchantEditsUpload(data: {
+    file_id: number;
+    oss_key: string;
+    file_size: number;
+    file_hash?: string;
+}) {
+    return post<ReconciliationChecklistManualEditUploadTask>(
+        "/reconciliation-checklist/merchant-edits/upload-callback",
+        data,
+    );
 }
 
 export function getReconciliationChecklistDashboardMetrics(params?: {
@@ -177,6 +381,29 @@ export function getReconciliationChecklistTaskSourceDownload(taskId: number) {
 
 export function listReconciliationChecklistSummary(params: ReconciliationChecklistSummaryParams) {
     return get<PaginatedData<ReconciliationChecklistSummary>>("/reconciliation-checklist/summary", params);
+}
+
+export function listReconciliationChecklistProductSummary(params: ReconciliationChecklistSummaryParams) {
+    return get<PaginatedData<ReconciliationChecklistProductSummary>>("/reconciliation-checklist/product-summary", params);
+}
+
+export function listReconciliationChecklistReceiptSummary(params: ReconciliationChecklistSummaryParams) {
+    return get<PaginatedData<ReconciliationChecklistReceiptSummary>>("/reconciliation-checklist/receipt-summary", params);
+}
+
+export function listReconciliationChecklistPayableBalanceSummary(params: ReconciliationChecklistSummaryParams) {
+    return get<PaginatedData<ReconciliationChecklistPayableBalanceSummary>>("/reconciliation-checklist/payable-balance-summary", params);
+}
+
+export function listReconciliationChecklistOptions(params: {
+    kind: "merchant_subject" | "receipt_merchant" | "live_platform" | "product_name";
+    accounting_year?: number;
+    accounting_month?: number;
+    org_id?: number | string;
+    keyword?: string;
+    limit?: number;
+}) {
+    return get<ReconciliationChecklistOption[]>("/reconciliation-checklist/options", params);
 }
 
 export function listReconciliationChecklistSummaryDetails(

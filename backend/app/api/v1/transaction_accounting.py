@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_async_session
-from app.core.deps import get_current_user, require_superadmin
+from app.core.deps import ensure_internal_org_access, get_current_user, require_superadmin
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.transaction_accounting import (
@@ -40,7 +40,7 @@ from app.services.transaction_accounting_service import TransactionAccountingSer
 from app.utils.query_filters import parse_query_datetime
 from app.models.transaction_accounting import TransactionTask, TransactionUploadFile
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(ensure_internal_org_access)])
 
 
 class TransactionUploadInitResponse(BaseModel):

@@ -49,6 +49,7 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
                 实际平台补贴="1",
                 实际抖音支付补贴="2",
                 实际抖音月付营销补贴="3",
+                实际达人补贴="4",
                 平台服务费="-5",
                 佣金="6",
                 招商服务费="7",
@@ -74,7 +75,7 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
     assert agg["gmv"] == Decimal("80")
     assert agg["order_paid_amount"] == Decimal("100")
     assert agg["refund_amount"] == Decimal("20")
-    assert agg["platform_income"] == Decimal("6")
+    assert agg["platform_income"] == Decimal("10")
     assert agg["platform_fee"] == Decimal("5")
     assert agg["return_cost"] == Decimal("3")
     assert agg["commission"] == Decimal("6")

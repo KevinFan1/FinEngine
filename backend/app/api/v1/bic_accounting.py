@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.core.deps import get_current_user
+from app.core.deps import ensure_internal_org_access, get_current_user
 from app.models.bic_accounting import BicTask, BicUploadFile
 from app.models.user import User
 from app.schemas.bic_accounting import BicDetailOut, BicSourceRowOut, BicTaskOut
@@ -16,7 +16,7 @@ from app.services.bic_accounting_service import BicAccountingService
 from app.services.oss_service import is_oss_object_unavailable_error, oss_service
 from app.utils.query_filters import parse_query_datetime
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(ensure_internal_org_access)])
 
 
 class BicTaskBatchActionIn(BaseModel):

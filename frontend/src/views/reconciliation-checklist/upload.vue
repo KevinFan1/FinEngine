@@ -25,10 +25,10 @@
 
                     <div class="page-header">
                         <div>
-                            <h2>对账清单上传</h2>
+                            <h2>底表上传</h2>
                             <p>确认表头匹配后再提交任务。</p>
                         </div>
-                        <el-button @click="downloadChecklistTemplate">下载模板</el-button>
+                        <el-button @click="handleTemplateDownload">下载模板</el-button>
                     </div>
 
                     <section class="upload-steps" aria-label="上传流程">
@@ -122,9 +122,9 @@
 
                         <el-table :data="items" stripe border class="summary-table roomy-table file-table">
                             <el-table-column type="index" label="#" width="50" align="center" />
-                            <el-table-column label="类型" width="110" align="center">
-                                <template #default>
-                                    <FileTypeBadge type="对账清单" />
+                            <el-table-column label="类型" width="150" align="center">
+                                <template #default="{ row }">
+                                    <FileTypeBadge :type="row.fileType || '对账清单'" />
                                 </template>
                             </el-table-column>
                             <el-table-column prop="name" label="文件名" min-width="260" show-overflow-tooltip />
@@ -211,7 +211,11 @@ import { createBatch, getOssSts, uploadCallback, type OssStsCredential } from "@
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import { useUserStore } from "@/stores/user";
 import { ApiBusinessError } from "@/api";
-import { CHECKLIST_FILE_TYPE, downloadChecklistTemplate } from "./common";
+import {
+    CHECKLIST_FILE_TYPE,
+    checklistFileTypeLabel,
+    downloadChecklistTemplate,
+} from "./common";
 
 type UploadStatus = "pending" | "uploading" | "success" | "error";
 const HEADER_CHECK_TIMEOUT = 15000;
@@ -220,6 +224,8 @@ interface HeaderCheckResult {
     headerRowFound: boolean;
     valid: boolean;
     missing: string[];
+    fileType: string;
+    empty: boolean;
 }
 
 interface HeaderWorkerSuccess {
@@ -241,6 +247,7 @@ interface UploadItem {
     file: File;
     name: string;
     valid: boolean;
+    fileType: string;
     message: string;
     error: string;
     status: UploadStatus;
@@ -296,6 +303,14 @@ async function fetchOrgs() {
     orgId.value = orgOptions.value[0]?.id;
 }
 
+async function handleTemplateDownload() {
+    try {
+        await downloadChecklistTemplate("source");
+    } catch {
+        // Error handled by interceptor / browser
+    }
+}
+
 async function handleFileInput(event: Event) {
     const files = Array.from((event.target as HTMLInputElement).files || []);
     await addFiles(files);
@@ -321,6 +336,7 @@ async function addFiles(files: File[]) {
             file,
             name: file.name,
             valid: false,
+            fileType: "",
             message: "校验中",
             error: "",
             status: "pending",
@@ -352,6 +368,16 @@ async function addFiles(files: File[]) {
 async function precheck(item: UploadItem) {
     try {
         const result = await inspectChecklistHeaders(item.file);
+        if (result.empty) {
+            patchItem(item, {
+                valid: true,
+                fileType: result.fileType,
+                message: "空数据，可提交任务",
+                error: "",
+                status: "pending",
+            });
+            return;
+        }
         if (!result.headerRowFound) {
             patchItem(item, {
                 valid: false,
@@ -363,7 +389,8 @@ async function precheck(item: UploadItem) {
         }
         patchItem(item, {
             valid: result.valid,
-            message: result.valid ? "表头匹配，可提交任务" : `缺少：${result.missing.join("、")}`,
+            fileType: result.fileType,
+            message: result.valid ? `识别为${checklistFileTypeLabel(result.fileType)}，可提交任务` : `缺少：${result.missing.join("、")}`,
             error: result.valid ? "" : `缺少：${result.missing.join("、")}`,
             status: "pending",
         });
@@ -466,7 +493,7 @@ async function createUploadContext(rows: UploadItem[]): Promise<UploadContext> {
         file_count: rows.length,
         total_bytes: rows.reduce((sum, row) => sum + row.file.size, 0),
         org_id: userStore.isSuperAdmin ? orgId.value : undefined,
-        remark: "对账清单上传",
+        remark: "底表上传",
     });
     const sts = await getOssSts(batch.id);
     const ossClient = await createOssClient(sts, batch.id);
@@ -546,7 +573,7 @@ async function uploadOne(item: UploadItem, context: UploadContext) {
             original_name: item.file.name,
             oss_key: ossKey,
             file_size: item.file.size,
-            parsed_type: CHECKLIST_FILE_TYPE,
+            parsed_type: item.fileType || CHECKLIST_FILE_TYPE,
             parsed_shop: "",
             detected_platform: "",
         });

@@ -142,19 +142,121 @@
                 <div class="header-right">
                     <QuotaWarning />
 
-                    <el-tooltip content="刷新当前页" placement="bottom">
-                        <button
-                            class="refresh-btn"
-                            :class="{ 'is-loading': isRefreshingCurrentPage }"
-                            type="button"
-                            aria-label="刷新当前页"
-                            :aria-busy="isRefreshingCurrentPage"
-                            :disabled="isRefreshingCurrentPage"
-                            @click="refreshCurrentPage"
-                        >
-                            <el-icon><Refresh /></el-icon>
-                        </button>
-                    </el-tooltip>
+                    <el-popover
+                        :visible="downloadCenterPopoverVisible"
+                        placement="bottom-end"
+                        trigger="click"
+                        :width="520"
+                        popper-class="download-center-popover"
+                        @update:visible="downloadCenterPopoverVisible = $event"
+                    >
+                        <template #reference>
+                            <button
+                                class="download-center-entry"
+                                :class="{ 'download-center-entry--active': hasActiveDownloadJobs }"
+                                type="button"
+                                :aria-label="downloadCenterTooltip"
+                            >
+                                <span
+                                    v-if="hasActiveDownloadJobs"
+                                    class="download-center-pulse"
+                                    aria-hidden="true"
+                                ></span>
+                                <el-icon><Download /></el-icon>
+                                <span
+                                    v-if="activeDownloadJobCount > 0"
+                                    class="download-center-count"
+                                >
+                                    {{ activeDownloadJobCount }}
+                                </span>
+                            </button>
+                        </template>
+
+                        <div class="download-center-panel">
+                            <div class="download-center-panel__header">
+                                <div class="download-center-panel__headline">
+                                    <span class="download-center-panel__eyebrow">下载中心</span>
+                                    <strong>最近导出任务</strong>
+                                    <p>查看最近生成结果，完成后可直接下载</p>
+                                </div>
+                                <span class="download-center-panel__summary">
+                                    {{
+                                        hasActiveDownloadJobs
+                                            ? `${activeDownloadJobCount} 个任务处理中`
+                                            : "全部任务已完成"
+                                    }}
+                                </span>
+                            </div>
+
+                            <div class="download-center-panel__body">
+                                <el-scrollbar
+                                    v-if="recentDownloadJobs.length"
+                                    class="download-center-panel__scroll"
+                                >
+                                    <div class="download-center-panel__list">
+                                        <div class="download-center-panel__columns" aria-hidden="true">
+                                            <span class="download-center-panel__column-title">文件名称</span>
+                                            <span class="download-center-panel__column-title">状态</span>
+                                            <span class="download-center-panel__column-title">按钮</span>
+                                        </div>
+                                        <div
+                                            v-for="job in recentDownloadJobs"
+                                            :key="job.id"
+                                            class="download-center-job"
+                                        >
+                                            <strong
+                                                class="download-center-job__filename"
+                                                :title="downloadJobFilenameLabel(job)"
+                                            >
+                                                {{ downloadJobFilenameLabel(job) }}
+                                            </strong>
+                                            <span
+                                                class="download-center-job__status"
+                                                :class="`is-${job.status}`"
+                                                :aria-label="`状态：${downloadJobStatusLabel(job.status)}`"
+                                            >
+                                                <span class="download-center-job__status-dot" aria-hidden="true"></span>
+                                            </span>
+                                            <div class="download-center-job__action-cell">
+                                                <button
+                                                    v-if="job.status === 'success'"
+                                                    type="button"
+                                                    class="download-center-job__action"
+                                                    :disabled="downloadingHeaderJobId === job.id"
+                                                    @click="downloadHeaderJob(job)"
+                                                >
+                                                    {{
+                                                        downloadingHeaderJobId === job.id
+                                                            ? "下载中"
+                                                            : "下载"
+                                                    }}
+                                                </button>
+                                                <span v-else class="download-center-job__action-placeholder">-</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </el-scrollbar>
+
+                                <div
+                                    v-else
+                                    class="download-center-panel__empty"
+                                >
+                                    暂无导出任务
+                                </div>
+                            </div>
+
+                            <div class="download-center-panel__footer">
+                                <button
+                                    type="button"
+                                    class="download-center-panel__link"
+                                    @click="openDownloadCenterEntry"
+                                >
+                                    <span>查看全部</span>
+                                    <span class="download-center-panel__link-icon" aria-hidden="true">›</span>
+                                </button>
+                            </div>
+                        </div>
+                    </el-popover>
 
                     <!-- Theme toggle button -->
                     <el-tooltip
@@ -468,7 +570,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, provide, ref, watch, type Component } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type Component } from "vue";
 import { ElMessage } from "element-plus/es/components/message/index.mjs";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -495,12 +597,19 @@ import {
     type PageRefreshHandler,
     type PageRefreshRegistry,
 } from "@/composables/pageRefresh";
+import {
+    downloadExportJobFile,
+    listExportJobs,
+    type ExportJob,
+    type ExportJobStatus,
+} from "@/api/exportJob";
 import { useAppStore, type Tab } from "@/stores/app";
 import { useUserStore } from "@/stores/user";
 import { useThemeStore } from "@/stores/theme";
 import BrandLogo from "@/components/BrandLogo.vue";
 import ForcePasswordChangeDialog from "@/components/ForcePasswordChangeDialog.vue";
 import QuotaWarning from "@/components/QuotaWarning.vue";
+import { navigateToDownloadCenter } from "@/utils/downloadCenterNavigation";
 import {
     filterSidebarMenuByRole,
     sidebarMenuItems,
@@ -517,7 +626,18 @@ const userStore = useUserStore();
 const themeStore = useThemeStore();
 const guideDrawerVisible = ref(false);
 const forcePasswordVisible = ref(false);
-const isRefreshingCurrentPage = ref(false);
+const activeDownloadJobCount = ref(0);
+const recentDownloadJobs = ref<ExportJob[]>([]);
+const downloadingHeaderJobId = ref<number | null>(null);
+const downloadCenterPopoverVisible = ref(false);
+let downloadJobPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const hasActiveDownloadJobs = computed(() => activeDownloadJobCount.value > 0);
+const downloadCenterTooltip = computed(() =>
+    hasActiveDownloadJobs.value
+        ? `下载中心：有 ${activeDownloadJobCount.value} 个导出任务处理中`
+        : "打开下载中心",
+);
 const routeRefreshNonce = ref(0);
 const refreshingRouteName = ref<string | null>(null);
 const pageRefreshHandlers = new Map<string, PageRefreshHandler>();
@@ -600,14 +720,14 @@ function findMenuPath(
 
 const menuItems = computed(() =>
     resolveSidebarMenuIcons(
-        filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole).filter(
+        filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole, userStore.isInternalOrg).filter(
             (item): item is SidebarMenuLinkItem => item.type !== "divider",
         ),
     ),
 );
 
 const filteredMenuItems = computed(() =>
-    filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole).map((item) =>
+    filterSidebarMenuByRole(sidebarMenuItems, userStore.userRole, userStore.isInternalOrg).map((item) =>
         item.type === "divider"
             ? item
             : {
@@ -986,6 +1106,14 @@ watch(
     { immediate: true },
 );
 
+onMounted(() => {
+    startDownloadJobPolling();
+});
+
+onUnmounted(() => {
+    stopDownloadJobPolling();
+});
+
 function openTab(tab: Tab) {
     hideTabContextMenu();
     if (tab.path === route.path) return;
@@ -1058,18 +1186,9 @@ async function refreshRouteFallback() {
 }
 
 async function refreshCurrentPage() {
-    if (isRefreshingCurrentPage.value) return;
-
-    isRefreshingCurrentPage.value = true;
-    try {
-        const handled = await pageRefreshRegistry.refresh(
-            currentRouteName.value,
-        );
-        if (!handled) {
-            await refreshRouteFallback();
-        }
-    } finally {
-        isRefreshingCurrentPage.value = false;
+    const handled = await pageRefreshRegistry.refresh(currentRouteName.value);
+    if (!handled) {
+        await refreshRouteFallback();
     }
 }
 
@@ -1096,6 +1215,88 @@ function handleCommand(command: string) {
         userStore.logout();
     } else if (command === "profile") {
         router.push("/profile");
+    }
+}
+
+async function fetchActiveDownloadJobs() {
+    try {
+        const [queuedResult, runningResult, recentResult] = await Promise.all([
+            listExportJobs({
+                page: 1,
+                page_size: 1,
+                status: "queued",
+            }),
+            listExportJobs({
+                page: 1,
+                page_size: 1,
+                status: "running",
+            }),
+            listExportJobs({
+                page: 1,
+                page_size: 6,
+            }),
+        ]);
+        activeDownloadJobCount.value =
+            Number(queuedResult.total || 0) + Number(runningResult.total || 0);
+        recentDownloadJobs.value = recentResult.items || [];
+    } catch {
+        activeDownloadJobCount.value = 0;
+        recentDownloadJobs.value = [];
+    }
+}
+
+async function openDownloadCenterEntry() {
+    downloadCenterPopoverVisible.value = false;
+    await nextTick();
+    await navigateToDownloadCenter(router, window.location);
+}
+
+function downloadJobStatusLabel(status: ExportJobStatus) {
+    return {
+        queued: "排队中",
+        running: "生成中",
+        success: "可下载",
+        failed: "失败",
+        expired: "已过期",
+    }[status] || status;
+}
+
+function downloadJobFilenameLabel(job: ExportJob) {
+    const filename = (job.filename || "").trim();
+    if (filename) return filename;
+    const title = (job.title || "").trim();
+    if (title) return title;
+    const exportType = (job.export_type || "").trim();
+    if (exportType) return exportType;
+    return "导出任务";
+}
+
+async function downloadHeaderJob(job: ExportJob) {
+    if (downloadingHeaderJobId.value) return;
+
+    downloadingHeaderJobId.value = job.id;
+    try {
+        await downloadExportJobFile(job.id);
+        ElMessage.success("下载已开始");
+    } catch {
+        ElMessage.error("下载失败，请稍后重试");
+    } finally {
+        downloadingHeaderJobId.value = null;
+    }
+}
+
+function startDownloadJobPolling() {
+    stopDownloadJobPolling();
+    fetchActiveDownloadJobs();
+    downloadJobPollTimer = setInterval(() => {
+        fetchActiveDownloadJobs();
+    }, 15000);
+}
+
+function stopDownloadJobPolling() {
+    if (downloadJobPollTimer) {
+        clearInterval(downloadJobPollTimer);
+        downloadJobPollTimer = null;
     }
 }
 </script>
@@ -1346,6 +1547,21 @@ function handleCommand(command: string) {
     }
 }
 
+@keyframes download-pulse {
+    0% {
+        transform: scale(0.96);
+        box-shadow: 0 0 0 0 rgba(230, 162, 60, 0.38);
+    }
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 9px rgba(230, 162, 60, 0);
+    }
+    100% {
+        transform: scale(0.96);
+        box-shadow: 0 0 0 0 rgba(230, 162, 60, 0);
+    }
+}
+
 // ==============================
 // Main Area
 // ==============================
@@ -1409,10 +1625,10 @@ function handleCommand(command: string) {
         gap: 14px;
         flex-shrink: 0;
 
-        .refresh-btn {
-            width: 32px;
+        .download-center-entry {
+            position: relative;
             height: 32px;
-            padding: 0;
+            width: 34px;
             border: 1px solid var(--border-color);
             background: var(--bg-card);
             color: var(--text-primary);
@@ -1421,27 +1637,56 @@ function handleCommand(command: string) {
             justify-content: center;
             cursor: pointer;
             border-radius: var(--radius-btn);
-            font-size: 16px;
             box-shadow: var(--shadow-sm);
             transition:
                 border-color 0.12s,
                 background-color 0.12s,
                 color 0.12s,
-                opacity 0.12s;
+                transform 0.12s;
 
-            &:hover:not(:disabled) {
+            .el-icon {
+                font-size: 16px;
+            }
+
+            &:hover {
                 color: var(--primary);
                 border-color: var(--primary);
                 background: var(--primary-light);
+                transform: translateY(-1px);
             }
 
-            &:disabled {
-                cursor: progress;
-                opacity: 0.72;
+            &--active {
+                border-color: color-mix(in srgb, var(--warning) 62%, var(--border-color));
+                background: color-mix(in srgb, var(--warning) 10%, var(--bg-card));
             }
 
-            &.is-loading .el-icon {
-                animation: spin 0.7s linear infinite;
+            .download-center-count {
+                position: absolute;
+                top: -6px;
+                right: -6px;
+                min-width: 18px;
+                height: 18px;
+                padding: 0 4px;
+                border-radius: 999px;
+                background: var(--warning);
+                color: #fff;
+                font-size: 11px;
+                font-weight: 700;
+                line-height: 18px;
+                text-align: center;
+                box-shadow: 0 4px 10px rgba(230, 162, 60, 0.28);
+            }
+
+            .download-center-pulse {
+                position: absolute;
+                top: 6px;
+                right: 8px;
+                width: 8px;
+                height: 8px;
+                border-radius: 999px;
+                background: var(--warning);
+                box-shadow: 0 0 0 rgba(230, 162, 60, 0.5);
+                animation: download-pulse 1.6s ease-out infinite;
             }
         }
 
@@ -1499,6 +1744,256 @@ function handleCommand(command: string) {
             }
         }
     }
+}
+
+:global(.download-center-popover) {
+    padding: 0;
+    border-radius: 14px;
+    border: 1px solid color-mix(in srgb, var(--primary-light-6) 48%, var(--border-light));
+    overflow: hidden;
+    box-shadow: 0 24px 54px rgba(15, 23, 42, 0.16);
+    backdrop-filter: blur(14px);
+}
+
+:global(.download-center-popover .download-center-panel) {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+:global(.download-center-popover .download-center-panel__header) {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 16px 13px;
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--primary-light) 72%, #fff) 0%, #ffffff 72%);
+    border-bottom: 1px solid color-mix(in srgb, var(--primary-light-8) 68%, var(--border-light));
+}
+
+:global(.download-center-popover .download-center-panel__header strong) {
+    display: block;
+    font-size: 18px;
+    line-height: 1.3;
+    letter-spacing: 0;
+}
+
+:global(.download-center-popover .download-center-panel__header p) {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+:global(.download-center-popover .download-center-panel__headline) {
+    min-width: 0;
+}
+
+:global(.download-center-popover .download-center-panel__eyebrow) {
+    display: inline-block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
+    color: var(--primary);
+}
+
+:global(.download-center-popover .download-center-panel__summary) {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--primary);
+    text-align: right;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.84);
+    border: 1px solid color-mix(in srgb, var(--primary-light-7) 60%, transparent);
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+}
+
+:global(.download-center-popover .download-center-panel__body) {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, color-mix(in srgb, var(--bg-page) 42%, #fff) 100%);
+    padding-top: 12px;
+}
+
+:global(.download-center-popover .download-center-panel__scroll) {
+    max-height: 344px;
+}
+
+:global(.download-center-popover .download-center-panel__list) {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 0 12px 12px;
+}
+
+:global(.download-center-popover .download-center-panel__columns),
+:global(.download-center-popover .download-center-job) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px 64px;
+    align-items: center;
+    gap: 8px;
+}
+
+:global(.download-center-popover .download-center-panel__columns) {
+    padding: 0 12px 2px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+:global(.download-center-popover .download-center-panel__column-title:nth-child(2)),
+:global(.download-center-popover .download-center-panel__column-title:nth-child(3)) {
+    text-align: center;
+}
+
+:global(.download-center-popover .download-center-job) {
+    min-height: 44px;
+    padding: 8px 10px 8px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid color-mix(in srgb, var(--border-light) 78%, transparent);
+    box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+    transition:
+        background-color 0.14s ease,
+        transform 0.14s ease,
+        box-shadow 0.14s ease,
+        border-color 0.14s ease;
+}
+
+:global(.download-center-popover .download-center-job:hover) {
+    background: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+    border-color: color-mix(in srgb, var(--primary-light-6) 48%, var(--border-light));
+}
+
+:global(.download-center-popover .download-center-job__filename) {
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+:global(.download-center-popover .download-center-job__action),
+:global(.download-center-popover .download-center-panel__link) {
+    border: 1px solid color-mix(in srgb, var(--primary-light-6) 58%, var(--border-light));
+    background: #ffffff;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 12px;
+    height: 30px;
+    line-height: 28px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(22, 119, 255, 0.08);
+    transition:
+        background-color 0.14s ease,
+        border-color 0.14s ease,
+        box-shadow 0.14s ease,
+        transform 0.14s ease;
+}
+
+:global(.download-center-popover .download-center-job__action:hover),
+:global(.download-center-popover .download-center-panel__link:hover) {
+    background: color-mix(in srgb, var(--primary-light) 72%, #fff);
+    border-color: color-mix(in srgb, var(--primary) 36%, var(--primary-light-6));
+    box-shadow: 0 6px 14px rgba(22, 119, 255, 0.14);
+    transform: translateY(-1px);
+}
+
+:global(.download-center-popover .download-center-job__action:disabled) {
+    cursor: wait;
+    color: var(--text-disabled);
+    background: var(--bg-muted);
+    border-color: var(--border-light);
+    transform: none;
+}
+
+:global(.download-center-popover .download-center-job__action-cell) {
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+}
+
+:global(.download-center-popover .download-center-job__action-placeholder) {
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+:global(.download-center-popover .download-center-job__status) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 999px;
+    background: transparent;
+}
+
+:global(.download-center-popover .download-center-job__status-dot) {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow:
+        0 0 0 4px color-mix(in srgb, currentColor 13%, transparent),
+        inset 0 0 0 2px rgba(255, 255, 255, 0.72);
+}
+
+:global(.download-center-popover .download-center-job__status.is-running),
+:global(.download-center-popover .download-center-job__status.is-queued) {
+    color: var(--warning);
+}
+
+:global(.download-center-popover .download-center-job__status.is-success) {
+    color: var(--success);
+}
+
+:global(.download-center-popover .download-center-job__status.is-failed),
+:global(.download-center-popover .download-center-job__status.is-expired) {
+    color: var(--danger);
+}
+
+:global(.download-center-popover .download-center-panel__empty) {
+    margin: 0 12px 12px;
+    padding: 24px 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px dashed color-mix(in srgb, var(--border-light) 76%, transparent);
+}
+
+:global(.download-center-popover .download-center-panel__footer) {
+    display: flex;
+    justify-content: flex-end;
+    padding: 10px 12px 12px;
+    background: #ffffff;
+    border-top: 1px solid var(--border-light);
+}
+
+:global(.download-center-popover .download-center-panel__link) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px 0 12px;
+}
+
+:global(.download-center-popover .download-center-panel__link-icon) {
+    font-size: 16px;
+    line-height: 1;
 }
 
 // ==============================
@@ -2222,6 +2717,10 @@ function handleCommand(command: string) {
 
         .header-right {
             flex-shrink: 0;
+
+            .download-center-entry {
+                width: 34px;
+            }
 
             .user-info {
                 .username {

@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container download-page">
+    <div class="page-container page-container--flow download-page">
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline>
                 <el-form-item label="状态">
@@ -13,11 +13,12 @@
                 </el-form-item>
                 <el-form-item label="模块">
                     <el-select v-model="searchForm.module" clearable placeholder="模块">
-                        <el-option label="汇总" value="summary" />
-                        <el-option label="资金科目核算" value="transaction_accounting" />
-                        <el-option label="BIC对账" value="bic_accounting" />
-                        <el-option label="商家对账" value="merchant_reconciliation" />
-                        <el-option label="对账清单" value="reconciliation_checklist" />
+                        <el-option
+                            v-for="option in DOWNLOAD_CENTER_MODULE_OPTIONS"
+                            :key="option.value"
+                            :label="option.label"
+                            :value="option.value"
+                        />
                     </el-select>
                 </el-form-item>
                 <el-form-item>
@@ -60,14 +61,14 @@
                         {{ rowIndex($index) }}
                     </template>
                 </el-table-column>
-                <el-table-column prop="title" label="名称" min-width="240" show-overflow-tooltip />
+                <el-table-column prop="title" label="模块" min-width="240" show-overflow-tooltip />
                 <el-table-column prop="filename" label="文件名称" min-width="240" show-overflow-tooltip />
                 <el-table-column prop="operator_name" label="操作人" width="140" show-overflow-tooltip>
                     <template #default="{ row }">
                         <span class="text-tertiary">{{ row.operator_name || "-" }}</span>
                     </template>
                 </el-table-column>
-                <el-table-column prop="module" label="模块" width="150">
+                <el-table-column prop="module" label="所属模块" width="150">
                     <template #default="{ row }">
                         <el-tag class="module-tag" size="small" effect="plain">
                             {{ moduleLabel(row.module) }}
@@ -263,6 +264,10 @@ import {
     type ExportJobStatus,
 } from "@/api/exportJob";
 import { formatDateTime } from "@/utils/format";
+import {
+    DOWNLOAD_CENTER_MODULE_OPTIONS,
+    getDownloadCenterModuleLabel,
+} from "@/utils/downloadCenterModules";
 
 const loading = ref(false);
 const downloadingId = ref<number | null>(null);
@@ -287,13 +292,7 @@ const tableSummary = computed(() => {
 });
 
 function moduleLabel(module: string) {
-    return {
-        summary: "汇总",
-        transaction_accounting: "资金科目核算",
-        bic_accounting: "BIC对账",
-        merchant_reconciliation: "商家对账",
-        reconciliation_checklist: "对账清单",
-    }[module] || module;
+    return getDownloadCenterModuleLabel(module);
 }
 
 function statusLabel(status: ExportJobStatus) {

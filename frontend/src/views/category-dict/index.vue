@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container category-dict-page">
+    <div class="page-container page-container--flow category-dict-page">
         <el-card shadow="never" class="search-card matcher-card">
             <div class="matcher-layout">
                 <section class="matcher-copy" aria-label="分类匹配辅助">

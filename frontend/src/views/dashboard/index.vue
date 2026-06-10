@@ -5,7 +5,7 @@
                 <span class="hero-kicker">数据总览</span>
                 <h2>首页</h2>
                 <p>
-                    围绕对账清单处理结果，集中查看任务规模、GMV、商家覆盖和最近处理情况。
+                    围绕对账清单处理结果，集中查看任务规模、用户实付、商户主体覆盖和最近处理情况。
                 </p>
             </div>
             <div class="hero-meta">
@@ -59,21 +59,21 @@
             <article class="panel-card chart-panel">
                 <div class="panel-header">
                     <div>
-                        <span class="panel-kicker">Monthly GMV</span>
-                        <h3>{{ metrics.year }} 年每月 GMV</h3>
+                        <span class="panel-kicker">Monthly Paid</span>
+                        <h3>{{ metrics.year }} 年每月用户实付</h3>
                     </div>
-                    <span class="panel-note">按动账月份统计</span>
+                    <span class="panel-note">按结算月份统计</span>
                 </div>
                 <div
                     ref="amountChartRef"
                     class="chart-box"
                     role="img"
-                    aria-label="全年每月 GMV 面积图"
+                    aria-label="全年每月用户实付面积图"
                 ></div>
                 <el-empty
                     v-if="!loading && !hasMonthlyAmountData"
                     class="chart-empty"
-                    description="暂无本年度 GMV"
+                    description="暂无本年度用户实付"
                 />
             </article>
 
@@ -81,14 +81,14 @@
                 <div class="panel-header">
                     <div>
                         <span class="panel-kicker">Top Merchants</span>
-                        <h3>商家 GMV Top 5</h3>
+                        <h3>商户主体用户实付 Top 5</h3>
                     </div>
-                    <span class="panel-note">按商家维度</span>
+                    <span class="panel-note">按商户主体维度</span>
                 </div>
                 <div v-if="metrics.top_merchants.length" class="merchant-list">
                     <div
                         v-for="(merchant, index) in metrics.top_merchants"
-                        :key="merchant.merchant_id"
+                        :key="merchant.merchant_name"
                         class="merchant-row"
                     >
                         <span class="rank">{{ index + 1 }}</span>
@@ -100,14 +100,14 @@
                                 <span
                                     :style="{
                                         width: merchantBarWidth(
-                                            merchant.total_order_amount,
+                                            merchant.total_user_paid_amount,
                                         ),
                                     }"
                                 ></span>
                             </div>
                         </div>
                         <b>{{
-                            formatCompactCurrency(merchant.total_order_amount)
+                            formatCompactCurrency(merchant.total_user_paid_amount)
                         }}</b>
                     </div>
                 </div>
@@ -212,7 +212,7 @@ const emptyMonthlyTaskCounts = () =>
 const emptyMonthlyAmounts = () =>
     Array.from({ length: 12 }, (_, index) => ({
         month: index + 1,
-        total_order_amount: "0.00",
+        total_user_paid_amount: "0.00",
     }));
 
 const metrics = shallowRef<ReconciliationChecklistDashboardMetrics>({
@@ -220,13 +220,13 @@ const metrics = shallowRef<ReconciliationChecklistDashboardMetrics>({
     total_task_count: 0,
     failed_task_count: 0,
     total_rows: 0,
-    total_order_amount: "0.00",
+    total_user_paid_amount: "0.00",
     merchant_count: 0,
     covered_month_count: 0,
     completion_rate: "0.00",
     year: currentYear,
     monthly_task_counts: emptyMonthlyTaskCounts(),
-    monthly_order_amounts: emptyMonthlyAmounts(),
+    monthly_user_paid_amounts: emptyMonthlyAmounts(),
     top_merchants: [],
     recent_tasks: [],
 });
@@ -245,17 +245,17 @@ const metricCards = computed(() => [
         className: "metric-card--tasks",
     },
     {
-        label: "累计 GMV",
-        value: formatCurrency(metrics.value.total_order_amount),
-        badge: "订单金额",
-        hint: "来自已落库的对账清单明细订单金额",
+        label: "累计用户实付",
+        value: formatCurrency(metrics.value.total_user_paid_amount),
+        badge: "预聚合口径",
+        hint: "来自对账清单收款商家汇总，不扫订单明细",
         className: "metric-card--gmv",
     },
     {
-        label: "对账商家",
+        label: "商户主体",
         value: formatInteger(metrics.value.merchant_count),
-        badge: "商家口径",
-        hint: "按商家维度统计，不含收款商家口径",
+        badge: "商户主体口径",
+        hint: "按商户主体名称统计，空名称不纳入覆盖数",
         className: "metric-card--merchant",
     },
     {
@@ -282,9 +282,9 @@ const monthlyAmounts = computed(() =>
     Array.from({ length: 12 }, (_, index) => {
         const month = index + 1;
         return Number(
-            metrics.value.monthly_order_amounts.find(
+            metrics.value.monthly_user_paid_amounts.find(
                 (item) => item.month === month,
-            )?.total_order_amount ?? 0,
+            )?.total_user_paid_amount ?? 0,
         );
     }),
 );
@@ -293,7 +293,7 @@ const topMerchantMaxAmount = computed(() =>
     Math.max(
         0,
         ...metrics.value.top_merchants.map((merchant) =>
-            Number(merchant.total_order_amount || 0),
+            Number(merchant.total_user_paid_amount || 0),
         ),
     ),
 );
@@ -428,7 +428,7 @@ function renderAmountChart() {
             trigger: "axis",
             formatter(params) {
                 const item = Array.isArray(params) ? params[0] : params;
-                return `${item.name}<br/>GMV：${formatCurrency(String(item.value || 0))}`;
+                return `${item.name}<br/>用户实付：${formatCurrency(String(item.value || 0))}`;
             },
         },
         grid: { left: 18, right: 14, top: 20, bottom: 26, containLabel: true },
@@ -439,7 +439,7 @@ function renderAmountChart() {
         }),
         series: [
             {
-                name: "GMV",
+                name: "用户实付",
                 type: "line",
                 smooth: true,
                 data: monthlyAmounts.value,
@@ -504,14 +504,14 @@ usePageRefresh(fetchMetrics);
 
 <style scoped lang="scss">
 .dashboard-page {
-    --dashboard-primary: #2563eb;
-    --dashboard-bg: #f8fafc;
-    --dashboard-surface: #ffffff;
-    --dashboard-border: #e2e8f0;
-    --dashboard-success: #10b981;
-    --dashboard-warning: #f59e0b;
-    --dashboard-text: #1e293b;
-    --dashboard-muted: #64748b;
+    --dashboard-primary: #2563EB;
+    --dashboard-bg: #F8FAFC;
+    --dashboard-surface: #FFFFFF;
+    --dashboard-border: #E2E8F0;
+    --dashboard-success: #10B981;
+    --dashboard-warning: #F59E0B;
+    --dashboard-text: #1E293B;
+    --dashboard-muted: #64748B;
     display: block;
     height: auto;
     min-height: 100%;

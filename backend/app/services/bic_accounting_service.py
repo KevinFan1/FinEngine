@@ -428,6 +428,7 @@ class BicAccountingService:
         task.error_message = None
         task.started_at = None
         task.finished_at = None
+        task.updated_at = datetime.now(timezone.utc)
         upload_file.status = "uploaded"
         upload_file.error_message = None
 
@@ -580,7 +581,7 @@ class BicAccountingService:
             .outerjoin(Shop, Shop.id == BicUploadFile.shop_id)
             .outerjoin(Organization, Organization.id == BicTask.org_id)
             .where(*filters)
-            .order_by(BicTask.id.desc())
+            .order_by(BicTask.updated_at.desc(), BicTask.id.desc())
         )
         count_stmt = select(func.count()).select_from(BicTask).join(BicUploadFile, BicUploadFile.id == BicTask.file_id).where(*filters)
         total = (await db.execute(count_stmt)).scalar() or 0

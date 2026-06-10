@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container">
+  <div class="page-container page-container--flow">
     <!-- Search bar -->
     <el-card shadow="never" class="search-card">
       <el-form :model="searchForm" inline>
@@ -50,6 +50,13 @@
         </el-table-column>
         <el-table-column prop="code" label="编码" width="140" show-overflow-tooltip />
         <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="org_type" label="类型" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.org_type === 'internal' ? 'success' : 'info'" size="small">
+              {{ row.org_type === 'internal' ? '内部组织' : '外部组织' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="text-tertiary">{{ row.remark || '-' }}</span>
@@ -133,6 +140,10 @@
               <strong>{{ selectedOrg.code }}</strong>
             </div>
             <div class="detail-item">
+              <span class="detail-label">组织类型</span>
+              <strong>{{ selectedOrg.org_type === 'internal' ? '内部组织' : '外部组织' }}</strong>
+            </div>
+            <div class="detail-item">
               <span class="detail-label">创建时间</span>
               <strong>{{ formatDateTime(selectedOrg.created_at) }}</strong>
             </div>
@@ -171,6 +182,12 @@
             :disabled="isEdit"
             maxlength="50"
           />
+        </el-form-item>
+        <el-form-item label="组织类型" prop="org_type">
+          <el-radio-group v-model="formData.org_type">
+            <el-radio value="external">外部组织</el-radio>
+            <el-radio value="internal">内部组织</el-radio>
+          </el-radio-group>
         </el-form-item>
         <el-form-item label="备注" prop="remark">
           <el-input
@@ -295,6 +312,7 @@ const submitLoading = ref(false)
 const formData = reactive({
   name: '',
   code: '',
+  org_type: 'external' as 'internal' | 'external',
   remark: '',
   // 配额字段（仅编辑时使用）
   plan_type: 'free',
@@ -312,6 +330,9 @@ const formRules: FormRules = {
     { required: true, message: '请输入组织编码', trigger: 'blur' },
     { min: 1, max: 50, message: '长度在 1 到 50 个字符', trigger: 'blur' },
     { pattern: /^[a-zA-Z0-9_-]+$/, message: '只能包含字母、数字、下划线和横线', trigger: 'blur' },
+  ],
+  org_type: [
+    { required: true, message: '请选择组织类型', trigger: 'change' },
   ],
   remark: [
     { max: 2000, message: '备注最多 2000 个字符', trigger: 'blur' },
@@ -376,6 +397,7 @@ async function openFormDrawer(row?: Organization) {
     editId.value = row.id
     formData.name = row.name
     formData.code = row.code
+    formData.org_type = row.org_type
     formData.remark = row.remark || ''
 
     // 加载配额数据（仅超级管理员）
@@ -397,6 +419,7 @@ async function openFormDrawer(row?: Organization) {
     editId.value = null
     formData.name = ''
     formData.code = ''
+    formData.org_type = 'external'
     formData.remark = ''
     formData.plan_type = 'free'
     formData.plan_expires_at = null
@@ -417,6 +440,7 @@ async function handleSubmit() {
       await updateOrganization(editId.value, {
         name: formData.name,
         code: formData.code,
+        org_type: formData.org_type,
         remark: formData.remark,
       })
 
@@ -437,6 +461,7 @@ async function handleSubmit() {
       await createOrganization({
         name: formData.name,
         code: formData.code,
+        org_type: formData.org_type,
         remark: formData.remark,
       })
       ElMessage.success('创建成功')

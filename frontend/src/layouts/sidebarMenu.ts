@@ -23,6 +23,7 @@ export interface SidebarMenuLinkItem {
     title: string;
     icon: SidebarMenuIconName;
     roles?: string[];
+    internalOnly?: boolean;
     children?: SidebarMenuLinkItem[];
 }
 
@@ -49,18 +50,38 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
     },
     {
         path: "/reconciliation-checklist/upload",
-        title: "对账清单上传",
+        title: "底表上传",
         icon: "Upload",
     },
     {
         path: "/reconciliation-checklist/tasks",
-        title: "对账清单任务",
+        title: "任务中心",
         icon: "List",
     },
     {
         path: "/reconciliation-checklist/summary",
-        title: "对账清单汇总",
+        title: "商家总表",
         icon: "DataAnalysis",
+    },
+    {
+        path: "/reconciliation-checklist/merchant-details",
+        title: "商家明细",
+        icon: "Document",
+    },
+    {
+        path: "/reconciliation-checklist/payable-balance-details",
+        title: "余额明细",
+        icon: "Document",
+    },
+    {
+        path: "/reconciliation-checklist/invoice-edits",
+        title: "发票修改",
+        icon: "Document",
+    },
+    {
+        path: "/reconciliation-checklist/merchant-edits",
+        title: "商家修改",
+        icon: "Document",
     },
     {
         path: "/downloads",
@@ -75,16 +96,19 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
         path: "/upload",
         title: "核算上传中心",
         icon: "Upload",
+        internalOnly: true,
     },
     {
         path: "/shops",
         title: "店铺管理",
         icon: "Shop",
+        internalOnly: true,
     },
     {
         path: "/order-accounting",
         title: "动账核算",
         icon: "Money",
+        internalOnly: true,
         children: [
             { path: "/tasks", title: "核算任务", icon: "List" },
             {
@@ -103,6 +127,7 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
         path: "/transaction-accounting",
         title: "动账资金核算",
         icon: "Wallet",
+        internalOnly: true,
         children: [
             {
                 path: "/transaction-tasks",
@@ -125,6 +150,7 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
         path: "/bic-accounting",
         title: "BIC核算",
         icon: "Wallet",
+        internalOnly: true,
         children: [
             {
                 path: "/bic-tasks",
@@ -255,13 +281,15 @@ export const sidebarMenuItems: SidebarMenuItem[] = [
 export function filterSidebarMenuByRole(
     items: SidebarMenuItem[],
     userRole: string,
+    isInternalOrg = true,
 ): SidebarMenuItem[] {
     return items.flatMap((item) => {
         if (item.type === "divider") return [item];
         if (item.roles && !item.roles.includes(userRole)) return [];
+        if (item.internalOnly && !isInternalOrg) return [];
         if (!item.children?.length) return [item];
 
-        const children = filterSidebarMenuByRole(item.children, userRole);
+        const children = filterSidebarMenuByRole(item.children, userRole, isInternalOrg);
         return children.length ? [{ ...item, children }] : [];
     });
 }

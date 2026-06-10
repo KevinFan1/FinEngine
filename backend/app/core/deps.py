@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
+from app.models.organization import ORG_TYPE_INTERNAL, Organization
 from app.core.security import decode_access_token
 from app.models.user import User
 
@@ -61,3 +62,30 @@ def require_same_org_or_superadmin(user=Depends(get_current_user), org_id: int |
     if user.org_id != org_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该组织的数据")
     return user
+
+
+async def _resolve_user_org_type(db: AsyncSession, org_id: int | None) -> str | None:
+    if not org_id:
+        return None
+    result = await db.execute(
+        select(Organization.org_type).where(
+            Organization.id == org_id,
+            Organization.is_deleted.is_(False),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def ensure_internal_org_access(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Only superadmin or internal organizations can access specific features."""
+    if user.role == "superadmin":
+        return user
+
+    org_type = await _resolve_user_org_type(db, user.org_id)
+    if org_type == ORG_TYPE_INTERNAL:
+        return user
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前组织类型无权访问该功能")

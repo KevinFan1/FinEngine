@@ -6,6 +6,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, SoftDeleteMixin
 
 
+ORG_TYPE_EXTERNAL = "external"
+ORG_TYPE_INTERNAL = "internal"
+
+
 class Organization(SoftDeleteMixin, Base):
     __tablename__ = "fin_organizations"
     __table_args__ = (
@@ -18,6 +22,7 @@ class Organization(SoftDeleteMixin, Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="主键ID")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="组织名称")
     code: Mapped[str] = mapped_column(String(50), nullable=False, comment="组织编码")
+    org_type: Mapped[str] = mapped_column(String(20), default=ORG_TYPE_EXTERNAL, nullable=False, comment="组织类型：external=外部组织 internal=内部组织")
     status: Mapped[int] = mapped_column(SmallInteger, default=1, comment="状态：1=启用 0=禁用")
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
 

@@ -20,6 +20,7 @@ export interface UserInfo {
     must_change_password: boolean;
     role: string;
     org_id: number | null;
+    org_type?: "internal" | "external" | null;
     org_name?: string;
     status: string;
     last_login_at: string | null;
@@ -57,6 +58,11 @@ export const useUserStore = defineStore("user", () => {
     );
     const isSuperAdmin = computed(() => userInfo.value?.role === "superadmin");
     const isOrgAdmin = computed(() => userInfo.value?.role === "org_admin");
+    const isInternalOrg = computed(
+        () =>
+            userInfo.value?.role === "superadmin" ||
+            userInfo.value?.org_type === "internal",
+    );
 
     // Actions
     async function login(params: LoginParams) {
@@ -65,24 +71,7 @@ export const useUserStore = defineStore("user", () => {
             token.value = res.access_token;
             localStorage.setItem("token", res.access_token);
 
-            // Fetch user info after obtaining token
-            const info = await getUserInfoApi();
-            const user: UserInfo = {
-                id: info.id,
-                username: info.username,
-                display_name: info.display_name,
-                phone: info.phone,
-                email: info.email,
-                must_change_password: info.must_change_password,
-                role: info.role,
-                org_id: info.org_id,
-                org_name: info.org_name,
-                status: info.status,
-                last_login_at: info.last_login_at,
-                created_at: info.created_at,
-            };
-            userInfo.value = user;
-            localStorage.setItem("userInfo", JSON.stringify(user));
+            await fetchAndStoreUserInfo();
 
             ElMessage.success("登录成功");
             const redirect = router.currentRoute.value.query.redirect;
@@ -106,6 +95,28 @@ export const useUserStore = defineStore("user", () => {
             userInfo.value = null;
             forceLogout({ redirect: true, notify: false });
         }
+    }
+
+    async function fetchAndStoreUserInfo() {
+        const info = await getUserInfoApi();
+        const user: UserInfo = {
+            id: info.id,
+            username: info.username,
+            display_name: info.display_name,
+            phone: info.phone,
+            email: info.email,
+            must_change_password: info.must_change_password,
+            role: info.role,
+            org_id: info.org_id,
+            org_type: info.org_type,
+            org_name: info.org_name,
+            status: info.status,
+            last_login_at: info.last_login_at,
+            created_at: info.created_at,
+        };
+        userInfo.value = user;
+        localStorage.setItem("userInfo", JSON.stringify(user));
+        return user;
     }
 
     function setUserInfo(info: UserInfo) {
@@ -134,6 +145,8 @@ export const useUserStore = defineStore("user", () => {
         displayName,
         isSuperAdmin,
         isOrgAdmin,
+        isInternalOrg,
+        fetchAndStoreUserInfo,
         login,
         logout,
         setUserInfo,

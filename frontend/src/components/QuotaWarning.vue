@@ -240,14 +240,14 @@ onMounted(() => {
 .quota-chip {
     position: relative;
     width: 196px;
-    min-height: 38px;
+    height: 32px;
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
-    grid-template-rows: 24px 3px;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    grid-template-rows: 1fr 2px;
     align-items: center;
-    column-gap: 9px;
-    row-gap: 5px;
-    padding: 6px 10px 6px 8px;
+    column-gap: 8px;
+    row-gap: 3px;
+    padding: 4px 10px 4px 7px;
     border: 1px solid rgba(22, 119, 255, 0.18);
     border-radius: var(--radius-btn);
     background:
@@ -279,8 +279,8 @@ onMounted(() => {
 }
 
 .quota-chip-icon {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -289,7 +289,7 @@ onMounted(() => {
     color: var(--primary);
 
     .el-icon {
-        font-size: 15px;
+        font-size: 14px;
     }
 }
 
@@ -298,14 +298,14 @@ onMounted(() => {
     align-content: center;
     gap: 1px;
     min-width: 0;
-    height: 24px;
+    height: 20px;
 
     strong {
         overflow: hidden;
         color: var(--text-primary);
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 700;
-        line-height: 14px;
+        line-height: 13px;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
@@ -323,15 +323,15 @@ onMounted(() => {
 .quota-chip-percent {
     align-self: center;
     color: var(--el-color-success);
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 800;
-    line-height: 20px;
+    line-height: 18px;
 }
 
 .quota-chip-bar {
     grid-column: 2 / -1;
     width: 100%;
-    height: 3px;
+    height: 2px;
     border-radius: 999px;
     background: var(--border-light);
     overflow: hidden;

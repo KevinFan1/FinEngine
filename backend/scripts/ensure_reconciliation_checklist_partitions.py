@@ -1,6 +1,8 @@
 """Create monthly partitions for reconciliation checklist detail and summary tables.
 
 Usage:
+    uv run ensure-reconciliation-checklist-partitions
+    uv run python scripts/ensure_reconciliation_checklist_partitions.py
     uv run python scripts/ensure_reconciliation_checklist_partitions.py --start 202601 --end 202612
 """
 
@@ -14,7 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.database import async_session_factory
-from app.services.partition_maintenance_service import ensure_reconciliation_checklist_partitions_for_window
+from app.services.partition_maintenance_service import (
+    ensure_reconciliation_checklist_partitions_for_anchor,
+    ensure_reconciliation_checklist_partitions_for_window,
+)
 
 
 def _parse_yyyymm(value: str) -> int:
@@ -29,21 +34,33 @@ def _parse_yyyymm(value: str) -> int:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Create monthly partitions for reconciliation checklist detail and summary tables.")
-    parser.add_argument("--start", type=_parse_yyyymm, required=True, help="起始年月，格式 YYYYMM")
-    parser.add_argument("--end", type=_parse_yyyymm, required=True, help="结束年月，格式 YYYYMM")
+    parser.add_argument("--start", type=_parse_yyyymm, help="起始年月，格式 YYYYMM")
+    parser.add_argument("--end", type=_parse_yyyymm, help="结束年月，格式 YYYYMM")
     args = parser.parse_args()
 
-    if args.end < args.start:
-        raise SystemExit("--end 不能小于 --start")
-
     async with async_session_factory() as db:
-        result = await ensure_reconciliation_checklist_partitions_for_window(
-            db,
-            start_period=args.start,
-            end_period=args.end,
-        )
+        if args.start or args.end:
+            if not args.start or not args.end:
+                raise SystemExit("必须同时提供 --start 和 --end，或者都不提供")
+            if args.end < args.start:
+                raise SystemExit("--end 不能小于 --start")
+
+            result = await ensure_reconciliation_checklist_partitions_for_window(
+                db,
+                start_period=args.start,
+                end_period=args.end,
+            )
+            await db.commit()
+            print(f"已创建对账清单分区窗口: {result['start_period']} ~ {result['end_period']}")
+            return
+
+        result = await ensure_reconciliation_checklist_partitions_for_anchor(db)
         await db.commit()
-        print(f"已创建对账清单分区窗口: {result['start_period']} ~ {result['end_period']}")
+        print(
+            "已创建对账清单分区窗口: "
+            f"{result['start_period']} ~ {result['end_period']} "
+            f"(base={result['base_period']})"
+        )
 
 
 if __name__ == "__main__":

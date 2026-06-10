@@ -1087,10 +1087,19 @@ html.dark .el-tag.platform-tag--miniprogram {
         display: flex;
         justify-content: flex-end;
         align-items: center;
+        flex-shrink: 0;
+        min-width: 0;
         margin-top: 0;
         padding: 12px 18px;
         border-top: 1px solid var(--border-light);
         background: var(--bg-elevated);
+        overflow-x: auto;
+        overflow-y: hidden;
+
+        .el-pagination {
+            flex-shrink: 0;
+            min-width: max-content;
+        }
     }
 
     .card-header {
@@ -1143,6 +1152,12 @@ html.dark .el-tag.platform-tag--miniprogram {
             margin-bottom: 14px;
         }
     }
+}
+
+.page-container--flow {
+    display: block;
+    height: auto;
+    min-height: 100%;
 }
 
 .active-filters {
@@ -1406,7 +1421,6 @@ html.dark .el-tag.platform-tag--miniprogram {
         }
 
         .pagination-area {
-            justify-content: center;
             overflow-x: auto;
             padding-bottom: 2px;
         }

@@ -161,3 +161,9 @@ def ensure_reconciliation_checklist_partitions() -> None:
     from scripts.ensure_reconciliation_checklist_partitions import main
 
     asyncio.run(main())
+
+
+def repair_reconciliation_checklist_partitions() -> None:
+    from scripts.repair_reconciliation_checklist_partitions import main
+
+    asyncio.run(main())

@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container transaction-page">
+    <div class="page-container page-container--flow transaction-page">
         <MerchantFilters
             :model="searchForm"
             :shops="douyinShops"

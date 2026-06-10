@@ -828,6 +828,7 @@ class TransactionAccountingService:
         task.error_message = None
         task.started_at = None
         task.finished_at = None
+        task.updated_at = datetime.now(timezone.utc)
         upload_file.status = "uploaded"
         upload_file.error_message = None
 

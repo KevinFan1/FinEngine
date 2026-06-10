@@ -108,14 +108,23 @@ async def get_me(
     from app.models.organization import Organization
 
     org_name = None
+    org_type = None
     if current_user.org_id:
-        result = await db.execute(select(Organization.name).where(Organization.id == current_user.org_id, Organization.is_deleted.is_(False)))
-        org_name = result.scalar()
+        result = await db.execute(
+            select(Organization.name, Organization.org_type).where(
+                Organization.id == current_user.org_id,
+                Organization.is_deleted.is_(False),
+            )
+        )
+        org_row = result.one_or_none()
+        if org_row is not None:
+            org_name, org_type = org_row
 
     return ApiResponse(
         data=UserInfo(
             id=current_user.id,
             org_id=current_user.org_id,
+            org_type=org_type,
             username=current_user.username,
             phone=current_user.phone,
             display_name=current_user.display_name,
