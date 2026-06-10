@@ -9,6 +9,8 @@ from datetime import date, datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+POSTGRES_IDENTIFIER_MAX_LENGTH = 63
+
 
 def _quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
@@ -24,6 +26,8 @@ class PartitionSpec:
     partition_column: str
     legacy_table_name: str
     prefix: str
+    hash_partition_column: str | None = None
+    hash_partitions: int = 0
 
 
 BIC_SOURCE_PARTITION = PartitionSpec(
@@ -45,20 +49,35 @@ RECONCILIATION_CHECKLIST_PARTITION = PartitionSpec(
     partition_column="accounting_period",
     legacy_table_name="fin_reconciliation_checklist_details_legacy",
     prefix="fin_reconciliation_checklist_details_",
+    hash_partition_column="org_id",
+    hash_partitions=16,
 )
 
 RECONCILIATION_CHECKLIST_SUMMARY_PARTITION = PartitionSpec(
-    table_name="fin_reconciliation_checklist_summary_rows",
+    table_name="fin_reconciliation_checklist_receipt_summary_rows",
     partition_column="accounting_period",
-    legacy_table_name="fin_reconciliation_checklist_summary_rows_legacy",
-    prefix="fin_reconciliation_checklist_summary_rows_",
+    legacy_table_name="fin_reconciliation_checklist_receipt_summary_rows_legacy",
+    prefix="fin_reconciliation_checklist_receipt_summary_rows_",
+    hash_partition_column="org_id",
+    hash_partitions=16,
 )
 
 RECONCILIATION_CHECKLIST_SUMMARY_PRODUCT_PARTITION = PartitionSpec(
-    table_name="fin_reconciliation_checklist_summary_product_rows",
+    table_name="fin_reconciliation_checklist_product_summary_rows",
     partition_column="accounting_period",
-    legacy_table_name="fin_reconciliation_checklist_summary_product_rows_legacy",
-    prefix="fin_reconciliation_checklist_summary_product_rows_",
+    legacy_table_name="fin_reconciliation_checklist_product_summary_rows_legacy",
+    prefix="fin_reconciliation_checklist_product_summary_rows_",
+    hash_partition_column="org_id",
+    hash_partitions=16,
+)
+
+RECONCILIATION_CHECKLIST_PAYABLE_BALANCE_SUMMARY_PARTITION = PartitionSpec(
+    table_name="fin_reconciliation_checklist_payable_balance_summary_rows",
+    partition_column="accounting_period",
+    legacy_table_name="fin_reconciliation_checklist_payable_balance_summary_rows_legacy",
+    prefix="fin_rcl_payable_balance_summary_",
+    hash_partition_column="org_id",
+    hash_partitions=16,
 )
 
 
@@ -101,6 +120,22 @@ def partition_name(spec: PartitionSpec, period: int) -> str:
     return f"{spec.prefix}{period}"
 
 
+def _hash_subpartition_name(partition: str, remainder: int) -> str:
+    return f"{partition}_h{remainder:02d}"
+
+
+def _validate_partition_identifier_length(spec: PartitionSpec, partition: str) -> None:
+    suffix_length = 0
+    if spec.hash_partition_column and spec.hash_partitions > 0:
+        suffix_length = len(_hash_subpartition_name("", max(spec.hash_partitions - 1, 0)))
+    max_partition_length = POSTGRES_IDENTIFIER_MAX_LENGTH - suffix_length
+    if len(partition) > max_partition_length:
+        raise ValueError(
+            f"partition name too long for PostgreSQL identifier limit: {partition} "
+            f"(len={len(partition)}, max={max_partition_length})"
+        )
+
+
 async def _table_exists(db: AsyncSession, table_name: str) -> bool:
     try:
         result = await db.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name})
@@ -126,6 +161,47 @@ async def _is_partitioned(db: AsyncSession, table_name: str) -> bool:
     except TypeError:
         return False
     return bool(result.scalar())
+
+
+async def _primary_key_columns(db: AsyncSession, table_name: str) -> list[str]:
+    result = await db.execute(
+        text(
+            """
+            SELECT array_agg(a.attname ORDER BY k.ord)::text[]
+            FROM pg_index i
+            JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+              ON true
+            JOIN pg_attribute a
+              ON a.attrelid = i.indrelid
+             AND a.attnum = k.attnum
+            WHERE i.indrelid = to_regclass(:table_name)
+              AND i.indisprimary
+            """
+        ),
+        {"table_name": table_name},
+    )
+    columns = result.scalar()
+    return list(columns or [])
+
+
+async def ensure_hash_partition_parent_primary_key(db: AsyncSession, *, spec: PartitionSpec) -> None:
+    if not spec.hash_partition_column or spec.hash_partitions <= 0:
+        return
+    if spec.partition_column != "accounting_period" or spec.hash_partition_column != "org_id":
+        return
+    if not await _table_exists(db, spec.table_name):
+        return
+    if not await _is_partitioned(db, spec.table_name):
+        return
+
+    expected_columns = ["id", "org_id", "accounting_period"]
+    if await _primary_key_columns(db, spec.table_name) == expected_columns:
+        return
+
+    table_name = _quote_identifier(spec.table_name)
+    constraint_name = _quote_identifier(f"{spec.table_name}_pkey")
+    await db.execute(text(f"ALTER TABLE {table_name} DROP CONSTRAINT IF EXISTS {constraint_name}"))
+    await db.execute(text(f"ALTER TABLE {table_name} ADD PRIMARY KEY (id, org_id, accounting_period)"))
 
 
 async def _copy_parent_comments_to_partition(db: AsyncSession, *, spec: PartitionSpec, partition: str) -> None:
@@ -166,6 +242,32 @@ async def _copy_parent_comments_to_partition(db: AsyncSession, *, spec: Partitio
         )
 
 
+async def _direct_child_partition_for_bounds(
+    db: AsyncSession,
+    *,
+    spec: PartitionSpec,
+    period: int,
+    next_period: int,
+) -> str | None:
+    result = await db.execute(
+        text(
+            """
+            SELECT child.relname
+            FROM pg_inherits i
+            JOIN pg_class child ON child.oid = i.inhrelid
+            WHERE i.inhparent = to_regclass(:table_name)
+              AND pg_get_expr(child.relpartbound, child.oid, true) = :partition_bound
+            LIMIT 1
+            """
+        ),
+        {
+            "table_name": spec.table_name,
+            "partition_bound": f"FOR VALUES FROM ({period}) TO ({next_period})",
+        },
+    )
+    return result.scalar()
+
+
 async def ensure_month_partition(db: AsyncSession, *, spec: PartitionSpec, period: int) -> None:
     if not await _table_exists(db, spec.table_name):
         return
@@ -176,16 +278,39 @@ async def ensure_month_partition(db: AsyncSession, *, spec: PartitionSpec, perio
 
     partition = partition_name(spec, period)
     next_period = next_yyyymm(period)
+    _validate_partition_identifier_length(spec, partition)
+    existing_partition = await _direct_child_partition_for_bounds(
+        db,
+        spec=spec,
+        period=period,
+        next_period=next_period,
+    )
+    if existing_partition and existing_partition != partition:
+        await db.execute(text(f"DROP TABLE IF EXISTS {_quote_identifier(existing_partition)} CASCADE"))
+    hash_clause = f" PARTITION BY HASH ({spec.hash_partition_column})" if spec.hash_partition_column and spec.hash_partitions > 0 else ""
     await db.execute(
         text(
             f"""
             CREATE TABLE IF NOT EXISTS {partition}
             PARTITION OF {spec.table_name}
             FOR VALUES FROM ({period}) TO ({next_period})
+            {hash_clause}
             """
         )
     )
     await _copy_parent_comments_to_partition(db, spec=spec, partition=partition)
+    if spec.hash_partition_column and spec.hash_partitions > 0:
+        for remainder in range(spec.hash_partitions):
+            subpartition = _hash_subpartition_name(partition, remainder)
+            await db.execute(
+                text(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {subpartition}
+                    PARTITION OF {partition}
+                    FOR VALUES WITH (MODULUS {spec.hash_partitions}, REMAINDER {remainder})
+                    """
+                )
+            )
 
 
 async def ensure_month_window(
@@ -204,15 +329,4 @@ async def ensure_month_window(
     for period in iter_yyyymm_range(start_period, end_period):
         if period <= 0:
             continue
-        partition = partition_name(spec, period)
-        next_period = next_yyyymm(period)
-        await db.execute(
-            text(
-                f"""
-                CREATE TABLE IF NOT EXISTS {partition}
-                PARTITION OF {spec.table_name}
-                FOR VALUES FROM ({period}) TO ({next_period})
-                """
-            )
-        )
-        await _copy_parent_comments_to_partition(db, spec=spec, partition=partition)
+        await ensure_month_partition(db, spec=spec, period=period)

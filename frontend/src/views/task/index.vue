@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container">
+    <div class="page-container page-container--flow">
         <!-- Filter bar -->
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline>
@@ -329,6 +329,46 @@
                             <span class="text-tertiary">{{
                                 formatDateTime(row.created_at)
                             }}</span>
+                        </div>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="started_at"
+                    label="开始时间"
+                    width="170"
+                >
+                    <template #default="{ row }">
+                        <span class="text-tertiary">{{
+                            row.started_at
+                                ? formatDateTime(row.started_at)
+                                : "-"
+                        }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="finished_at"
+                    label="结束时间"
+                    width="170"
+                >
+                    <template #default="{ row }">
+                        <span class="text-tertiary">{{
+                            row.finished_at
+                                ? formatDateTime(row.finished_at)
+                                : "-"
+                        }}</span>
+                    </template>
+                </el-table-column>
+                <el-table-column
+                    prop="updated_at"
+                    label="更新时间"
+                    width="170"
+                    class-name="created-time-column"
+                >
+                    <template #default="{ row }">
+                        <div class="created-time-stack">
+                            <span class="text-tertiary">{{
+                                formatDateTime(row.updated_at || row.created_at)
+                            }}</span>
                             <el-tag
                                 v-if="isActionExpired(row)"
                                 type="info"
@@ -540,9 +580,21 @@
                         <div class="detail-time-item">
                             <span class="detail-dot"></span>
                             <div>
-                                <span class="detail-label">完成时间</span>
+                                <span class="detail-label">结束时间</span>
                                 <strong>{{
                                     formatDateTime(taskDetail.finished_at)
+                                }}</strong>
+                            </div>
+                        </div>
+                        <div class="detail-time-item">
+                            <span class="detail-dot"></span>
+                            <div>
+                                <span class="detail-label">更新时间</span>
+                                <strong>{{
+                                    formatDateTime(
+                                        taskDetail.updated_at ||
+                                            taskDetail.created_at,
+                                    )
                                 }}</strong>
                             </div>
                         </div>

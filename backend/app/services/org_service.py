@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from app.models.organization import Organization
+from app.models.organization import ORG_TYPE_INTERNAL, Organization
 from app.models.user import User
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import AuditService
@@ -113,6 +113,7 @@ class OrgService:
             .values(
                 name=data.name,
                 code=data.code,
+                org_type=data.org_type,
                 remark=data.remark,
                 status=1,
                 max_users=DEFAULT_ORG_MAX_USERS,
@@ -165,6 +166,7 @@ class OrgService:
             return None
 
         old_value = {"name": org.name, "code": org.code, "remark": org.remark, "status": org.status}
+        old_value["org_type"] = org.org_type
 
         update_data = data.model_dump(exclude_unset=True)
         if "name" in update_data and update_data["name"] != org.name:
@@ -182,7 +184,7 @@ class OrgService:
             raise ValueError(_org_integrity_error_message(exc)) from exc
         await db.refresh(org)
 
-        new_value = {"name": org.name, "code": org.code, "remark": org.remark, "status": org.status}
+        new_value = {"name": org.name, "code": org.code, "org_type": org.org_type, "remark": org.remark, "status": org.status}
 
         await AuditService.log(
             db,

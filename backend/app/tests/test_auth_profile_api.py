@@ -8,6 +8,7 @@ def test_user_info_schema_includes_must_change_password() -> None:
     user = UserInfo(
         id=1,
         org_id=10,
+        org_type="external",
         username="demo",
         phone="13800000000",
         display_name="演示用户",
@@ -20,6 +21,7 @@ def test_user_info_schema_includes_must_change_password() -> None:
     )
 
     assert user.must_change_password is True
+    assert user.org_type == "external"
 
 
 def test_user_info_schema_defaults_must_change_password_false() -> None:
@@ -37,3 +39,4 @@ def test_user_info_schema_defaults_must_change_password_false() -> None:
     )
 
     assert user.must_change_password is False
+    assert user.org_type is None

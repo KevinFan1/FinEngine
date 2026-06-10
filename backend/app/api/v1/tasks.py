@@ -8,7 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.core.deps import get_current_user
+from app.core.deps import ensure_internal_org_access, get_current_user
 from app.models.organization import Organization
 from app.models.shop import Shop
 from app.models.task import ProcessingTask
@@ -21,7 +21,7 @@ from app.services.platform_profile_service import resolve_platform_profile
 from app.services.shop_visibility import active_shop_filter
 from app.utils.query_filters import datetime_range_filters, parse_query_datetime, split_int_filter_values
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(ensure_internal_org_access)])
 TASK_ACTION_EXPIRE_DAYS = 30
 
 
@@ -349,6 +349,7 @@ async def _validate_task_action(
 
 
 async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db: AsyncSession) -> None:
+    now = datetime.now(timezone.utc)
     task.status = "queued"
     task.progress = 0
     task.celery_task_id = None
@@ -359,6 +360,7 @@ async def _enqueue_task_again(task: ProcessingTask, upload_file: UploadFile, db:
     task.result_summary = None
     task.started_at = None
     task.finished_at = None
+    task.updated_at = now
     upload_file.status = "uploaded"
     upload_file.error_message = None
     upload_file.row_count = 0

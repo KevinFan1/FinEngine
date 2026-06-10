@@ -132,7 +132,7 @@
 | `order_paid` | NUMERIC(14,2) | 收 | 订单实付应结 - 返现 |
 | `refund_amount` | NUMERIC(14,2) | 退 | 退款转赔付 - 订单退款 |
 | `gmv` | NUMERIC(14,2) | 实收GMV | 收 - 退 |
-| `platform_income` | NUMERIC(14,2) | 平台其他收入 | 实际平台补贴 + 实际抖音支付补贴 + 实际抖音月付营销补贴 |
+| `platform_income` | NUMERIC(14,2) | 平台其他收入 | 实际平台补贴 + 实际抖音支付补贴 + 实际抖音月付营销补贴 + 实际达人补贴 |
 | `platform_fee_positive` | NUMERIC(14,2) | 平台服务费（修改正数） | -平台服务费 |
 | `return_cost` | NUMERIC(14,2) | 退货及其他费用 | 匹配到赔付分类时取动账金额，否则 0 |
 | `commission_derived` | NUMERIC(14,2) | 达人佣金 | 佣金 |

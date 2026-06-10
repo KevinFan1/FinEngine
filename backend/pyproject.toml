@@ -46,6 +46,7 @@ seed-transaction-accounting-rules = "app.cli.commands:seed_transaction_accountin
 seed-transaction-major-subjects = "app.cli.commands:seed_transaction_major_subjects"
 ensure-source-partitions = "app.cli.commands:ensure_source_partitions"
 ensure-reconciliation-checklist-partitions = "app.cli.commands:ensure_reconciliation_checklist_partitions"
+repair-reconciliation-checklist-partitions = "app.cli.commands:repair_reconciliation_checklist_partitions"
 migrate-generate = "app.cli.commands:migrate_generate"
 migrate-upgrade = "app.cli.commands:migrate_upgrade"
 migrate-downgrade = "app.cli.commands:migrate_downgrade"

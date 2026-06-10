@@ -27,6 +27,7 @@ export interface UserInfo {
     must_change_password: boolean;
     role: string;
     org_id: number | null;
+    org_type?: "internal" | "external" | null;
     org_name?: string;
     status: string;
     last_login_at: string | null;

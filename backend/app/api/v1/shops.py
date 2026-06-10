@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.core.deps import get_current_user
+from app.core.deps import ensure_internal_org_access, get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.shop import ShopCreate, ShopImportResult, ShopOut, ShopUpdate
@@ -49,7 +49,7 @@ async def list_shops(
 
 @router.get("/import-template")
 async def download_shop_import_template(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(ensure_internal_org_access),
 ):
     """下载店铺资料导入模板。"""
     buffer = ShopService.build_import_template()
@@ -65,7 +65,7 @@ async def download_shop_import_template(
 async def import_shops(
     request: Request,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(ensure_internal_org_access),
     db: AsyncSession = Depends(get_async_session),
 ):
     """批量导入店铺资料。"""
@@ -90,7 +90,7 @@ async def import_shops(
 async def create_shop(
     data: ShopCreate,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(ensure_internal_org_access),
     db: AsyncSession = Depends(get_async_session),
 ):
     """创建店铺。"""
@@ -111,7 +111,7 @@ async def create_shop(
 @router.get("/{shop_id}", response_model=ApiResponse[ShopOut])
 async def get_shop(
     shop_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(ensure_internal_org_access),
     db: AsyncSession = Depends(get_async_session),
 ):
     """获取店铺详情。"""
@@ -131,7 +131,7 @@ async def update_shop(
     shop_id: int,
     data: ShopUpdate,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(ensure_internal_org_access),
     db: AsyncSession = Depends(get_async_session),
 ):
     """更新店铺信息。"""
@@ -155,7 +155,7 @@ async def update_shop(
 async def delete_shop(
     shop_id: int,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(ensure_internal_org_access),
     db: AsyncSession = Depends(get_async_session),
 ):
     """删除指定店铺。"""

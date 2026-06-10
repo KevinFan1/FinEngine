@@ -37,6 +37,10 @@ celery_app.conf.beat_schedule = {
     "ensure-source-partitions-daily": {
         "task": "app.tasks.partition_maintenance.ensure_source_partitions_task",
         "schedule": crontab(minute=0, hour=0),
+    },
+    "ensure-reconciliation-checklist-partitions-daily": {
+        "task": "app.tasks.partition_maintenance.ensure_reconciliation_checklist_partitions_precreate_task",
+        "schedule": crontab(minute=10, hour=0),
     }
 }
 

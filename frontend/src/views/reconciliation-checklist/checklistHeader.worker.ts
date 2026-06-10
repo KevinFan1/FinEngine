@@ -9,6 +9,8 @@ interface HeaderCheckResult {
     headerRowFound: boolean;
     valid: boolean;
     missing: string[];
+    fileType: string;
+    empty: boolean;
 }
 
 interface HeaderWorkerSuccess {
@@ -154,19 +156,30 @@ function cellRefToIndex(ref: string) {
     return index - 1;
 }
 
-function resolveFirstSheetPath(workbookXml: string, relsXml: string) {
-    const firstSheet = workbookXml.match(/<sheet\b[^>]*\br:id="([^"]+)"/);
-    const relationId = firstSheet?.[1];
-    if (relationId) {
-        const relPattern = new RegExp(`<Relationship\\b[^>]*\\bId="${relationId}"[^>]*>`, "i");
-        const relationship = relsXml.match(relPattern)?.[0];
-        const target = relationship?.match(/\bTarget="([^"]+)"/)?.[1];
-        if (target) {
-            if (target.startsWith("/")) return target.slice(1);
-            return `xl/${target.replace(/^\.\//, "")}`;
-        }
+function resolveSheetTarget(target: string) {
+    if (target.startsWith("/")) return target.slice(1);
+    return `xl/${target.replace(/^\.\//, "")}`;
+}
+
+function resolveSheetPaths(workbookXml: string, relsXml: string) {
+    const targets = new Map<string, string>();
+    const relRegex = /<Relationship\b[^>]*>/g;
+    let relMatch: RegExpExecArray | null;
+    while ((relMatch = relRegex.exec(relsXml))) {
+        const relation = relMatch[0];
+        const id = relation.match(/\bId="([^"]+)"/)?.[1];
+        const target = relation.match(/\bTarget="([^"]+)"/)?.[1];
+        if (id && target) targets.set(id, resolveSheetTarget(target));
     }
-    return "xl/worksheets/sheet1.xml";
+
+    const paths: string[] = [];
+    const sheetRegex = /<sheet\b[^>]*\br:id="([^"]+)"/g;
+    let sheetMatch: RegExpExecArray | null;
+    while ((sheetMatch = sheetRegex.exec(workbookXml))) {
+        const path = targets.get(sheetMatch[1]);
+        if (path) paths.push(path);
+    }
+    return paths.length ? paths : ["xl/worksheets/sheet1.xml"];
 }
 
 function parseNeededSharedStringIndexes(sheetXml: string) {
@@ -243,34 +256,61 @@ function parseSheetRows(sheetXml: string, sharedStrings: Map<number, string>) {
     });
 }
 
+function rowsAreEmpty(rows: string[][]) {
+    return !rows.some((row) => row.some((value) => String(value || "").trim()));
+}
+
+function betterHeaderResult(current: HeaderCheckResult | null, candidate: HeaderCheckResult) {
+    if (!current) return candidate;
+    return candidate.missing.length < current.missing.length ? candidate : current;
+}
+
 async function buildHeaderResult(buffer: ArrayBuffer): Promise<HeaderCheckResult> {
     const entries = readZipEntries(buffer);
     const workbookXml = await readZipText(buffer, entries, "xl/workbook.xml");
     const relsXml = await readZipText(buffer, entries, "xl/_rels/workbook.xml.rels");
-    const sheetPath = resolveFirstSheetPath(workbookXml, relsXml);
-    const sheetXml = await readZipText(buffer, entries, sheetPath, (text) => closedTagCount(text, "row") >= 5);
-    if (!sheetXml) {
-        return { headerRowFound: false, valid: false, missing: [] };
-    }
+    const sheetXmls: string[] = [];
+    const sharedStringIndexes = new Set<number>();
 
-    const sharedStringIndexes = parseNeededSharedStringIndexes(sheetXml);
+    for (const sheetPath of resolveSheetPaths(workbookXml, relsXml)) {
+        const sheetXml = await readZipText(buffer, entries, sheetPath, (text) => closedTagCount(text, "row") >= 5);
+        if (!sheetXml) continue;
+        sheetXmls.push(sheetXml);
+        for (const index of parseNeededSharedStringIndexes(sheetXml)) sharedStringIndexes.add(index);
+    }
+    if (!sheetXmls.length) {
+        return { headerRowFound: false, valid: true, missing: [], fileType: "", empty: true };
+    }
     const maxSharedStringIndex = sharedStringIndexes.size ? Math.max(...sharedStringIndexes) : -1;
     const sharedStringsXml =
         maxSharedStringIndex >= 0
             ? await readZipText(buffer, entries, "xl/sharedStrings.xml", (text) => closedTagCount(text, "si") > maxSharedStringIndex)
             : "";
     const sharedStrings = parseSharedStrings(sharedStringsXml, sharedStringIndexes);
-    const headerRow = findChecklistHeaderRow(parseSheetRows(sheetXml, sharedStrings));
-    if (!headerRow) {
-        return { headerRowFound: false, valid: false, missing: [] };
+    let best: HeaderCheckResult | null = null;
+    let hasContent = false;
+
+    for (const sheetXml of sheetXmls) {
+        const rows = parseSheetRows(sheetXml, sharedStrings);
+        if (rowsAreEmpty(rows)) continue;
+        hasContent = true;
+        const headerRow = findChecklistHeaderRow(rows);
+        if (!headerRow) continue;
+        const result = validateChecklistHeaders(headerRow.cells);
+        const candidate = {
+            headerRowFound: true,
+            valid: result.valid,
+            missing: result.missing,
+            fileType: result.fileType,
+            empty: false,
+        };
+        if (candidate.valid) return candidate;
+        best = betterHeaderResult(best, candidate);
     }
 
-    const result = validateChecklistHeaders(headerRow);
-    return {
-        headerRowFound: true,
-        valid: result.valid,
-        missing: result.missing,
-    };
+    if (best) return best;
+    if (!hasContent) return { headerRowFound: false, valid: true, missing: [], fileType: "", empty: true };
+    return { headerRowFound: false, valid: false, missing: [], fileType: "", empty: false };
 }
 
 self.onmessage = async (event: MessageEvent<HeaderWorkerRequest>) => {

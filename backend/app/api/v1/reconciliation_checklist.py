@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_async_session
 from app.core.deps import get_current_user
 from app.models.reconciliation_checklist import ReconciliationChecklistTask, ReconciliationChecklistUploadFile
@@ -13,11 +14,26 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.reconciliation_checklist import (
     ReconciliationChecklistEntityOptionOut,
+    ReconciliationChecklistInvoiceEditQueryOut,
+    ReconciliationChecklistInvoiceEditSaveIn,
+    ReconciliationChecklistManualEditUploadCallbackIn,
+    ReconciliationChecklistManualEditUploadFileOut,
+    ReconciliationChecklistManualEditUploadInitIn,
+    ReconciliationChecklistManualEditUploadInitOut,
+    ReconciliationChecklistManualEditUploadInitResponse,
+    ReconciliationChecklistManualEditQueryIn,
+    ReconciliationChecklistManualEditSaveOut,
+    ReconciliationChecklistMerchantEditQueryOut,
+    ReconciliationChecklistMerchantEditSaveIn,
+    ReconciliationChecklistOptionOut,
+    ReconciliationChecklistPayableBalanceSummaryOut,
+    ReconciliationChecklistProductSummaryOut,
+    ReconciliationChecklistReceiptSummaryOut,
     ReconciliationChecklistSummaryDetailOut,
     ReconciliationChecklistSummaryOut,
     ReconciliationChecklistTaskOut,
 )
-from app.services.oss_service import is_oss_object_unavailable_error, oss_service
+from app.services.oss_service import assume_sts_role, is_oss_object_unavailable_error, oss_service
 from app.services.reconciliation_checklist_service import ReconciliationChecklistService
 
 router = APIRouter()
@@ -53,18 +69,18 @@ class ReconciliationChecklistDashboardMonthlyOut(BaseModel):
 
 class ReconciliationChecklistDashboardMonthlyAmountOut(BaseModel):
     month: int
-    total_order_amount: str
+    total_user_paid_amount: str
 
 
 class ReconciliationChecklistDashboardMerchantOut(BaseModel):
-    merchant_id: int
     merchant_name: str
-    total_order_amount: str
+    total_user_paid_amount: str
 
 
 class ReconciliationChecklistDashboardRecentTaskOut(BaseModel):
     id: int
     original_name: str
+    task_type: str
     status: str
     total_rows: int
     success_rows: int
@@ -78,13 +94,13 @@ class ReconciliationChecklistDashboardOut(BaseModel):
     total_task_count: int
     failed_task_count: int
     total_rows: int
-    total_order_amount: str
+    total_user_paid_amount: str
     merchant_count: int
     covered_month_count: int
     completion_rate: str
     year: int
     monthly_task_counts: list[ReconciliationChecklistDashboardMonthlyOut]
-    monthly_order_amounts: list[ReconciliationChecklistDashboardMonthlyAmountOut]
+    monthly_user_paid_amounts: list[ReconciliationChecklistDashboardMonthlyAmountOut]
     top_merchants: list[ReconciliationChecklistDashboardMerchantOut]
     recent_tasks: list[ReconciliationChecklistDashboardRecentTaskOut]
 
@@ -99,6 +115,7 @@ def _task_out(task, upload_file, org_name: str | None = None) -> ReconciliationC
         source_upload_file_id=upload_file.source_upload_file_id,
         original_name=upload_file.original_name,
         celery_task_id=task.celery_task_id,
+        task_type=getattr(task, "task_type", "source_import"),
         status=task.status,
         progress=task.progress,
         total_rows=task.total_rows,
@@ -123,6 +140,205 @@ def _load_task_error(task: ReconciliationChecklistTask | None, upload_file: Reco
     return None
 
 
+async def _manual_edit_upload_init(
+    *,
+    body: ReconciliationChecklistManualEditUploadInitIn,
+    task_type: str,
+    current_user: User,
+    db: AsyncSession,
+) -> ApiResponse[ReconciliationChecklistManualEditUploadInitResponse]:
+    if not settings.ALIYUN_STS_ROLE_ARN or not settings.ALIYUN_ACCESS_KEY_ID:
+        return ApiResponse(code=501, message="阿里云 OSS STS 未配置")
+    try:
+        upload_file = await ReconciliationChecklistService.init_manual_edit_upload(
+            db,
+            org_id=body.org_id,
+            user=current_user,
+            original_name=body.original_name,
+            file_size=body.file_size,
+            task_type=task_type,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    try:
+        creds = assume_sts_role(
+            role_arn=settings.ALIYUN_STS_ROLE_ARN,
+            session_name=f"finengine-rcl-edit-{upload_file.org_id}-{upload_file.id}-{current_user.id}",
+            duration_seconds=settings.ALIYUN_STS_EXPIRE_SECONDS,
+        )
+    except Exception:
+        return ApiResponse(code=502, message="获取 OSS 上传凭证失败，请稍后重试")
+    prefix = f"user-upload/reconciliation-checklist/manual-edits/{upload_file.org_id}/{upload_file.id}/"
+    return ApiResponse(
+        data=ReconciliationChecklistManualEditUploadInitResponse(
+            file=ReconciliationChecklistManualEditUploadFileOut.model_validate(upload_file),
+            upload=ReconciliationChecklistManualEditUploadInitOut(
+                file_id=upload_file.id,
+                access_key_id=creds["access_key_id"],
+                access_key_secret=creds["access_key_secret"],
+                security_token=creds["security_token"],
+                expiration=creds["expiration"],
+                region=settings.ALIYUN_OSS_REGION,
+                bucket=settings.ALIYUN_OSS_BUCKET,
+                endpoint=oss_service.normalized_endpoint(),
+                oss_key_prefix=prefix,
+            ),
+        )
+    )
+
+
+async def _manual_edit_upload_callback(
+    *,
+    body: ReconciliationChecklistManualEditUploadCallbackIn,
+    task_type: str,
+    request: Request,
+    current_user: User,
+    db: AsyncSession,
+) -> ApiResponse[ReconciliationChecklistTaskRunOut]:
+    upload_file = await db.get(ReconciliationChecklistUploadFile, body.file_id)
+    if upload_file is None or upload_file.is_deleted:
+        return ApiResponse(code=404, message="上传文件不存在")
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    try:
+        task = await ReconciliationChecklistService.create_manual_edit_upload_task_from_oss(
+            db,
+            org_id=upload_file.org_id,
+            user=current_user,
+            file_id=upload_file.id,
+            original_name=upload_file.original_name,
+            oss_key=body.oss_key,
+            file_size=body.file_size,
+            file_hash=body.file_hash,
+            task_type=task_type,
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=ReconciliationChecklistTaskRunOut(task_id=task.id, status=task.status), message="已提交任务中心处理")
+
+
+@router.post("/invoice-edits/query", response_model=ApiResponse[ReconciliationChecklistInvoiceEditQueryOut])
+async def query_invoice_edit_items(
+    body: ReconciliationChecklistManualEditQueryIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        matched_items, missing_sub_order_nos = await ReconciliationChecklistService.query_invoice_edit_items(
+            db,
+            org_id=body.org_id,
+            user=current_user,
+            sub_order_nos=body.sub_order_nos,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=ReconciliationChecklistInvoiceEditQueryOut(matched_items=matched_items, missing_sub_order_nos=missing_sub_order_nos))
+
+
+@router.post("/invoice-edits/save", response_model=ApiResponse[ReconciliationChecklistManualEditSaveOut])
+async def save_invoice_edit_items(
+    body: ReconciliationChecklistInvoiceEditSaveIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    try:
+        result = await ReconciliationChecklistService.save_invoice_edit_items(
+            db,
+            org_id=body.org_id,
+            user=current_user,
+            items=[item.model_dump() for item in body.items],
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=ReconciliationChecklistManualEditSaveOut.model_validate(result))
+
+
+@router.post("/invoice-edits/upload-init", response_model=ApiResponse[ReconciliationChecklistManualEditUploadInitResponse])
+async def init_invoice_edit_upload(
+    body: ReconciliationChecklistManualEditUploadInitIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    return await _manual_edit_upload_init(body=body, task_type="invoice_edit", current_user=current_user, db=db)
+
+
+@router.post("/invoice-edits/upload-callback", response_model=ApiResponse[ReconciliationChecklistTaskRunOut])
+async def callback_invoice_edit_upload(
+    body: ReconciliationChecklistManualEditUploadCallbackIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    return await _manual_edit_upload_callback(body=body, task_type="invoice_edit", request=request, current_user=current_user, db=db)
+
+
+@router.post("/merchant-edits/query", response_model=ApiResponse[ReconciliationChecklistMerchantEditQueryOut])
+async def query_merchant_edit_items(
+    body: ReconciliationChecklistManualEditQueryIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        matched_items, missing_sub_order_nos = await ReconciliationChecklistService.query_merchant_edit_items(
+            db,
+            org_id=body.org_id,
+            user=current_user,
+            sub_order_nos=body.sub_order_nos,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=ReconciliationChecklistMerchantEditQueryOut(matched_items=matched_items, missing_sub_order_nos=missing_sub_order_nos))
+
+
+@router.post("/merchant-edits/save", response_model=ApiResponse[ReconciliationChecklistManualEditSaveOut])
+async def save_merchant_edit_items(
+    body: ReconciliationChecklistMerchantEditSaveIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    try:
+        result = await ReconciliationChecklistService.save_merchant_edit_items(
+            db,
+            org_id=body.org_id,
+            user=current_user,
+            items=[item.model_dump() for item in body.items],
+            ip=ip,
+            user_agent=ua,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=ReconciliationChecklistManualEditSaveOut.model_validate(result))
+
+
+@router.post("/merchant-edits/upload-init", response_model=ApiResponse[ReconciliationChecklistManualEditUploadInitResponse])
+async def init_merchant_edit_upload(
+    body: ReconciliationChecklistManualEditUploadInitIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    return await _manual_edit_upload_init(body=body, task_type="merchant_edit", current_user=current_user, db=db)
+
+
+@router.post("/merchant-edits/upload-callback", response_model=ApiResponse[ReconciliationChecklistTaskRunOut])
+async def callback_merchant_edit_upload(
+    body: ReconciliationChecklistManualEditUploadCallbackIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    return await _manual_edit_upload_callback(body=body, task_type="merchant_edit", request=request, current_user=current_user, db=db)
+
+
 @router.get("/dashboard-metrics", response_model=ApiResponse[ReconciliationChecklistDashboardOut])
 async def get_dashboard_metrics(
     year: int | None = Query(None, ge=2000, le=2100),
@@ -143,7 +359,7 @@ async def get_dashboard_metrics(
             total_task_count=int(metrics["total_task_count"]),
             failed_task_count=int(metrics["failed_task_count"]),
             total_rows=int(metrics["total_rows"]),
-            total_order_amount=str(metrics["total_order_amount"]),
+            total_user_paid_amount=str(metrics["total_user_paid_amount"]),
             merchant_count=int(metrics["merchant_count"]),
             covered_month_count=int(metrics["covered_month_count"]),
             completion_rate=str(metrics["completion_rate"]),
@@ -155,18 +371,17 @@ async def get_dashboard_metrics(
                 )
                 for item in metrics["monthly_task_counts"]
             ],
-            monthly_order_amounts=[
+            monthly_user_paid_amounts=[
                 ReconciliationChecklistDashboardMonthlyAmountOut(
                     month=int(item["month"]),
-                    total_order_amount=str(item["total_order_amount"]),
+                    total_user_paid_amount=str(item["total_user_paid_amount"]),
                 )
-                for item in metrics["monthly_order_amounts"]
+                for item in metrics["monthly_user_paid_amounts"]
             ],
             top_merchants=[
                 ReconciliationChecklistDashboardMerchantOut(
-                    merchant_id=int(item["merchant_id"]),
                     merchant_name=str(item["merchant_name"]),
-                    total_order_amount=str(item["total_order_amount"]),
+                    total_user_paid_amount=str(item["total_user_paid_amount"]),
                 )
                 for item in metrics["top_merchants"]
             ],
@@ -175,6 +390,7 @@ async def get_dashboard_metrics(
                     id=int(item["id"]),
                     original_name=str(item["original_name"]),
                     status=str(item["status"]),
+                    task_type=str(item.get("task_type") or "source_import"),
                     total_rows=int(item["total_rows"]),
                     success_rows=int(item["success_rows"]),
                     failed_rows=int(item["failed_rows"]),
@@ -352,7 +568,7 @@ async def list_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    rows, total = await ReconciliationChecklistService.list_summary(
+    rows, total = await ReconciliationChecklistService.list_product_summary(
         db,
         user=current_user,
         org_id=org_id,
@@ -363,17 +579,125 @@ async def list_summary(
         accounting_end_year=accounting_end_year,
         accounting_end_month=accounting_end_month,
         shop_ids=shop_ids,
-        merchant_name=merchant_name,
-        live_promoter=live_promoter,
+        merchant_subject_name=merchant_name,
         receipt_merchant=receipt_merchant,
-        merchant_ids=merchant_ids,
-        live_promoter_ids=live_promoter_ids,
-        receipt_merchant_ids=receipt_merchant_ids,
         keyword=keyword,
         page=page,
         page_size=page_size,
     )
     return ApiResponse(data=PageResponse(items=[ReconciliationChecklistSummaryOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
+
+
+@router.get("/product-summary", response_model=ApiResponse[PageResponse[ReconciliationChecklistProductSummaryOut]])
+async def list_product_summary(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    accounting_year: int | None = Query(None),
+    accounting_month: int | None = Query(None, ge=1, le=12),
+    accounting_start_year: int | None = Query(None),
+    accounting_start_month: int | None = Query(None, ge=1, le=12),
+    accounting_end_year: int | None = Query(None),
+    accounting_end_month: int | None = Query(None, ge=1, le=12),
+    merchant_subject_name: str | None = Query(None),
+    receipt_merchant: str | None = Query(None),
+    product_name: str | None = Query(None),
+    keyword: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await ReconciliationChecklistService.list_product_summary(
+        db,
+        user=current_user,
+        org_id=org_id,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        accounting_start_year=accounting_start_year,
+        accounting_start_month=accounting_start_month,
+        accounting_end_year=accounting_end_year,
+        accounting_end_month=accounting_end_month,
+        merchant_subject_name=merchant_subject_name,
+        receipt_merchant=receipt_merchant,
+        product_name=product_name,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(data=PageResponse(items=[ReconciliationChecklistProductSummaryOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
+
+
+@router.get("/receipt-summary", response_model=ApiResponse[PageResponse[ReconciliationChecklistReceiptSummaryOut]])
+async def list_receipt_summary(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    accounting_year: int | None = Query(None),
+    accounting_month: int | None = Query(None, ge=1, le=12),
+    accounting_start_year: int | None = Query(None),
+    accounting_start_month: int | None = Query(None, ge=1, le=12),
+    accounting_end_year: int | None = Query(None),
+    accounting_end_month: int | None = Query(None, ge=1, le=12),
+    merchant_subject_name: str | None = Query(None),
+    receipt_merchant: str | None = Query(None),
+    live_platform: str | None = Query(None),
+    keyword: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await ReconciliationChecklistService.list_receipt_summary(
+        db,
+        user=current_user,
+        org_id=org_id,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        accounting_start_year=accounting_start_year,
+        accounting_start_month=accounting_start_month,
+        accounting_end_year=accounting_end_year,
+        accounting_end_month=accounting_end_month,
+        merchant_subject_name=merchant_subject_name,
+        receipt_merchant=receipt_merchant,
+        live_platform=live_platform,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(data=PageResponse(items=[ReconciliationChecklistReceiptSummaryOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
+
+
+@router.get("/payable-balance-summary", response_model=ApiResponse[PageResponse[ReconciliationChecklistPayableBalanceSummaryOut]])
+async def list_payable_balance_summary(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    org_id: str | None = Query(None),
+    accounting_year: int | None = Query(None),
+    accounting_month: int | None = Query(None, ge=1, le=12),
+    accounting_start_year: int | None = Query(None),
+    accounting_start_month: int | None = Query(None, ge=1, le=12),
+    accounting_end_year: int | None = Query(None),
+    accounting_end_month: int | None = Query(None, ge=1, le=12),
+    merchant_subject_name: str | None = Query(None),
+    receipt_merchant: str | None = Query(None),
+    keyword: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    rows, total = await ReconciliationChecklistService.list_payable_balance_summary(
+        db,
+        user=current_user,
+        org_id=org_id,
+        accounting_year=accounting_year,
+        accounting_month=accounting_month,
+        accounting_start_year=accounting_start_year,
+        accounting_start_month=accounting_start_month,
+        accounting_end_year=accounting_end_year,
+        accounting_end_month=accounting_end_month,
+        merchant_subject_name=merchant_subject_name,
+        receipt_merchant=receipt_merchant,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
+    )
+    return ApiResponse(data=PageResponse(items=[ReconciliationChecklistPayableBalanceSummaryOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
 
 
 @router.get("/summary/details", response_model=ApiResponse[PageResponse[ReconciliationChecklistSummaryDetailOut]])
@@ -394,24 +718,46 @@ async def list_summary_details(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    rows, total = await ReconciliationChecklistService.list_summary_details(
+    rows, total = await ReconciliationChecklistService.list_product_summary(
         db,
         user=current_user,
         org_id=org_id,
         accounting_year=accounting_year,
         accounting_month=accounting_month,
-        merchant_name=merchant_name,
-        live_promoter=live_promoter,
+        merchant_subject_name=merchant_name,
         receipt_merchant=receipt_merchant,
-        merchant_id=merchant_id,
-        live_promoter_id=live_promoter_id,
-        receipt_merchant_id=receipt_merchant_id,
-        shop_ids=shop_ids,
         keyword=keyword,
         page=page,
         page_size=page_size,
     )
     return ApiResponse(data=PageResponse(items=[ReconciliationChecklistSummaryDetailOut.model_validate(row) for row in rows], total=total, page=page, page_size=page_size))
+
+
+@router.get("/options", response_model=ApiResponse[list[ReconciliationChecklistOptionOut]])
+async def list_options(
+    kind: str = Query(..., pattern="^(merchant_subject|receipt_merchant|live_platform|product_name)$"),
+    accounting_year: int | None = Query(None),
+    accounting_month: int | None = Query(None, ge=1, le=12),
+    org_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        rows = await ReconciliationChecklistService.list_options(
+            db,
+            user=current_user,
+            kind=kind,
+            accounting_year=accounting_year,
+            accounting_month=accounting_month,
+            org_id=org_id,
+            keyword=keyword,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return ApiResponse(code=400, message=str(exc))
+    return ApiResponse(data=[ReconciliationChecklistOptionOut.model_validate(row) for row in rows])
 
 
 @router.get("/entities/options", response_model=ApiResponse[list[ReconciliationChecklistEntityOptionOut]])

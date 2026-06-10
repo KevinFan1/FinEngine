@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
-from app.core.deps import get_current_user
+from app.core.deps import ensure_internal_org_access, get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse, PageResponse
 from app.schemas.summary import SummaryDongzhangDetailOut, SummaryOut, SummaryReportOut
@@ -17,7 +17,7 @@ from app.services.merchant_reconciliation_service import MerchantReconciliationS
 from app.services.summary_service import SummaryService
 from app.utils.query_filters import resolve_org_ids
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(ensure_internal_org_access)])
 
 
 def resolve_accounting_date_filters(

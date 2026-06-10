@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container checklist-page">
+    <div class="page-container page-container--flow checklist-page">
         <el-card shadow="never" class="search-card checklist-filter-card">
             <el-form :model="filters" inline class="filter-form">
                 <el-form-item
@@ -62,7 +62,7 @@
             <template #header>
                 <div class="card-header">
                     <div class="summary-title-group">
-                        <span class="card-header-title">对账清单任务</span>
+                        <span class="card-header-title">任务中心</span>
                         <span class="summary-count"
                             >共 {{ pagination.total }} 条</span
                         >
@@ -99,12 +99,22 @@
                 @selection-change="handleSelectionChange"
             >
                 <el-table-column type="selection" width="46" fixed="left" />
+                <el-table-column label="序号" width="70" align="center" fixed="left">
+                    <template #default="{ $index }">
+                        {{ rowIndex($index) }}
+                    </template>
+                </el-table-column>
                 <el-table-column
                     prop="original_name"
                     label="文件名"
                     min-width="240"
                     show-overflow-tooltip
                 />
+                <el-table-column label="任务类型" width="112" align="center">
+                    <template #default="{ row }">
+                        <span class="status-pill task-type-pill">{{ taskTypeLabel(row.task_type) }}</span>
+                    </template>
+                </el-table-column>
                 <el-table-column
                     v-if="userStore.isSuperAdmin"
                     prop="org_name"
@@ -138,9 +148,19 @@
                         formatDateTime(row.created_at)
                     }}</template>
                 </el-table-column>
+                <el-table-column label="开始时间" width="170">
+                    <template #default="{ row }">{{
+                        row.started_at ? formatDateTime(row.started_at) : "-"
+                    }}</template>
+                </el-table-column>
                 <el-table-column label="结束时间" width="170">
                     <template #default="{ row }">{{
                         row.finished_at ? formatDateTime(row.finished_at) : "-"
+                    }}</template>
+                </el-table-column>
+                <el-table-column label="更新时间" width="170">
+                    <template #default="{ row }">{{
+                        formatDateTime(row.updated_at || row.created_at)
                     }}</template>
                 </el-table-column>
 
@@ -255,19 +275,53 @@
                                 {{ currentTask.updated_rows || 0 }}</strong
                             >
                         </div>
-                        <div class="detail-item">
-                            <span class="detail-label">创建时间</span>
-                            <strong>{{
-                                formatDateTime(currentTask.created_at)
-                            }}</strong>
+                    </div>
+                </section>
+
+                <section class="detail-card">
+                    <div class="detail-card-header">
+                        <span>时间信息</span>
+                    </div>
+                    <div class="detail-timeline">
+                        <div class="detail-time-item">
+                            <span class="detail-dot"></span>
+                            <div>
+                                <span class="detail-label">创建时间</span>
+                                <strong>{{ formatDateTime(currentTask.created_at) }}</strong>
+                            </div>
                         </div>
-                        <div class="detail-item">
-                            <span class="detail-label">结束时间</span>
-                            <strong>{{
-                                currentTask.finished_at
-                                    ? formatDateTime(currentTask.finished_at)
-                                    : "-"
-                            }}</strong>
+                        <div class="detail-time-item">
+                            <span class="detail-dot"></span>
+                            <div>
+                                <span class="detail-label">开始时间</span>
+                                <strong>{{
+                                    currentTask.started_at
+                                        ? formatDateTime(currentTask.started_at)
+                                        : "-"
+                                }}</strong>
+                            </div>
+                        </div>
+                        <div class="detail-time-item">
+                            <span class="detail-dot"></span>
+                            <div>
+                                <span class="detail-label">结束时间</span>
+                                <strong>{{
+                                    currentTask.finished_at
+                                        ? formatDateTime(currentTask.finished_at)
+                                        : "-"
+                                }}</strong>
+                            </div>
+                        </div>
+                        <div class="detail-time-item">
+                            <span class="detail-dot"></span>
+                            <div>
+                                <span class="detail-label">更新时间</span>
+                                <strong>{{
+                                    formatDateTime(
+                                        currentTask.updated_at || currentTask.created_at,
+                                    )
+                                }}</strong>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -377,17 +431,33 @@ function taskStatusLabel(status: string) {
     );
 }
 
+function taskTypeLabel(taskType: string | undefined | null) {
+    return (
+        (
+            {
+                source_import: "底表导入",
+                invoice_edit: "发票修改",
+                merchant_edit: "商家修改",
+            } as Record<string, string>
+        )[taskType || "source_import"] || taskType || "底表导入"
+    );
+}
+
 function statusClass(status: string) {
     return (
         {
             queued: "status-pill",
-            running: "status-pill status-pill--warning",
+            running: "status-pill status-pill--info",
             success: "status-pill status-pill--success",
             partial_success: "status-pill status-pill--warning",
             failed: "status-pill status-pill--error",
-            expired: "status-pill status-pill--error",
+            expired: "status-pill status-pill--muted",
         }[status] || "status-pill"
     );
+}
+
+function rowIndex(index: number) {
+    return (pagination.page - 1) * pagination.pageSize + index + 1;
 }
 
 function queryString(value: unknown): string {
@@ -640,10 +710,10 @@ watch(
 
 <style scoped lang="scss">
 .checklist-page {
-    display: flex;
-    flex-direction: column;
+    display: block;
+    height: auto;
+    min-height: 100%;
     gap: 14px;
-    min-height: 0;
 }
 
 .card-header {
@@ -659,8 +729,7 @@ watch(
 
 .checklist-filter-card {
     display: block;
-    flex: 0 0 auto;
-    margin-bottom: 0;
+    margin-bottom: 14px;
     overflow: visible;
 }
 
@@ -705,6 +774,11 @@ watch(
     gap: 10px;
     min-width: 0;
     flex-wrap: wrap;
+}
+
+.task-type-pill {
+    background: #eef4ff;
+    color: #1d4ed8;
 }
 
 .card-header-title {
@@ -752,9 +826,21 @@ watch(
 .pagination-area {
     display: flex;
     justify-content: flex-end;
-    margin-top: 14px;
-}
+    align-items: center;
+    flex-shrink: 0;
+    min-width: 0;
+    margin-top: 0;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-elevated);
+    overflow-x: auto;
+    overflow-y: hidden;
 
+    :deep(.el-pagination) {
+        flex-shrink: 0;
+        min-width: max-content;
+    }
+}
 .status-pill {
     display: inline-flex;
     align-items: center;
@@ -766,6 +852,17 @@ watch(
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 700;
+    line-height: 1.4;
+}
+
+.status-pill--info {
+    background: var(--info-light);
+    color: var(--info);
+}
+
+.status-pill--success {
+    background: var(--success-light);
+    color: var(--success);
 }
 
 .status-pill--warning {
@@ -773,14 +870,14 @@ watch(
     color: var(--warning);
 }
 
-.status-pill--success {
-    background: var(--bg-elevated);
-    color: var(--success);
-}
-
 .status-pill--error {
     background: var(--error-light);
     color: var(--error);
+}
+
+.status-pill--muted {
+    background: var(--bg-hover);
+    color: var(--text-tertiary);
 }
 
 .result-stack {
@@ -930,6 +1027,37 @@ watch(
 .detail-label {
     color: var(--text-tertiary);
     font-size: 12px;
+}
+
+.detail-timeline {
+    display: grid;
+    gap: 10px;
+}
+
+.detail-time-item {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    min-width: 0;
+}
+
+.detail-time-item strong {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-primary);
+    font-family: "SF Mono", SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.detail-dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light-9);
 }
 
 .detail-item strong {

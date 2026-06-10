@@ -5,6 +5,7 @@ export interface Organization {
     id: number;
     code: string;
     name: string;
+    org_type: "internal" | "external";
     status: string;
     remark: string;
     created_at: string;
@@ -21,6 +22,7 @@ export interface OrganizationListParams {
 export interface OrganizationForm {
     name: string;
     code: string;
+    org_type: "internal" | "external";
     remark?: string;
 }
 

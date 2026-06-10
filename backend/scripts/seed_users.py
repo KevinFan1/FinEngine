@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.database import async_session_factory
 from app.core.security import hash_password
-from app.models.organization import Organization
+from app.models.organization import ORG_TYPE_INTERNAL, Organization
 from app.models.user import User
 from app.services.cash_flow_seed_service import CashFlowSeedService
 from app.services.transaction_accounting_seed_service import TransactionAccountingSeedService
@@ -30,6 +30,7 @@ async def seed():
             org = Organization(
                 name="默认组织",
                 code="default",
+                org_type=ORG_TYPE_INTERNAL,
                 status=1,
                 remark="系统初始化自动创建",
             )

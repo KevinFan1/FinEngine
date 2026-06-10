@@ -13,14 +13,34 @@ test("flattens common functions above the sidebar divider", () => {
         primaryMenus.map((item) => item.title),
         [
             "首页",
-            "对账清单上传",
-            "对账清单任务",
-            "对账清单汇总",
+            "底表上传",
+            "任务中心",
+            "商家总表",
+            "商家明细",
+            "余额明细",
+            "发票修改",
+            "商家修改",
             "下载中心",
         ],
     );
     assert.equal(primaryMenus[0]?.path, "/dashboard");
     assert.equal(primaryMenus[1]?.path, "/reconciliation-checklist/upload");
+    assert.ok(
+        sidebarMenuItems.some(
+            (item) =>
+                item.type !== "divider" &&
+                item.path === "/reconciliation-checklist/invoice-edits" &&
+                item.title === "发票修改",
+        ),
+    );
+    assert.ok(
+        sidebarMenuItems.some(
+            (item) =>
+                item.type !== "divider" &&
+                item.path === "/reconciliation-checklist/merchant-edits" &&
+                item.title === "商家修改",
+        ),
+    );
     assert.equal(
         countMenuItemsByPath(sidebarMenuItems, "/downloads"),
         1,

@@ -52,7 +52,7 @@ class _CreateOrgRaceSession:
 
 @pytest.mark.asyncio
 async def test_create_org_uses_atomic_insert_with_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    created_org = Organization(id=8, name="并发组织", code="race-org", status=1)
+    created_org = Organization(id=8, name="并发组织", code="race-org", status=1, org_type="external")
     db = _CreateOrgRaceSession(created_org)
     audit_calls = []
 
@@ -77,12 +77,13 @@ async def test_create_org_uses_atomic_insert_with_expected_defaults(monkeypatch:
     assert params["max_storage_bytes"] == DEFAULT_ORG_MAX_STORAGE_BYTES
     assert params["used_storage_bytes"] == 0
     assert params["plan_type"] == "free"
+    assert params["org_type"] == "external"
     assert len(audit_calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_create_org_reports_name_duplicate_after_concurrent_insert() -> None:
-    existing_org = Organization(id=9, name="并发组织", code="other-code", status=1)
+    existing_org = Organization(id=9, name="并发组织", code="other-code", status=1, org_type="external")
     db = _CreateOrgRaceSession(None, existing_name=existing_org)
 
     with pytest.raises(ValueError, match="组织名称已存在"):
@@ -97,7 +98,7 @@ async def test_create_org_reports_name_duplicate_after_concurrent_insert() -> No
 
 @pytest.mark.asyncio
 async def test_create_org_reports_code_duplicate_after_concurrent_insert() -> None:
-    existing_org = Organization(id=9, name="其他组织", code="race-org", status=1)
+    existing_org = Organization(id=9, name="其他组织", code="race-org", status=1, org_type="external")
     db = _CreateOrgRaceSession(None, existing_code=existing_org)
 
     with pytest.raises(ValueError, match="组织编码已存在"):
@@ -108,3 +109,25 @@ async def test_create_org_reports_code_duplicate_after_concurrent_insert() -> No
         )
 
     assert any(getattr(stmt, "is_insert", False) for stmt in db.statements)
+
+
+@pytest.mark.asyncio
+async def test_create_org_persists_explicit_external_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_org = Organization(id=10, name="外部组织", code="external-org", status=1, org_type="external")
+    db = _CreateOrgRaceSession(created_org)
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.org_service.AuditService.log", fake_log)
+
+    org = await OrgService.create_org(
+        db,  # type: ignore[arg-type]
+        data=OrganizationCreate(name="外部组织", code="external-org", org_type="external"),
+        operator=type("UserStub", (), {"id": 3, "username": "u3", "display_name": "用户3"})(),
+    )
+
+    assert org.org_type == "external"
+    insert_stmt = next(stmt for stmt in db.statements if getattr(stmt, "is_insert", False))
+    params = insert_stmt.compile().params
+    assert params["org_type"] == "external"

@@ -1,5 +1,5 @@
 <template>
-    <div class="page-container transaction-page">
+    <div class="page-container page-container--flow transaction-page">
         <el-card shadow="never" class="search-card">
             <el-form :model="searchForm" inline class="filter-form">
                 <el-form-item label="核算年月">
