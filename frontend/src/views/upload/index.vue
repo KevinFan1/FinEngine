@@ -279,21 +279,6 @@
                                         <el-icon><Delete /></el-icon> 清空
                                     </el-button>
                                     <el-button
-                                        size="small"
-                                        :disabled="
-                                            isUploading ||
-                                            !hasSelectedFiles
-                                        "
-                                        @click="clearSelectedFiles"
-                                    >
-                                        清空选中
-                                        {{
-                                            hasSelectedFiles
-                                                ? `(${selectedFileRows.length})`
-                                                : ""
-                                        }}
-                                    </el-button>
-                                    <el-button
                                         v-if="failedReadyItems.length > 0"
                                         :disabled="isUploading"
                                         @click="retryFailedFiles"

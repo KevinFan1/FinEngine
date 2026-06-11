@@ -1,13 +1,13 @@
+import logging
+import re
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-import re
 from types import SimpleNamespace
-from collections.abc import Sequence
-import logging
 
-from openpyxl import Workbook, load_workbook
 import pytest
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
@@ -30,17 +30,17 @@ from app.services.reconciliation_checklist_service import (
     CHECKLIST_FILE_TYPE_INVOICE,
     CHECKLIST_FILE_TYPE_MERCHANT,
     CHECKLIST_FILE_TYPE_SOURCE,
-    SOURCE_DETAIL_COMPARE_FIELDS,
     CHECKLIST_TASK_TYPE_INVOICE_EDIT,
     CHECKLIST_TASK_TYPE_MERCHANT_EDIT,
+    SOURCE_DETAIL_COMPARE_FIELDS,
     SOURCE_HEADERS,
     ReconciliationChecklistService,
     _build_header_column_lookup,
     _canonical_header,
     _detect_checklist_type,
-    _value_from_row,
     _row_fingerprint,
     _to_int,
+    _value_from_row,
 )
 
 
@@ -503,7 +503,10 @@ class _ManualEditSaveSession:
             )
         ):
             return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: list(self.detail_rows)))
-        if "SELECT fin_reconciliation_checklist_details.accounting_period, fin_reconciliation_checklist_details.sub_order_no, fin_reconciliation_checklist_details.receipt_merchant, fin_reconciliation_checklist_details.merchant_net_amount, fin_reconciliation_checklist_details.payment_amount" in sql:
+        if (
+            "SELECT fin_reconciliation_checklist_details.accounting_period, fin_reconciliation_checklist_details.sub_order_no, fin_reconciliation_checklist_details.receipt_merchant, fin_reconciliation_checklist_details.merchant_net_amount, fin_reconciliation_checklist_details.payment_amount"
+            in sql
+        ):
             return SimpleNamespace(all=lambda: list(self.existing_summary_values))
         if "SELECT fin_reconciliation_checklist_details.accounting_period, fin_reconciliation_checklist_details.sub_order_no" in sql:
             return SimpleNamespace(all=lambda: list(self.existing_details))
@@ -731,12 +734,7 @@ async def test_dashboard_metrics_use_receipt_summary_rows_without_scanning_detai
 
 
 def test_checklist_partition_migration_primary_keys_include_org_hash_key() -> None:
-    migration_path = (
-        Path(__file__).resolve().parents[2]
-        / "alembic"
-        / "versions"
-        / "049_rebuild_reconciliation_checklist_order_base.py"
-    )
+    migration_path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "049_rebuild_reconciliation_checklist_order_base.py"
     source = migration_path.read_text(encoding="utf-8")
 
     detail_block = _migration_create_table_block(source, "fin_reconciliation_checklist_details")
@@ -764,7 +762,7 @@ def test_header_detection_recognizes_three_checklist_types_and_aliases() -> None
     assert _detect_checklist_type(source_headers).file_type == CHECKLIST_FILE_TYPE_SOURCE
     assert _detect_checklist_type(["唯一ID", "子订单号", "收款商家", "开票时间", "发票号码"]).file_type == CHECKLIST_FILE_TYPE_INVOICE
     assert _detect_checklist_type(["唯一ID", "子订单号", "收款商家", "应付商家净额", "付款金额", "付款时间（商家）"]).file_type == CHECKLIST_FILE_TYPE_MERCHANT
-    assert _canonical_header(" 用户实付    （订单金额） ") == "用户实付 （订单金额）"
+    assert _canonical_header(" 用户实付（订单金额） ") == "用户实付（订单金额）"
 
 
 def test_header_detection_treats_truncated_payment_time_header_as_source() -> None:
@@ -1116,8 +1114,12 @@ async def test_apply_invoice_rows_batches_updates(monkeypatch: pytest.MonkeyPatc
     ]
 
     async def fake_resolve(*_args, **_kwargs):
-        detail_1 = SimpleNamespace(id=101, sub_order_no="SO-1", row_fingerprint="UID-1", accounting_period=202606, settlement_time=datetime(2026, 6, 1, 8, 0, 0), receipt_merchant="")
-        detail_2 = SimpleNamespace(id=102, sub_order_no="SO-2", row_fingerprint="UID-2", accounting_period=202607, settlement_time=datetime(2026, 7, 1, 8, 0, 0), receipt_merchant="")
+        detail_1 = SimpleNamespace(
+            id=101, sub_order_no="SO-1", row_fingerprint="UID-1", accounting_period=202606, settlement_time=datetime(2026, 6, 1, 8, 0, 0), receipt_merchant=""
+        )
+        detail_2 = SimpleNamespace(
+            id=102, sub_order_no="SO-2", row_fingerprint="UID-2", accounting_period=202607, settlement_time=datetime(2026, 7, 1, 8, 0, 0), receipt_merchant=""
+        )
         return {"UID-1": detail_1, "UID-2": detail_2}, {"SO-1": [detail_1], "SO-2": [detail_2]}
 
     monkeypatch.setattr(ReconciliationChecklistService, "_resolve_target_details", staticmethod(fake_resolve))
@@ -1167,8 +1169,28 @@ async def test_apply_merchant_rows_batches_updates(monkeypatch: pytest.MonkeyPat
     ]
 
     async def fake_resolve(*_args, **_kwargs):
-        detail_1 = SimpleNamespace(id=101, sub_order_no="SO-1", row_fingerprint="UID-1", accounting_period=202606, settlement_time=datetime(2026, 6, 1, 8, 0, 0), receipt_merchant="", merchant_net_amount=Decimal("0.00"), payment_amount=None, merchant_payment_time=None)
-        detail_2 = SimpleNamespace(id=102, sub_order_no="SO-2", row_fingerprint="UID-2", accounting_period=202607, settlement_time=datetime(2026, 7, 1, 8, 0, 0), receipt_merchant="", merchant_net_amount=Decimal("0.00"), payment_amount=None, merchant_payment_time=None)
+        detail_1 = SimpleNamespace(
+            id=101,
+            sub_order_no="SO-1",
+            row_fingerprint="UID-1",
+            accounting_period=202606,
+            settlement_time=datetime(2026, 6, 1, 8, 0, 0),
+            receipt_merchant="",
+            merchant_net_amount=Decimal("0.00"),
+            payment_amount=None,
+            merchant_payment_time=None,
+        )
+        detail_2 = SimpleNamespace(
+            id=102,
+            sub_order_no="SO-2",
+            row_fingerprint="UID-2",
+            accounting_period=202607,
+            settlement_time=datetime(2026, 7, 1, 8, 0, 0),
+            receipt_merchant="",
+            merchant_net_amount=Decimal("0.00"),
+            payment_amount=None,
+            merchant_payment_time=None,
+        )
         return {"UID-1": detail_1, "UID-2": detail_2}, {"SO-1": [detail_1], "SO-2": [detail_2]}
 
     monkeypatch.setattr(ReconciliationChecklistService, "_resolve_target_details", staticmethod(fake_resolve))
@@ -1238,10 +1260,7 @@ async def test_apply_merchant_edit_rows_updates_balance_and_filters_deleted_rows
     assert session.update_calls == 1
     joined_sql = "\n".join(session.statements)
     assert "merchant_net_balance" in joined_sql
-    assert (
-        "merchant_payment_time=CAST(reconciliation_merchant_manual_updates.merchant_payment_time AS TIMESTAMP WITHOUT TIME ZONE)"
-        in joined_sql
-    )
+    assert "merchant_payment_time=CAST(reconciliation_merchant_manual_updates.merchant_payment_time AS TIMESTAMP WITHOUT TIME ZONE)" in joined_sql
     assert "is_deleted IS false" in joined_sql
 
 
@@ -1868,9 +1887,7 @@ async def test_lookup_existing_merchant_summary_values_chunks_large_pair_lists()
 
 
 def test_manual_edit_normalize_sub_order_numbers_dedupes_and_limits() -> None:
-    result = ReconciliationChecklistService._normalize_manual_edit_sub_orders(
-        [" SO-1 ", "SO-2,SO-1", "SO-3\nSO-4", "，SO-5,,SO-6"]
-    )
+    result = ReconciliationChecklistService._normalize_manual_edit_sub_orders([" SO-1 ", "SO-2,SO-1", "SO-3\nSO-4", "，SO-5,,SO-6"])
 
     assert result == ["SO-1", "SO-2", "SO-3", "SO-4", "SO-5", "SO-6"]
     with pytest.raises(ValueError, match="请先输入子订单号"):
@@ -1970,8 +1987,7 @@ async def test_query_invoice_edit_items_returns_matched_and_missing(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_query_invoice_edit_items_treats_missing_details_as_missing_sub_orders(
-) -> None:
+async def test_query_invoice_edit_items_treats_missing_details_as_missing_sub_orders() -> None:
     session = _ManualEditQuerySession(
         [
             SimpleNamespace(
@@ -2422,10 +2438,7 @@ async def test_apply_invoice_edit_rows_marks_period_when_receipt_merchant_change
     assert failed == 0
     assert errors == []
     assert periods == {202606}
-    assert (
-        "invoice_time=CAST(reconciliation_invoice_manual_updates.invoice_time AS TIMESTAMP WITHOUT TIME ZONE)"
-        in "\n".join(session.statements)
-    )
+    assert "invoice_time=CAST(reconciliation_invoice_manual_updates.invoice_time AS TIMESTAMP WITHOUT TIME ZONE)" in "\n".join(session.statements)
 
 
 @pytest.mark.asyncio
@@ -3089,6 +3102,10 @@ def test_summary_export_specs_are_registered() -> None:
     assert EXPORT_SPECS["reconciliation_checklist.summary"].module == "reconciliation_checklist"
 
 
+def _cell_has_no_border(cell) -> bool:
+    return all(side is None or side.style is None for side in (cell.border.left, cell.border.right, cell.border.top, cell.border.bottom))
+
+
 @pytest.mark.asyncio
 async def test_export_product_summary_file_uses_reference_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_path = tmp_path / "product_summary.xlsx"
@@ -3135,9 +3152,95 @@ async def test_export_product_summary_file_uses_reference_layout(tmp_path: Path,
 
 
 @pytest.mark.asyncio
-async def test_export_product_summary_current_page_forwards_pagination_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_export_product_summary_file_applies_merged_headers_and_skips_all_zero_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    output_path = tmp_path / "product_summary_merged.xlsx"
+    rows = [
+        {
+            "key": "1:202606:收款商家A:商户主体A:商品A",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "receipt_merchant": "收款商家A",
+            "merchant_subject_name": "商户主体A",
+            "product_name": "商品A",
+            "product_quantity": 2,
+            "total_user_paid_amount": Decimal("100.50"),
+            "total_live_commission": Decimal("9.00"),
+            "total_merchant_net_amount": Decimal("91.50"),
+        },
+        {
+            "key": "1:202606:收款商家A:商户主体A:商品B",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "receipt_merchant": "收款商家A",
+            "merchant_subject_name": "商户主体A",
+            "product_name": "商品B",
+            "product_quantity": 1,
+            "total_user_paid_amount": Decimal("0.00"),
+            "total_live_commission": Decimal("0.00"),
+            "total_merchant_net_amount": Decimal("0.00"),
+        },
+        {
+            "key": "1:202606:收款商家A:商户主体A:商品C",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "receipt_merchant": "收款商家A",
+            "merchant_subject_name": "商户主体A",
+            "product_name": "商品C",
+            "product_quantity": 1,
+            "total_user_paid_amount": None,
+            "total_live_commission": None,
+            "total_merchant_net_amount": None,
+        },
+    ]
+
+    async def fake_list_product_summary(*_args, **_kwargs):
+        return rows, len(rows)
+
+    monkeypatch.setattr(ReconciliationChecklistService, "list_product_summary", staticmethod(fake_list_product_summary))
+
+    row_count = await ReconciliationChecklistService.export_product_summary_to_file(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),  # type: ignore[arg-type]
+        output_path=output_path,
+    )
+
+    workbook = load_workbook(output_path)
+    try:
+        ws = workbook.active
+        assert row_count == 1
+        assert "A1:E1" in {str(cell_range) for cell_range in ws.merged_cells.ranges}
+        assert "D3:E3" in {str(cell_range) for cell_range in ws.merged_cells.ranges}
+        assert ws["D3"].value == "商户主体A"
+        assert _cell_has_no_border(ws["A1"])
+        assert _cell_has_no_border(ws["D2"])
+        assert _cell_has_no_border(ws["A4"])
+        assert ws["B6"].alignment.horizontal == "left"
+        assert ws["C6"].alignment.horizontal == "right"
+        assert ws["C6"].number_format == "0.00"
+        assert ws["D6"].number_format == "0.00"
+        assert ws["E6"].number_format == "0.00"
+        assert ws["A7"].value == "总计"
+        assert ws.max_row == 7
+        assert ws.column_dimensions["A"].width > 10
+        assert ws.column_dimensions["B"].width > 36
+    finally:
+        workbook.close()
+
+
+@pytest.mark.asyncio
+async def test_export_product_summary_current_page_forwards_pagination_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_path = tmp_path / "product_summary_current_page.xlsx"
     captured_kwargs: dict[str, object] = {}
     rows = [
@@ -3184,9 +3287,100 @@ async def test_export_product_summary_current_page_forwards_pagination_once(
 
 
 @pytest.mark.asyncio
-async def test_export_receipt_summary_current_page_forwards_pagination_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_export_receipt_summary_file_applies_merged_headers_and_skips_all_zero_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    output_path = tmp_path / "receipt_summary_merged.xlsx"
+    rows = [
+        {
+            "key": "1:202606:商户主体A:抖音:收款商家A",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "merchant_subject_name": "商户主体A",
+            "live_platform": "抖音",
+            "receipt_merchant": "收款商家A",
+            "order_count": 2,
+            "total_user_paid_amount": Decimal("100.50"),
+            "total_live_commission": Decimal("9.00"),
+            "total_merchant_net_amount": Decimal("91.50"),
+        },
+        {
+            "key": "1:202606:商户主体A:抖音:收款商家B",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "merchant_subject_name": "商户主体A",
+            "live_platform": "抖音",
+            "receipt_merchant": "收款商家B",
+            "order_count": 1,
+            "total_user_paid_amount": Decimal("0.00"),
+            "total_live_commission": Decimal("0.00"),
+            "total_merchant_net_amount": Decimal("0.00"),
+        },
+        {
+            "key": "1:202606:商户主体A:抖音:收款商家C",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "merchant_subject_name": "商户主体A",
+            "live_platform": "抖音",
+            "receipt_merchant": "收款商家C",
+            "order_count": 1,
+            "total_user_paid_amount": None,
+            "total_live_commission": None,
+            "total_merchant_net_amount": None,
+        },
+    ]
+
+    async def fake_list_receipt_summary(*_args, **_kwargs):
+        return rows, len(rows)
+
+    monkeypatch.setattr(ReconciliationChecklistService, "list_receipt_summary", staticmethod(fake_list_receipt_summary))
+
+    row_count = await ReconciliationChecklistService.export_receipt_summary_to_file(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),  # type: ignore[arg-type]
+        output_path=output_path,
+    )
+
+    workbook = load_workbook(output_path)
+    try:
+        ws = workbook.active
+        assert row_count == 1
+        merged_ranges = {str(cell_range) for cell_range in ws.merged_cells.ranges}
+        assert "A1:B1" in merged_ranges
+        assert "C1:E1" in merged_ranges
+        assert "A2:B2" in merged_ranges
+        assert "C2:E2" in merged_ranges
+        assert "A3:B3" in merged_ranges
+        assert "C3:E3" in merged_ranges
+        assert ws["C1"].value == "商户主体A"
+        assert ws["C2"].value == "抖音"
+        assert ws["C3"].value == "2026年6月"
+        assert _cell_has_no_border(ws["A4"])
+        assert ws["B6"].value == "收款商家A"
+        assert ws["B6"].alignment.horizontal == "left"
+        assert ws["C6"].alignment.horizontal == "right"
+        assert ws["C6"].number_format == "0.00"
+        assert ws["D6"].number_format == "0.00"
+        assert ws["E6"].number_format == "0.00"
+        assert ws["A7"].value == "总计"
+        assert ws.max_row == 7
+        assert ws.column_dimensions["B"].width > 34
+    finally:
+        workbook.close()
+
+
+@pytest.mark.asyncio
+async def test_export_receipt_summary_current_page_forwards_pagination_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_path = tmp_path / "receipt_summary_current_page.xlsx"
     captured_kwargs: dict[str, object] = {}
     rows = [
@@ -3234,9 +3428,7 @@ async def test_export_receipt_summary_current_page_forwards_pagination_once(
 
 
 @pytest.mark.asyncio
-async def test_export_payable_balance_summary_current_page_forwards_pagination_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_export_payable_balance_summary_current_page_forwards_pagination_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output_path = tmp_path / "payable_balance_summary.xlsx"
     captured_kwargs: dict[str, object] = {}
     rows = [
@@ -3283,5 +3475,65 @@ async def test_export_payable_balance_summary_current_page_forwards_pagination_o
         assert ws["A1"].value == "商户主体名称"
         assert ws["A2"].value == "商户主体A"
         assert ws["G3"].value == float(Decimal("1.50"))
+    finally:
+        workbook.close()
+
+
+@pytest.mark.asyncio
+async def test_export_payable_balance_summary_file_applies_wider_columns_and_amount_alignment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_path = tmp_path / "payable_balance_summary_format.xlsx"
+    rows = [
+        {
+            "key": "1:202606:商户主体A:收款商家A",
+            "org_id": 1,
+            "org_name": "组织A",
+            "accounting_year": 2026,
+            "accounting_month": 6,
+            "accounting_period": 202606,
+            "merchant_subject_name": "商户主体A",
+            "receipt_merchant": "收款商家A",
+            "total_user_paid_amount": Decimal("100.50"),
+            "total_merchant_net_amount": Decimal("91.50"),
+            "total_payment_amount": Decimal("90.00"),
+            "total_merchant_net_balance": Decimal("1.50"),
+        }
+    ]
+
+    async def fake_list_payable_balance_summary(*_args, **_kwargs):
+        return rows, 1
+
+    monkeypatch.setattr(
+        ReconciliationChecklistService,
+        "list_payable_balance_summary",
+        staticmethod(fake_list_payable_balance_summary),
+    )
+
+    row_count = await ReconciliationChecklistService.export_payable_balance_summary_to_file(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        user=SimpleNamespace(role="admin", org_id=1),  # type: ignore[arg-type]
+        output_path=output_path,
+    )
+
+    workbook = load_workbook(output_path)
+    try:
+        ws = workbook.active
+        assert row_count == 1
+        assert ws["C2"].value == "收款商家A"
+        assert ws["C2"].alignment.horizontal == "left"
+        assert ws["D2"].alignment.horizontal == "right"
+        assert ws["D2"].number_format == "0.00"
+        assert ws["E2"].number_format == "0.00"
+        assert ws["F2"].number_format == "0.00"
+        assert ws["G2"].number_format == "0.00"
+        assert ws.column_dimensions["A"].width > 28
+        assert ws.column_dimensions["B"].width > 18
+        assert ws.column_dimensions["C"].width > 28
+        assert ws.column_dimensions["D"].width > 18
+        assert ws.column_dimensions["E"].width > 18
+        assert ws.column_dimensions["F"].width > 18
+        assert ws.column_dimensions["G"].width > 20
     finally:
         workbook.close()

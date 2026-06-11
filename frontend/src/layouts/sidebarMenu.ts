@@ -41,6 +41,13 @@ export interface ResolvedSidebarMenuItem
 }
 
 const merchantReconciliationMenuEnabled = false;
+const memberVisibleTopLevelPaths = new Set([
+    "/upload",
+    "/shops",
+    "/order-accounting",
+    "/transaction-accounting",
+    "/bic-accounting",
+]);
 
 export const sidebarMenuItems: SidebarMenuItem[] = [
     {
@@ -283,10 +290,17 @@ export function filterSidebarMenuByRole(
     userRole: string,
     isInternalOrg = true,
 ): SidebarMenuItem[] {
+    const isTopLevelMenu = items === sidebarMenuItems;
     return items.flatMap((item) => {
-        if (item.type === "divider") return [item];
+        if (item.type === "divider") {
+            if (userRole === "member" && isTopLevelMenu) return [];
+            return [item];
+        }
         if (item.roles && !item.roles.includes(userRole)) return [];
         if (item.internalOnly && !isInternalOrg) return [];
+        if (userRole === "member" && isTopLevelMenu && !memberVisibleTopLevelPaths.has(item.path)) {
+            return [];
+        }
         if (!item.children?.length) return [item];
 
         const children = filterSidebarMenuByRole(item.children, userRole, isInternalOrg);

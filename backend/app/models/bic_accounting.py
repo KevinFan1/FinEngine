@@ -121,6 +121,17 @@ class BicSourceRow(SoftDeleteMixin, Base):
             postgresql_where=text("is_deleted = false AND transaction_flow_no <> ''"),
         ),
         Index("idx_fin_bic_source_id", "id"),
+        Index(
+            "idx_fin_bic_source_visible_id",
+            "id",
+            postgresql_where=text("is_deleted = false"),
+        ),
+        Index(
+            "idx_fin_bic_source_org_visible_id",
+            "org_id",
+            "id",
+            postgresql_where=text("is_deleted = false"),
+        ),
         Index("idx_fin_bic_source_detail", "detail_id"),
         Index("idx_fin_bic_source_task", "task_id"),
         Index("idx_fin_bic_source_org_period_provider", "org_id", "accounting_period", "service_provider"),

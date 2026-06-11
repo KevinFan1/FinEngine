@@ -46,7 +46,6 @@
                         <span class="summary-count">共 {{ pagination.total }} 条 · 已选 {{ selectedRows.length }} 条</span>
                     </div>
                     <div class="card-header-actions">
-                        <el-button :disabled="selectedRows.length === 0" @click="clearSelectedRows">清空选中</el-button>
                         <el-button :loading="exportSelectedLoading" :disabled="selectedRows.length === 0" @click="handleExport('selected')"><el-icon><Download /></el-icon> 导出选中</el-button>
                         <el-button :loading="exportCurrentPageLoading" @click="handleExport('current_page')"><el-icon><Download /></el-icon> 导出当前页</el-button>
                         <el-button type="primary" :loading="exportAllLoading" @click="handleExport('all')"><el-icon><Download /></el-icon> 导出全部</el-button>

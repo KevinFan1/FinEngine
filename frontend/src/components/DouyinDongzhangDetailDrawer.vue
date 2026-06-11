@@ -308,6 +308,9 @@ const includeInSummaryExport = ref(false);
 const detailTableRef = ref<{ doLayout: () => void }>();
 const visibleColumnKeys = ref<string[]>([...DEFAULT_VISIBLE_COLUMN_KEYS]);
 const savingVisibleColumns = ref(false);
+const inFlightFetchRequestKey = ref<string | null>(null);
+let inFlightFetchPromise: Promise<void> | null = null;
+let latestFetchSequence = 0;
 
 const pagination = reactive({
     page: 1,
@@ -319,6 +322,22 @@ const selectedCount = computed(() => selectedRows.value.length);
 const visibleBusinessColumns = computed(() => {
     const visibleSet = new Set(visibleColumnKeys.value);
     return BUSINESS_COLUMN_DEFS.filter((column) => visibleSet.has(column.key));
+});
+const detailContextKey = computed(() => {
+    const context = props.context;
+    if (!context?.summaryId) return "";
+    const orgId =
+        context.orgId ||
+        (props.selectedOrgIds?.length ? props.selectedOrgIds.join(",") : "");
+    return [
+        context.summaryId,
+        orgId,
+        context.sourceDate || "",
+        context.summaryDate || "",
+        context.platform || "",
+        context.shopName || "",
+        context.shopColor || "",
+    ].join("|");
 });
 
 watch(
@@ -346,26 +365,15 @@ watch(
     { immediate: true },
 );
 
-watch(
-    () => props.modelValue,
-    (visible) => {
-        if (visible) {
-            pagination.page = 1;
-            fetchData();
-        }
-    },
-);
-
-watch(
-    () => props.context,
-    () => {
-        selectedRows.value = [];
-        if (props.modelValue) {
-            pagination.page = 1;
-            fetchData();
-        }
-    },
-);
+watch([() => props.modelValue, detailContextKey], ([visible, currentContextKey]) => {
+    selectedRows.value = [];
+    if (!visible || !currentContextKey) return;
+    if (pagination.page !== 1) {
+        pagination.page = 1;
+        return;
+    }
+    void fetchData();
+});
 
 function isColumnLocked(key: string) {
     return ALWAYS_VISIBLE_COLUMN_KEYS.includes(key);
@@ -440,22 +448,45 @@ function handleSelectionChange(rows: SummaryDongzhangDetailRecord[]) {
 
 async function fetchData() {
     if (!props.context?.summaryId) return;
-    loading.value = true;
-    try {
-        const res = await getSummaryDongzhangDetailList(props.context.summaryId, {
-            page: pagination.page,
-            page_size: pagination.pageSize,
-            org_id:
-                props.context.orgId ||
-                (props.selectedOrgIds?.length ? props.selectedOrgIds.join(",") : undefined),
-        });
-        tableData.value = res.items || [];
-        pagination.total = res.total || 0;
-    } finally {
-        loading.value = false;
-        await nextTick();
-        detailTableRef.value?.doLayout();
+    const requestKey = [
+        props.context.summaryId,
+        pagination.page,
+        pagination.pageSize,
+        props.context.orgId ||
+            (props.selectedOrgIds?.length ? props.selectedOrgIds.join(",") : ""),
+    ].join("|");
+    if (inFlightFetchRequestKey.value === requestKey && inFlightFetchPromise) {
+        return inFlightFetchPromise;
     }
+    const fetchSequence = ++latestFetchSequence;
+    inFlightFetchRequestKey.value = requestKey;
+    const requestPromise = (async () => {
+        loading.value = true;
+        try {
+            const res = await getSummaryDongzhangDetailList(props.context!.summaryId, {
+                page: pagination.page,
+                page_size: pagination.pageSize,
+                org_id:
+                    props.context!.orgId ||
+                    (props.selectedOrgIds?.length ? props.selectedOrgIds.join(",") : undefined),
+            });
+            if (fetchSequence !== latestFetchSequence) return;
+            tableData.value = res.items || [];
+            pagination.total = res.total || 0;
+        } finally {
+            if (fetchSequence === latestFetchSequence) {
+                loading.value = false;
+                await nextTick();
+                detailTableRef.value?.doLayout();
+            }
+            if (inFlightFetchPromise === requestPromise) {
+                inFlightFetchPromise = null;
+                inFlightFetchRequestKey.value = null;
+            }
+        }
+    })();
+    inFlightFetchPromise = requestPromise;
+    return requestPromise;
 }
 
 async function handleExport(scope: "all" | "current_page" | "selected") {

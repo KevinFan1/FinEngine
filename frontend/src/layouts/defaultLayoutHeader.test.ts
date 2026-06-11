@@ -14,6 +14,11 @@ test("keeps a dedicated download center entry in the top-right header", () => {
     assert.match(source, /navigateToDownloadCenter/);
 });
 
+test("download center entry refreshes the page when already inside download center", () => {
+    assert.match(source, /currentRouteName\.value === "DownloadCenter"/);
+    assert.match(source, /await refreshCurrentPage\(\)/);
+});
+
 test("removes the top-right global refresh button", () => {
     const headerRightBlock = source.match(
         /<div class="header-right">[\s\S]*?<\/div>\s*<\/header>/,
@@ -47,6 +52,11 @@ test("header download panel fetches only after opening and offers manual refresh
     assert.match(source, /mine_only:\s*true/);
     assert.match(source, /download-center-panel__refresh/);
     assert.match(source, /RefreshRight/);
+    assert.doesNotMatch(
+        source,
+        /async function handleDownloadCenterShow\(\)\s*\{[\s\S]*if \(headerDownloadJobsLoaded\.value\) return;/,
+        "header download panel should refetch each time it is opened",
+    );
 });
 
 test("header panel keeps only file name, status, and download action for each job", () => {

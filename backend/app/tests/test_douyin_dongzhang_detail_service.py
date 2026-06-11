@@ -1,11 +1,15 @@
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from openpyxl import load_workbook
+import pytest
+from sqlalchemy import Select
 
 from app.services.douyin_dongzhang_detail_service import DouyinDongzhangDetailService
 from app.services.partition_service import DOUYIN_SOURCE_PARTITION
 from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
+from app.models.summary import FinancialSummary
 from app.services.upload_period_service import get_upload_period_header
 
 
@@ -20,6 +24,67 @@ def test_douyin_detail_partition_key_uses_source_period_from_upload_period_rule(
 
 def test_douyin_dongzhang_upload_period_rule_uses_transaction_time() -> None:
     assert get_upload_period_header("douyin", "动账") == "动账时间"
+
+
+class _SummaryDetailQuerySession:
+    def __init__(self) -> None:
+        self.statements: list[object] = []
+
+    async def execute(self, statement: object):
+        self.statements.append(statement)
+        statement_sql = str(statement.compile(compile_kwargs={"literal_binds": True})) if isinstance(statement, Select) else str(statement)
+        is_count = "SELECT count(" in statement_sql
+        is_summary_context = "FROM fin_financial_summaries" in statement_sql
+
+        class _Result:
+            def scalar(self_inner):
+                return 0
+
+            def first(self_inner):
+                if is_summary_context:
+                    return (
+                        FinancialSummary(
+                            id=2,
+                            org_id=3,
+                            shop_id=4,
+                            summary_year=2026,
+                            summary_month=5,
+                            source_year=2026,
+                            source_month=5,
+                            source_platform_code="douyin",
+                            report_platform_code="douyin",
+                            platform_name="douyin",
+                            shop_name="抖音旗舰店",
+                        ),
+                        "组织A",
+                        "#fff",
+                    )
+                return None
+
+            def scalars(self_inner):
+                return self_inner
+
+            def all(self_inner):
+                return [] if not is_count else [0]
+
+        return _Result()
+
+
+@pytest.mark.asyncio
+async def test_get_summary_details_orders_by_id_desc() -> None:
+    session = _SummaryDetailQuerySession()
+
+    await DouyinDongzhangDetailService.get_summary_details(
+        session,  # type: ignore[arg-type]
+        summary_id=2,
+        org_ids=None,
+        page=1,
+        page_size=50,
+    )
+
+    detail_sql = str(session.statements[-1].compile(compile_kwargs={"literal_binds": True}))
+    assert "ORDER BY fin_douyin_dongzhang_details.id DESC" in detail_sql
+    assert "source_row_number" not in detail_sql.split("ORDER BY", 1)[1]
 
 
 def test_serialize_detail_row_formats_money_and_dates() -> None:

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
+import logging
 
 import pytest
 
@@ -8,6 +9,7 @@ from app.models.platform import Platform
 from app.models.upload import UploadFile
 import app.core.database as database_module
 import app.services.oss_service as oss_service_module
+import app.tasks.processors as processors_module
 from app.tasks.celery_app import (
     _build_order_dependency_summary,
     _build_order_or_fallback_time_summary,
@@ -483,6 +485,17 @@ class _FakeAsyncResult:
         self.result = result
 
 
+class _FakeProcessor:
+    def process(self, **_kwargs):
+        return {
+            "total_rows": 1,
+            "success_rows": 1,
+            "failed_rows": 0,
+            "errors": [],
+            "groups": {},
+        }
+
+
 @pytest.mark.asyncio
 async def test_process_file_exception_reloads_task_without_accessing_expired_task_id(monkeypatch) -> None:
     task = _RollbackSensitiveTask()
@@ -529,6 +542,78 @@ async def test_process_file_exception_reloads_task_without_accessing_expired_tas
     assert task.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
     assert task.processed_rows == 9
     assert upload_file.status == "expired"
+
+
+@pytest.mark.asyncio
+async def test_process_file_platform_logs_chinese_stage_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    task = _RollbackSensitiveTask()
+    upload_file = UploadFile(
+        id=456,
+        batch_id=1,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        file_size=100,
+        parsed_year=2026,
+        parsed_month=2,
+        parsed_type="动账",
+        parsed_shop="抖音旗舰店",
+        detected_platform="douyin",
+        status="uploaded",
+    )
+    platform = Platform(id=1, code="douyin", name="抖音", status=1)
+    session = _ProcessFileSession(task, upload_file, platform)
+
+    monkeypatch.setattr(database_module, "async_session_factory", _ProcessFileSessionFactory(session))
+    monkeypatch.setattr(oss_service_module.oss_service, "download_to_temp", lambda *_args, **_kwargs: None)
+
+    async def fake_resolve_upload_period_header(*_args, **_kwargs) -> str:
+        return "动账时间"
+
+    monkeypatch.setattr(celery_module, "resolve_upload_period_header", fake_resolve_upload_period_header)
+    monkeypatch.setattr(
+        celery_module,
+        "extract_upload_period",
+        lambda *_args, **_kwargs: SimpleNamespace(year=2026, month=2, header="动账时间"),
+    )
+
+    async def fake_resolve_platform_profile(_db, _platform_code):
+        return SimpleNamespace(
+            processor_code="douyin",
+            source_platform_code="douyin",
+            report_platform_code="douyin",
+            order_scope_code="douyin",
+        )
+
+    async def fake_get_categories(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("app.services.platform_profile_service.resolve_platform_profile", fake_resolve_platform_profile)
+    monkeypatch.setattr("app.services.category_dict_service.CategoryDictService.get_categories", fake_get_categories)
+    monkeypatch.setitem(processors_module.PLATFORM_PROCESSORS, "douyin", _FakeProcessor())
+
+    task_instance = SimpleNamespace(request=SimpleNamespace(id="celery-task-id"))
+
+    with caplog.at_level(logging.INFO, logger="finengine.worker"):
+        await celery_module._process_file_platform_async(
+            task_instance,
+            file_id=456,
+            oss_key="oss-key",
+            org_id=1,
+            platform_code="douyin",
+            shop_name="抖音旗舰店",
+            shop_id=None,
+        )
+
+    assert "核算任务阶段总览" in caplog.text
+    assert "任务状态=success" in caplog.text
+    assert "文件下载耗时秒=" in caplog.text
+    assert "处理器执行耗时秒=" in caplog.text
+    assert "后处理入库耗时秒=" in caplog.text
 
 
 @pytest.mark.asyncio

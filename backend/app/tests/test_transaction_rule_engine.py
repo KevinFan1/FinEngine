@@ -649,6 +649,10 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
     assert sum("transaction_accounting.rule_result" in record.message for record in caplog.records) == 2
     assert sum("transaction_accounting.category_result" in record.message for record in caplog.records) == 2
     assert sum("transaction_accounting.task_perf" in record.message for record in caplog.records) == 1
+    assert "动账资金核算任务阶段总览" in caplog.text
+    assert "规则加载耗时秒=" in caplog.text
+    assert "行处理耗时秒=" in caplog.text
+    assert "结果入库耗时秒=" in caplog.text
     assert not any("transaction_accounting.row_multi_rule_match" in record.message for record in caplog.records)
 
 

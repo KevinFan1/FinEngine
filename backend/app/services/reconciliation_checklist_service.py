@@ -75,8 +75,13 @@ CHECKLIST_EXPORT_BORDER = Border(
     top=CHECKLIST_EXPORT_SIDE,
     bottom=CHECKLIST_EXPORT_SIDE,
 )
+CHECKLIST_EXPORT_NO_BORDER = Border()
 CHECKLIST_EXPORT_ALIGNMENT = Alignment(horizontal="center", vertical="center")
+CHECKLIST_EXPORT_LEFT_ALIGNMENT = Alignment(horizontal="left", vertical="center")
+CHECKLIST_EXPORT_RIGHT_ALIGNMENT = Alignment(horizontal="right", vertical="center")
 CHECKLIST_EXPORT_HEADER_FONT = Font(bold=True)
+CHECKLIST_EXPORT_MONEY_FORMAT = "0.00"
+CHECKLIST_PRODUCT_SUMMARY_TITLE = "直播运营费用明细"
 
 SOURCE_HEADERS = [
     "进驻的直播平台",
@@ -460,17 +465,54 @@ def _apply_export_sheet_style(sheet) -> None:
         sheet.column_dimensions[column_name].width = width
 
 
-def _export_cell(sheet, value: object, *, bold: bool = False, font_size: int | None = None) -> WriteOnlyCell:
+def _export_cell(
+    sheet,
+    value: object,
+    *,
+    bold: bool = False,
+    font_size: int | None = None,
+    border: Border = CHECKLIST_EXPORT_BORDER,
+    alignment: Alignment = CHECKLIST_EXPORT_ALIGNMENT,
+    number_format: str | None = None,
+) -> WriteOnlyCell:
     cell = WriteOnlyCell(sheet, value=value)
-    cell.border = CHECKLIST_EXPORT_BORDER
-    cell.alignment = CHECKLIST_EXPORT_ALIGNMENT
+    cell.border = border
+    cell.alignment = alignment
     if bold or font_size:
         cell.font = Font(bold=bold, size=font_size)
+    if number_format:
+        cell.number_format = number_format
     return cell
 
 
 def _export_row(sheet, values: Iterable[object], *, bold: bool = False, font_size: int | None = None) -> list[WriteOnlyCell]:
     return [_export_cell(sheet, value, bold=bold, font_size=font_size) for value in values]
+
+
+def _set_sheet_cell(
+    sheet,
+    row: int,
+    column: int,
+    value: object,
+    *,
+    bold: bool = False,
+    font_size: int | None = None,
+    border: Border = CHECKLIST_EXPORT_BORDER,
+    alignment: Alignment = CHECKLIST_EXPORT_ALIGNMENT,
+    number_format: str | None = None,
+):
+    cell = sheet.cell(row=row, column=column, value=value)
+    cell.border = border
+    cell.alignment = alignment
+    if bold or font_size:
+        cell.font = Font(bold=bold, size=font_size)
+    if number_format:
+        cell.number_format = number_format
+    return cell
+
+
+def _is_zero_money_export_row(*values: object) -> bool:
+    return all(safe_decimal(value) == Decimal("0.00") for value in values)
 
 
 def _sheet_title(*parts: object) -> str:
@@ -491,10 +533,7 @@ def _chunk_records(records: Sequence[Any], *, bind_count_per_record: int | None 
 def _chunk_tuple_lookup_records(records: Sequence[Any]) -> list[Sequence[Any]]:
     if not records:
         return []
-    return [
-        records[start : start + CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE]
-        for start in range(0, len(records), CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE)
-    ]
+    return [records[start : start + CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE] for start in range(0, len(records), CHECKLIST_TUPLE_IN_LOOKUP_CHUNK_SIZE)]
 
 
 def _source_stage_table():
@@ -713,11 +752,7 @@ class ReconciliationChecklistService:
         parsed_rows: Iterable[dict[str, object]],
         errors: Iterable[str],
     ) -> list[str]:
-        row_to_sub_order = {
-            int(row.get("source_row_number") or 0): safe_str(row.get("sub_order_no"))
-            for row in parsed_rows
-            if safe_str(row.get("sub_order_no"))
-        }
+        row_to_sub_order = {int(row.get("source_row_number") or 0): safe_str(row.get("sub_order_no")) for row in parsed_rows if safe_str(row.get("sub_order_no"))}
         missing_sub_orders: list[str] = []
         for error in errors:
             match = ReconciliationChecklistService.ERROR_ROW_PATTERN.match(safe_str(error))
@@ -840,11 +875,7 @@ class ReconciliationChecklistService:
 
         missing_sub_order_nos = ReconciliationChecklistService._extract_missing_sub_orders_from_errors(parsed_rows, errors)
         affected_period_list = sorted(int(period) for period in affected_periods)
-        sample_sub_order_nos = [
-            safe_str(row.get("sub_order_no"))
-            for row in parsed_rows[:CHECKLIST_MANUAL_EDIT_SAMPLE_LIMIT]
-            if safe_str(row.get("sub_order_no"))
-        ]
+        sample_sub_order_nos = [safe_str(row.get("sub_order_no")) for row in parsed_rows[:CHECKLIST_MANUAL_EDIT_SAMPLE_LIMIT] if safe_str(row.get("sub_order_no"))]
         await AuditService.log(
             db,
             user_id=user.id,
@@ -921,11 +952,7 @@ class ReconciliationChecklistService:
 
         missing_sub_order_nos = ReconciliationChecklistService._extract_missing_sub_orders_from_errors(parsed_rows, errors)
         affected_period_list = sorted(int(period) for period in affected_periods)
-        sample_sub_order_nos = [
-            safe_str(row.get("sub_order_no"))
-            for row in parsed_rows[:CHECKLIST_MANUAL_EDIT_SAMPLE_LIMIT]
-            if safe_str(row.get("sub_order_no"))
-        ]
+        sample_sub_order_nos = [safe_str(row.get("sub_order_no")) for row in parsed_rows[:CHECKLIST_MANUAL_EDIT_SAMPLE_LIMIT] if safe_str(row.get("sub_order_no"))]
         await AuditService.log(
             db,
             user_id=user.id,
@@ -1293,7 +1320,15 @@ class ReconciliationChecklistService:
             task.updated_rows = int(summary.get("更新行数", 0))
             task.result_summary = summary
             task.progress = 100
-            task.status = "failed" if summary.get("文件解析失败") else ("partial_success" if task.failed_rows > 0 and task.success_rows > 0 else ("failed" if task.failed_rows > 0 and task.success_rows == 0 and task.total_rows > 0 else "success"))
+            task.status = (
+                "failed"
+                if summary.get("文件解析失败")
+                else (
+                    "partial_success"
+                    if task.failed_rows > 0 and task.success_rows > 0
+                    else ("failed" if task.failed_rows > 0 and task.success_rows == 0 and task.total_rows > 0 else "success")
+                )
+            )
             error_messages = summary.get("错误明细")
             task.error_message = "\n".join(map(str, error_messages)) if isinstance(error_messages, list) and errors_are_fatal(summary) else None
             task.finished_at = datetime.now(timezone.utc)
@@ -1375,13 +1410,7 @@ class ReconciliationChecklistService:
         affected_periods: set[int] = set()
         should_rebuild_summaries = False
         if not parse_result.get("fatal_error") and parse_result.get("rows"):
-            affected_periods.update(
-                {
-                    int(row["accounting_period"])
-                    for row in parse_result["rows"]
-                    if row.get("accounting_period")
-                }
-            )
+            affected_periods.update({int(row["accounting_period"]) for row in parse_result["rows"] if row.get("accounting_period")})
             if parse_result["file_type"] == CHECKLIST_FILE_TYPE_SOURCE:
                 persist_started = perf_counter()
                 inserted_rows, updated_rows, unchanged_rows, moved_periods = await ReconciliationChecklistService._persist_source_rows_sharded(
@@ -1395,7 +1424,9 @@ class ReconciliationChecklistService:
                 should_rebuild_summaries = bool(affected_periods)
             elif parse_result["file_type"] == CHECKLIST_FILE_TYPE_INVOICE:
                 persist_started = perf_counter()
-                updated_rows, failed_rows, errors, periods = await ReconciliationChecklistService._apply_invoice_rows(db, task=task, upload_file=upload_file, rows=parse_result["rows"])
+                updated_rows, failed_rows, errors, periods = await ReconciliationChecklistService._apply_invoice_rows(
+                    db, task=task, upload_file=upload_file, rows=parse_result["rows"]
+                )
                 persist_seconds += perf_counter() - persist_started
                 parse_result["failed_rows"] = int(parse_result["failed_rows"]) + failed_rows
                 parse_result["success_rows"] = max(0, int(parse_result["success_rows"]) - failed_rows)
@@ -1406,7 +1437,9 @@ class ReconciliationChecklistService:
                 should_rebuild_summaries = bool(periods)
             elif parse_result["file_type"] == CHECKLIST_FILE_TYPE_MERCHANT:
                 persist_started = perf_counter()
-                updated_rows, failed_rows, errors, periods = await ReconciliationChecklistService._apply_merchant_rows(db, task=task, upload_file=upload_file, rows=parse_result["rows"])
+                updated_rows, failed_rows, errors, periods = await ReconciliationChecklistService._apply_merchant_rows(
+                    db, task=task, upload_file=upload_file, rows=parse_result["rows"]
+                )
                 persist_seconds += perf_counter() - persist_started
                 parse_result["failed_rows"] = int(parse_result["failed_rows"]) + failed_rows
                 parse_result["success_rows"] = max(0, int(parse_result["success_rows"]) - failed_rows)
@@ -1904,12 +1937,7 @@ class ReconciliationChecklistService:
         )
         if shard_period is not None:
             join_condition = join_condition & (ReconciliationChecklistDetail.accounting_period == shard_period)
-        business_changes = or_(
-            *(
-                getattr(ReconciliationChecklistDetail, field_name).is_distinct_from(stage_table.c[field_name])
-                for field_name in SOURCE_DETAIL_COMPARE_FIELDS
-            )
-        )
+        business_changes = or_(*(getattr(ReconciliationChecklistDetail, field_name).is_distinct_from(stage_table.c[field_name]) for field_name in SOURCE_DETAIL_COMPARE_FIELDS))
         joined_stage = stage_table.outerjoin(ReconciliationChecklistDetail, join_condition)
 
         compare_started = perf_counter()
@@ -1997,10 +2025,7 @@ class ReconciliationChecklistService:
             return False
 
         column_names = _copy_stage_column_names(rows)
-        records = [
-            tuple(row.get(column_name) for column_name in column_names)
-            for row in rows
-        ]
+        records = [tuple(row.get(column_name) for column_name in column_names) for row in rows]
         await driver_connection.copy_records_to_table(
             table_name,
             records=records,
@@ -2061,10 +2086,7 @@ class ReconciliationChecklistService:
         ordered_shards: list[tuple[int | None, list[dict[str, object]]]] = []
         for period, period_rows in sorted(rows_by_period.items(), key=lambda item: item[0]):
             ordered_shards.extend(
-                [
-                    (period, period_rows[start : start + CHECKLIST_SOURCE_PERSIST_SHARD_SIZE])
-                    for start in range(0, len(period_rows), CHECKLIST_SOURCE_PERSIST_SHARD_SIZE)
-                ]
+                [(period, period_rows[start : start + CHECKLIST_SOURCE_PERSIST_SHARD_SIZE]) for start in range(0, len(period_rows), CHECKLIST_SOURCE_PERSIST_SHARD_SIZE)]
             )
         if rows_without_period:
             ordered_shards.extend(
@@ -2109,10 +2131,7 @@ class ReconciliationChecklistService:
 
     @staticmethod
     def _source_detail_has_business_changes(existing_detail: dict[str, object], row: dict[str, object]) -> bool:
-        return any(
-            existing_detail.get(field_name) != row.get(field_name)
-            for field_name in SOURCE_DETAIL_COMPARE_FIELDS
-        )
+        return any(existing_detail.get(field_name) != row.get(field_name) for field_name in SOURCE_DETAIL_COMPARE_FIELDS)
 
     @staticmethod
     def _detail_values(*, task: ReconciliationChecklistTask, upload_file: ReconciliationChecklistUploadFile, row: dict[str, object]) -> dict[str, object]:
@@ -2234,10 +2253,7 @@ class ReconciliationChecklistService:
                 )
             )
             receipt_merchant_map.update(
-                {
-                    (int(accounting_period), safe_str(sub_order_no)): safe_str(receipt_merchant)
-                    for accounting_period, sub_order_no, receipt_merchant in result.all()
-                }
+                {(int(accounting_period), safe_str(sub_order_no)): safe_str(receipt_merchant) for accounting_period, sub_order_no, receipt_merchant in result.all()}
             )
         return receipt_merchant_map
 
@@ -2399,11 +2415,7 @@ class ReconciliationChecklistService:
             next_invoice_number = safe_str(row.get("invoice_number"))
             if safe_str(detail.receipt_merchant) != next_receipt_merchant:
                 periods.add(int(detail.accounting_period))
-            if (
-                safe_str(detail.receipt_merchant) == next_receipt_merchant
-                and detail.invoice_time == next_invoice_time
-                and safe_str(detail.invoice_number) == next_invoice_number
-            ):
+            if safe_str(detail.receipt_merchant) == next_receipt_merchant and detail.invoice_time == next_invoice_time and safe_str(detail.invoice_number) == next_invoice_number:
                 continue
             matched_rows.append(
                 {
@@ -2433,9 +2445,7 @@ class ReconciliationChecklistService:
                 )
                 for row in chunk
             ]
-            updates = values(*update_columns, name="reconciliation_invoice_manual_updates").data(update_rows).alias(
-                "reconciliation_invoice_manual_updates"
-            )
+            updates = values(*update_columns, name="reconciliation_invoice_manual_updates").data(update_rows).alias("reconciliation_invoice_manual_updates")
             await db.execute(
                 update(ReconciliationChecklistDetail)
                 .where(
@@ -2494,9 +2504,7 @@ class ReconciliationChecklistService:
                 or (detail.merchant_net_amount if detail.merchant_net_amount is not None else Decimal("0.00")) != next_merchant_net_amount
                 or detail.payment_amount != next_payment_amount
             )
-            if (
-                summary_fields_changed
-            ):
+            if summary_fields_changed:
                 periods.add(int(detail.accounting_period))
             if not summary_fields_changed and detail.merchant_payment_time == next_merchant_payment_time:
                 continue
@@ -2636,9 +2644,7 @@ class ReconciliationChecklistService:
                 )
                 for row in chunk
             ]
-            updates = values(*update_columns, name="reconciliation_merchant_manual_updates").data(update_rows).alias(
-                "reconciliation_merchant_manual_updates"
-            )
+            updates = values(*update_columns, name="reconciliation_merchant_manual_updates").data(update_rows).alias("reconciliation_merchant_manual_updates")
             await db.execute(
                 update(ReconciliationChecklistDetail)
                 .where(
@@ -2664,9 +2670,21 @@ class ReconciliationChecklistService:
         period_list = sorted({int(period) for period in periods if int(period) > 0})
         if not period_list:
             return
-        await db.execute(delete(ReconciliationChecklistProductSummaryRow).where(ReconciliationChecklistProductSummaryRow.org_id == org_id, ReconciliationChecklistProductSummaryRow.accounting_period.in_(period_list)))
-        await db.execute(delete(ReconciliationChecklistReceiptSummaryRow).where(ReconciliationChecklistReceiptSummaryRow.org_id == org_id, ReconciliationChecklistReceiptSummaryRow.accounting_period.in_(period_list)))
-        await db.execute(delete(ReconciliationChecklistPayableBalanceSummaryRow).where(ReconciliationChecklistPayableBalanceSummaryRow.org_id == org_id, ReconciliationChecklistPayableBalanceSummaryRow.accounting_period.in_(period_list)))
+        await db.execute(
+            delete(ReconciliationChecklistProductSummaryRow).where(
+                ReconciliationChecklistProductSummaryRow.org_id == org_id, ReconciliationChecklistProductSummaryRow.accounting_period.in_(period_list)
+            )
+        )
+        await db.execute(
+            delete(ReconciliationChecklistReceiptSummaryRow).where(
+                ReconciliationChecklistReceiptSummaryRow.org_id == org_id, ReconciliationChecklistReceiptSummaryRow.accounting_period.in_(period_list)
+            )
+        )
+        await db.execute(
+            delete(ReconciliationChecklistPayableBalanceSummaryRow).where(
+                ReconciliationChecklistPayableBalanceSummaryRow.org_id == org_id, ReconciliationChecklistPayableBalanceSummaryRow.accounting_period.in_(period_list)
+            )
+        )
 
         product_columns = (
             "org_id",
@@ -3290,29 +3308,124 @@ class ReconciliationChecklistService:
         rows, _ = await ReconciliationChecklistService.list_product_summary(db, user=user, **query_params)
         if not rows:
             raise ValueError("未找到符合条件的对账清单数据")
-        workbook = Workbook(write_only=True)
+        workbook = Workbook()
+        default_sheet = workbook.active
+        workbook.remove(default_sheet)
         grouped: dict[tuple[int, int, str, str], list[dict[str, object]]] = {}
         for row in rows:
-            grouped.setdefault((int(row["accounting_year"]), int(row["accounting_month"]), safe_str(row["receipt_merchant"]), safe_str(row["merchant_subject_name"])), []).append(row)
+            grouped.setdefault((int(row["accounting_year"]), int(row["accounting_month"]), safe_str(row["receipt_merchant"]), safe_str(row["merchant_subject_name"])), []).append(
+                row
+            )
         row_count = 0
         for (year, month, receipt_merchant, merchant_subject), group_rows in grouped.items():
             sheet = workbook.create_sheet(_sheet_title(year, month, receipt_merchant, merchant_subject))
-            _apply_export_sheet_style(sheet)
-            sheet.append(_export_row(sheet, ["直播运营费用明细", "", "", "", ""], bold=True, font_size=16))
-            sheet.append(_export_row(sheet, ["", "", "", "结算时间", f"{year}年{month}月"], bold=True))
-            sheet.append(_export_row(sheet, ["收款商家", receipt_merchant, "商户主体名称", merchant_subject, ""], bold=True))
-            sheet.append(_export_row(sheet, ["", "", "", "", ""]))
-            sheet.append(_export_row(sheet, ["序号", "商品名称", "用户实付    （订单金额）", "直播推广佣金", "应付商家净额"], bold=True))
+            for column_name, width in {"A": 14, "B": 48, "C": 22, "D": 22, "E": 22}.items():
+                sheet.column_dimensions[column_name].width = width
+
+            sheet.merge_cells("A1:E1")
+            _set_sheet_cell(
+                sheet,
+                1,
+                1,
+                CHECKLIST_PRODUCT_SUMMARY_TITLE,
+                bold=True,
+                font_size=16,
+                border=CHECKLIST_EXPORT_NO_BORDER,
+            )
+            for column in range(2, 6):
+                _set_sheet_cell(sheet, 1, column, None, border=CHECKLIST_EXPORT_NO_BORDER)
+
+            for column in range(1, 6):
+                _set_sheet_cell(sheet, 2, column, None, bold=True, border=CHECKLIST_EXPORT_NO_BORDER)
+            _set_sheet_cell(sheet, 2, 4, "结算时间", bold=True, border=CHECKLIST_EXPORT_NO_BORDER)
+            _set_sheet_cell(sheet, 2, 5, f"{year}年{month}月", bold=True, border=CHECKLIST_EXPORT_NO_BORDER)
+
+            _set_sheet_cell(sheet, 3, 1, "收款商家", bold=True)
+            _set_sheet_cell(sheet, 3, 2, receipt_merchant, bold=True)
+            _set_sheet_cell(sheet, 3, 3, "商户主体名称", bold=True)
+            sheet.merge_cells("D3:E3")
+            _set_sheet_cell(sheet, 3, 4, merchant_subject, bold=True)
+            _set_sheet_cell(sheet, 3, 5, None, bold=True)
+
+            for column in range(1, 6):
+                _set_sheet_cell(sheet, 4, column, None, border=CHECKLIST_EXPORT_NO_BORDER)
+
+            headers = ["序号", "商品名称", "用户实付（订单金额）", "直播推广佣金", "应付商家净额"]
+            for column, header in enumerate(headers, start=1):
+                _set_sheet_cell(sheet, 5, column, header, bold=True)
+
             total_user_paid = Decimal("0.00")
             total_commission = Decimal("0.00")
             total_net = Decimal("0.00")
-            for index, row in enumerate(group_rows, start=1):
-                total_user_paid += safe_decimal(row.get("total_user_paid_amount"))
-                total_commission += safe_decimal(row.get("total_live_commission"))
-                total_net += safe_decimal(row.get("total_merchant_net_amount"))
-                sheet.append(_export_row(sheet, [index, row.get("product_name") or "", float(row.get("total_user_paid_amount") or 0), float(row.get("total_live_commission") or 0), float(row.get("total_merchant_net_amount") or 0)]))
+            current_row = 6
+            display_index = 1
+            for row in group_rows:
+                user_paid = _money(row.get("total_user_paid_amount"))
+                commission = _money(row.get("total_live_commission"))
+                net_amount = _money(row.get("total_merchant_net_amount"))
+                if _is_zero_money_export_row(user_paid, commission, net_amount):
+                    continue
+                total_user_paid += user_paid
+                total_commission += commission
+                total_net += net_amount
+                _set_sheet_cell(sheet, current_row, 1, display_index)
+                _set_sheet_cell(sheet, current_row, 2, row.get("product_name") or "", alignment=CHECKLIST_EXPORT_LEFT_ALIGNMENT)
+                _set_sheet_cell(
+                    sheet,
+                    current_row,
+                    3,
+                    float(user_paid),
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                )
+                _set_sheet_cell(
+                    sheet,
+                    current_row,
+                    4,
+                    float(commission),
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                )
+                _set_sheet_cell(
+                    sheet,
+                    current_row,
+                    5,
+                    float(net_amount),
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                )
+                current_row += 1
+                display_index += 1
                 row_count += 1
-            sheet.append(_export_row(sheet, ["总计", "", float(total_user_paid), float(total_commission), float(total_net)], bold=True))
+            _set_sheet_cell(sheet, current_row, 1, "总计", bold=True)
+            _set_sheet_cell(sheet, current_row, 2, "", bold=True)
+            _set_sheet_cell(
+                sheet,
+                current_row,
+                3,
+                float(total_user_paid),
+                bold=True,
+                alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+            )
+            _set_sheet_cell(
+                sheet,
+                current_row,
+                4,
+                float(total_commission),
+                bold=True,
+                alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+            )
+            _set_sheet_cell(
+                sheet,
+                current_row,
+                5,
+                float(total_net),
+                bold=True,
+                alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+            )
         workbook.save(output_path)
         workbook.close()
         return row_count
@@ -3329,29 +3442,111 @@ class ReconciliationChecklistService:
         rows, _ = await ReconciliationChecklistService.list_receipt_summary(db, user=user, **query_params)
         if not rows:
             raise ValueError("未找到符合条件的对账清单数据")
-        workbook = Workbook(write_only=True)
+        workbook = Workbook()
+        default_sheet = workbook.active
+        workbook.remove(default_sheet)
         grouped: dict[tuple[int, int, str, str], list[dict[str, object]]] = {}
         for row in rows:
             grouped.setdefault((int(row["accounting_year"]), int(row["accounting_month"]), safe_str(row["merchant_subject_name"]), safe_str(row["live_platform"])), []).append(row)
         row_count = 0
         for (year, month, merchant_subject, live_platform), group_rows in grouped.items():
             sheet = workbook.create_sheet(_sheet_title(year, month, merchant_subject, live_platform))
-            _apply_export_sheet_style(sheet)
-            sheet.append(_export_row(sheet, ["商户主体名称", "", merchant_subject, "", ""], bold=True))
-            sheet.append(_export_row(sheet, ["进驻的直播平台", "", live_platform, "", ""], bold=True))
-            sheet.append(_export_row(sheet, ["结算时间", "", f"{year}年{month}月", "", ""], bold=True))
-            sheet.append(_export_row(sheet, ["", "", "", "", ""]))
-            sheet.append(_export_row(sheet, ["序号", "收款商家", "用户实付 （订单金额）", "直播推广佣金", "应付商家净额"], bold=True))
+            for column_name, width in {"A": 14, "B": 48, "C": 22, "D": 22, "E": 22}.items():
+                sheet.column_dimensions[column_name].width = width
+
+            summary_rows = [
+                ("商户主体名称", merchant_subject),
+                ("进驻的直播平台", live_platform),
+                ("结算时间", f"{year}年{month}月"),
+            ]
+            for row_index, (label, value) in enumerate(summary_rows, start=1):
+                sheet.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=2)
+                sheet.merge_cells(start_row=row_index, start_column=3, end_row=row_index, end_column=5)
+                _set_sheet_cell(sheet, row_index, 1, label, bold=True)
+                _set_sheet_cell(sheet, row_index, 2, None, bold=True)
+                _set_sheet_cell(sheet, row_index, 3, value, bold=True)
+                _set_sheet_cell(sheet, row_index, 4, None, bold=True)
+                _set_sheet_cell(sheet, row_index, 5, None, bold=True)
+
+            for column in range(1, 6):
+                _set_sheet_cell(sheet, 4, column, None, border=CHECKLIST_EXPORT_NO_BORDER)
+
+            headers = ["序号", "收款商家", "用户实付 （订单金额）", "直播推广佣金", "应付商家净额"]
+            for column, header in enumerate(headers, start=1):
+                _set_sheet_cell(sheet, 5, column, header, bold=True)
+
             total_user_paid = Decimal("0.00")
             total_commission = Decimal("0.00")
             total_net = Decimal("0.00")
-            for index, row in enumerate(group_rows, start=1):
-                total_user_paid += safe_decimal(row.get("total_user_paid_amount"))
-                total_commission += safe_decimal(row.get("total_live_commission"))
-                total_net += safe_decimal(row.get("total_merchant_net_amount"))
-                sheet.append(_export_row(sheet, [index, row.get("receipt_merchant") or "", float(row.get("total_user_paid_amount") or 0), float(row.get("total_live_commission") or 0), float(row.get("total_merchant_net_amount") or 0)]))
+            current_row = 6
+            display_index = 1
+            for row in group_rows:
+                user_paid = _money(row.get("total_user_paid_amount"))
+                commission = _money(row.get("total_live_commission"))
+                net_amount = _money(row.get("total_merchant_net_amount"))
+                if _is_zero_money_export_row(user_paid, commission, net_amount):
+                    continue
+                total_user_paid += user_paid
+                total_commission += commission
+                total_net += net_amount
+                _set_sheet_cell(sheet, current_row, 1, display_index)
+                _set_sheet_cell(sheet, current_row, 2, row.get("receipt_merchant") or "", alignment=CHECKLIST_EXPORT_LEFT_ALIGNMENT)
+                _set_sheet_cell(
+                    sheet,
+                    current_row,
+                    3,
+                    float(user_paid),
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                )
+                _set_sheet_cell(
+                    sheet,
+                    current_row,
+                    4,
+                    float(commission),
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                )
+                _set_sheet_cell(
+                    sheet,
+                    current_row,
+                    5,
+                    float(net_amount),
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                )
+                current_row += 1
+                display_index += 1
                 row_count += 1
-            sheet.append(_export_row(sheet, ["总计", "", float(total_user_paid), float(total_commission), float(total_net)], bold=True))
+            _set_sheet_cell(sheet, current_row, 1, "总计", bold=True)
+            _set_sheet_cell(sheet, current_row, 2, "", bold=True)
+            _set_sheet_cell(
+                sheet,
+                current_row,
+                3,
+                float(total_user_paid),
+                bold=True,
+                alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+            )
+            _set_sheet_cell(
+                sheet,
+                current_row,
+                4,
+                float(total_commission),
+                bold=True,
+                alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+            )
+            _set_sheet_cell(
+                sheet,
+                current_row,
+                5,
+                float(total_net),
+                bold=True,
+                alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+            )
         workbook.save(output_path)
         workbook.close()
         return row_count
@@ -3370,11 +3565,10 @@ class ReconciliationChecklistService:
             raise ValueError("未找到符合条件的对账清单数据")
         workbook = Workbook(write_only=True)
         sheet = workbook.create_sheet("商家应付余额明细")
-        _apply_export_sheet_style(sheet)
+        for column_name, width in {"A": 34, "B": 24, "C": 40, "D": 24, "E": 24, "F": 24, "G": 26}.items():
+            sheet.column_dimensions[column_name].width = width
         headers = ["商户主体名称", "结算时间（年月）", "收款商家", "用户实付 （订单金额）", "应付商家净额", "付款金额", "应付商家净额余额"]
         sheet.append(_export_row(sheet, headers, bold=True))
-        for column_name, width in {"A": 28, "B": 18, "C": 28, "D": 18, "E": 18, "F": 18, "G": 20}.items():
-            sheet.column_dimensions[column_name].width = width
         row_count = 0
         total_user_paid = Decimal("0.00")
         total_net = Decimal("0.00")
@@ -3390,21 +3584,72 @@ class ReconciliationChecklistService:
             total_payment += payment_amount
             total_balance += balance_amount
             sheet.append(
-                _export_row(
-                    sheet,
-                    [
-                        row.get("merchant_subject_name") or "",
-                        f"{int(row['accounting_year'])}年{int(row['accounting_month'])}月",
-                        row.get("receipt_merchant") or "",
+                [
+                    _export_cell(sheet, row.get("merchant_subject_name") or ""),
+                    _export_cell(sheet, f"{int(row['accounting_year'])}年{int(row['accounting_month'])}月"),
+                    _export_cell(sheet, row.get("receipt_merchant") or "", alignment=CHECKLIST_EXPORT_LEFT_ALIGNMENT),
+                    _export_cell(
+                        sheet,
                         float(user_paid),
+                        alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                        number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                    ),
+                    _export_cell(
+                        sheet,
                         float(net_amount),
+                        alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                        number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                    ),
+                    _export_cell(
+                        sheet,
                         float(payment_amount),
+                        alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                        number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                    ),
+                    _export_cell(
+                        sheet,
                         float(balance_amount),
-                    ],
-                )
+                        alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                        number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                    ),
+                ]
             )
             row_count += 1
-        sheet.append(_export_row(sheet, ["总计", "", "", float(total_user_paid), float(total_net), float(total_payment), float(total_balance)], bold=True))
+        sheet.append(
+            [
+                _export_cell(sheet, "总计", bold=True),
+                _export_cell(sheet, "", bold=True),
+                _export_cell(sheet, "", bold=True),
+                _export_cell(
+                    sheet,
+                    float(total_user_paid),
+                    bold=True,
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                ),
+                _export_cell(
+                    sheet,
+                    float(total_net),
+                    bold=True,
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                ),
+                _export_cell(
+                    sheet,
+                    float(total_payment),
+                    bold=True,
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                ),
+                _export_cell(
+                    sheet,
+                    float(total_balance),
+                    bold=True,
+                    alignment=CHECKLIST_EXPORT_RIGHT_ALIGNMENT,
+                    number_format=CHECKLIST_EXPORT_MONEY_FORMAT,
+                ),
+            ]
+        )
         workbook.save(output_path)
         workbook.close()
         return row_count
@@ -3422,13 +3667,26 @@ class ReconciliationChecklistService:
         return await ReconciliationChecklistService.list_product_summary(db, user=user, **params)
 
     @staticmethod
-    async def list_entity_options(db: AsyncSession, *, user: User, entity_type: str, accounting_year: int, accounting_month: int, org_id: str | int | None = None, keyword: str | None = None, limit: int = 50, **_kwargs) -> list[dict[str, object]]:
+    async def list_entity_options(
+        db: AsyncSession,
+        *,
+        user: User,
+        entity_type: str,
+        accounting_year: int,
+        accounting_month: int,
+        org_id: str | int | None = None,
+        keyword: str | None = None,
+        limit: int = 50,
+        **_kwargs,
+    ) -> list[dict[str, object]]:
         kind = {
             "merchant": "merchant_subject",
             "receipt_merchant": "receipt_merchant",
             "live_promoter": "live_platform",
         }.get(entity_type, "merchant_subject")
-        rows = await ReconciliationChecklistService.list_options(db, user=user, kind=kind, org_id=org_id, accounting_year=accounting_year, accounting_month=accounting_month, keyword=keyword, limit=limit)
+        rows = await ReconciliationChecklistService.list_options(
+            db, user=user, kind=kind, org_id=org_id, accounting_year=accounting_year, accounting_month=accounting_month, keyword=keyword, limit=limit
+        )
         return [
             {
                 "id": index + 1,

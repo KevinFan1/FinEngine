@@ -253,7 +253,7 @@ class DouyinDongzhangDetailService:
                 DouyinDongzhangDetail.summary_id == summary_id,
                 DouyinDongzhangDetail.is_deleted.is_(False),
             )
-            .order_by(DouyinDongzhangDetail.source_row_number.asc(), DouyinDongzhangDetail.id.asc())
+            .order_by(DouyinDongzhangDetail.id.desc())
         )
         count_stmt = (
             select(func.count())

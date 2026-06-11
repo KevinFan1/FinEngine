@@ -99,7 +99,6 @@
                         <span class="summary-count">共 {{ pagination.total }} 条 · 已选 {{ selectedCount }} 条</span>
                     </div>
                     <div class="card-header-actions">
-                        <el-button :disabled="selectedCount === 0" @click="clearSelectedRows">清空选中</el-button>
                         <el-button :loading="exportSelectedLoading" :disabled="selectedCount === 0" @click="handleExport('selected')">导出选中</el-button>
                         <el-button @click="fetchData">刷新</el-button>
                         <el-button :loading="exportCurrentPageLoading" @click="handleExport('current_page')">导出当前页</el-button>
@@ -110,6 +109,7 @@
 
             <el-table
                 v-if="summaryMode === 'product'"
+                ref="summaryTableRef"
                 v-loading="loading"
                 :data="productRows"
                 border
@@ -150,6 +150,7 @@
 
             <el-table
                 v-else-if="summaryMode === 'receipt'"
+                ref="summaryTableRef"
                 v-loading="loading"
                 :data="receiptRows"
                 border
@@ -190,6 +191,7 @@
 
             <el-table
                 v-else
+                ref="summaryTableRef"
                 v-loading="loading"
                 :data="payableBalanceRows"
                 border
@@ -246,8 +248,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { ElMessage, type TableInstance } from "element-plus";
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import {
     listReconciliationChecklistOptions,
@@ -286,6 +288,8 @@ const pagination = reactive({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0 });
 const selectedRowMap = ref(new Map<string, SummaryRow>());
 const selectedCount = computed(() => selectedRowMap.value.size);
 const selectedRows = computed(() => Array.from(selectedRowMap.value.values()));
+const summaryTableRef = ref<TableInstance>();
+const restoringSelection = ref(false);
 const exportSelectedLoading = ref(false);
 const exportCurrentPageLoading = ref(false);
 const exportAllLoading = ref(false);
@@ -549,12 +553,15 @@ async function fetchData() {
             receiptRows.value = res.items;
             pagination.total = res.total || 0;
         }
+        await nextTick();
+        await restoreSelection();
     } finally {
         loading.value = false;
     }
 }
 
 function handleSelectionChange(rows: SummaryRow[]) {
+    if (restoringSelection.value) return;
     const currentPageKeys = new Set(currentRows().map((row) => row.key));
     const nextMap = new Map(selectedRowMap.value);
     currentPageKeys.forEach((key) => nextMap.delete(key));
@@ -562,8 +569,24 @@ function handleSelectionChange(rows: SummaryRow[]) {
     selectedRowMap.value = nextMap;
 }
 
-function clearSelectedRows() {
+async function restoreSelection() {
+    if (!summaryTableRef.value) return;
+    restoringSelection.value = true;
+    summaryTableRef.value.clearSelection();
+    currentRows().forEach((row) => {
+        if (selectedRowMap.value.has(row.key)) {
+            summaryTableRef.value?.toggleRowSelection(row, true);
+        }
+    });
+    await nextTick();
+    restoringSelection.value = false;
+}
+
+function clearSelectedRows(clearTable = true) {
     selectedRowMap.value = new Map();
+    if (clearTable) {
+        summaryTableRef.value?.clearSelection();
+    }
 }
 
 function handleSearch() {

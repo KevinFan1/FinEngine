@@ -109,6 +109,10 @@ TRANSACTION_ERROR_SAMPLE_LIMIT = 20
 logger = logging.getLogger("finengine.transaction_accounting")
 
 
+def _format_seconds(value: float) -> str:
+    return f"{value:.3f}"
+
+
 def _capture_transaction_result_state(task: TransactionTask) -> dict[str, object]:
     return {
         "total_rows": task.total_rows,
@@ -1713,6 +1717,26 @@ class TransactionAccountingService:
                         process_seconds,
                         perf_counter() - task_started,
                     )
+                    logger.info(
+                        "动账资金核算任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 规则数=%s 汇总分组数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 行处理速度=%s 空文件=是",
+                        task.id,
+                        upload_file.id,
+                        task.status,
+                        task.total_rows,
+                        task.matched_rows,
+                        task.unmatched_rows,
+                        task.failed_rows,
+                        len(rules),
+                        0,
+                        _format_seconds(download_seconds or 0.0),
+                        _format_seconds(open_seconds or 0.0),
+                        _format_seconds(load_seconds),
+                        _format_seconds(rules_seconds),
+                        _format_seconds(process_seconds),
+                        _format_seconds(0.0),
+                        _format_seconds(perf_counter() - task_started),
+                        _format_seconds(0.0),
+                    )
                     await db.flush()
                     await db.refresh(task)
                     return task
@@ -1783,6 +1807,26 @@ class TransactionAccountingService:
                 perf_counter() - task_started,
                 (task.total_rows / process_seconds) if process_seconds > 0 else 0.0,
             )
+            logger.info(
+                "动账资金核算任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 规则数=%s 汇总分组数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 行处理速度=%s",
+                task.id,
+                upload_file.id,
+                task.status,
+                task.total_rows,
+                task.matched_rows,
+                task.unmatched_rows,
+                task.failed_rows,
+                len(rules),
+                len(summary_accumulator),
+                _format_seconds(download_seconds or 0.0),
+                _format_seconds(open_seconds or 0.0),
+                _format_seconds(load_seconds),
+                _format_seconds(rules_seconds),
+                _format_seconds(process_seconds),
+                _format_seconds(persist_seconds),
+                _format_seconds(perf_counter() - task_started),
+                _format_seconds((task.total_rows / process_seconds) if process_seconds > 0 else 0.0),
+            )
         except Exception as exc:
             await db.rollback()
             task = await db.get(TransactionTask, task_id)
@@ -1809,6 +1853,24 @@ class TransactionAccountingService:
                 process_seconds,
                 persist_seconds,
                 perf_counter() - task_started,
+                task.error_message,
+            )
+            logger.warning(
+                "动账资金核算任务处理失败 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s error=%s",
+                task.id,
+                upload_file.id,
+                task.status,
+                task.total_rows,
+                task.matched_rows,
+                task.unmatched_rows,
+                task.failed_rows,
+                _format_seconds(download_seconds or 0.0),
+                _format_seconds(open_seconds or 0.0),
+                _format_seconds(load_seconds),
+                _format_seconds(rules_seconds),
+                _format_seconds(process_seconds),
+                _format_seconds(persist_seconds),
+                _format_seconds(perf_counter() - task_started),
                 task.error_message,
             )
         await db.flush()

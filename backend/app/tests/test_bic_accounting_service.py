@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import datetime
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -585,6 +586,68 @@ async def test_execute_task_marks_source_file_expired_and_preserves_previous_res
     assert upload_file.error_message == SOURCE_FILE_UNAVAILABLE_MESSAGE
 
 
+@pytest.mark.asyncio
+async def test_execute_task_logs_chinese_stage_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    task = BicTask(
+        id=1,
+        file_id=2,
+        org_id=3,
+        user_id=4,
+        status="queued",
+        progress=0,
+    )
+    upload_file = BicUploadFile(
+        id=2,
+        org_id=3,
+        user_id=4,
+        original_name="26年02月_bic_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_id=5,
+        shop_name="抖音旗舰店",
+        status="uploaded",
+    )
+    session = _BicExecuteSession(task=task, upload_file=upload_file)
+
+    monkeypatch.setattr("app.services.bic_accounting_service.oss_service.download_to_temp", lambda *_args, **_kwargs: None)
+
+    async def fake_resolve_upload_period_header(*_args, **_kwargs) -> str:
+        return "计费完成时间"
+
+    monkeypatch.setattr(
+        "app.services.bic_accounting_service.resolve_upload_period_header",
+        fake_resolve_upload_period_header,
+    )
+    monkeypatch.setattr(
+        "app.services.bic_accounting_service.extract_upload_period",
+        lambda *_args, **_kwargs: SimpleNamespace(year=2026, month=2),
+    )
+
+    async def fake_persist_task_result(*_args, **_kwargs) -> dict:
+        return {
+            "文件类型": "BIC",
+            "总行数": 1,
+            "符合条件行数": 1,
+            "失败行数": 0,
+            "明细分组数": 1,
+            "源数据行数": 1,
+        }
+
+    monkeypatch.setattr(BicAccountingService, "persist_task_result", staticmethod(fake_persist_task_result))
+
+    with caplog.at_level(logging.INFO, logger="finengine.bic_accounting"):
+        await BicAccountingService.execute_task(session, task_id=1)  # type: ignore[arg-type]
+
+    assert "BIC任务阶段总览" in caplog.text
+    assert "任务状态=success" in caplog.text
+    assert "文件下载耗时秒=" in caplog.text
+    assert "所属年月解析耗时秒=" in caplog.text
+    assert "结果入库耗时秒=" in caplog.text
+
+
 def test_bic_detail_workbook_includes_shop_profile_fields() -> None:
     buffer = BicAccountingService._build_detail_workbook(
         [
@@ -883,7 +946,7 @@ def test_bic_source_rows_link_to_detail_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_source_rows_defaults_to_latest_task_scope() -> None:
+async def test_list_source_rows_defaults_to_id_desc_without_latest_task_scope() -> None:
     session = _BicSourceRowsQuerySession()
     user = SimpleNamespace(role="member", org_id=3)
 
@@ -899,9 +962,9 @@ async def test_list_source_rows_defaults_to_latest_task_scope() -> None:
     assert session.count_queries == 0
     assert len(session.statements) == 1
     statement_sql = str(session.statements[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "fin_bic_source_rows.task_id IN (SELECT max(fin_bic_tasks.id) AS task_id" in statement_sql
-    assert "GROUP BY fin_bic_upload_files.org_id" in statement_sql
-    assert "fin_bic_upload_files.accounting_month" in statement_sql
+    assert "SELECT max(fin_bic_tasks.id) AS task_id" not in statement_sql
+    assert "GROUP BY fin_bic_upload_files.org_id" not in statement_sql
+    assert "ORDER BY fin_bic_source_rows.id DESC" in statement_sql
     assert "fin_bic_source_rows.shop_id IS NULL" in statement_sql
     assert "EXISTS" in statement_sql
     assert "fin_shops" in statement_sql

@@ -109,6 +109,31 @@ test("keeps user management under system management and only visible for admin r
     );
 });
 
+test("limits organization members to the designated accounting and shop menus", () => {
+    const memberMenus = filterSidebarMenuByRole(sidebarMenuItems, "member");
+
+    assert.deepEqual(
+        memberMenus
+            .filter((item) => item.type !== "divider")
+            .map((item) => item.title),
+        [
+            "核算上传中心",
+            "店铺管理",
+            "动账核算",
+            "动账资金核算",
+            "BIC核算",
+        ],
+    );
+    assert.equal(
+        memberMenus.some((item) => item.type !== "divider" && item.title === "规则配置"),
+        false,
+    );
+    assert.equal(
+        memberMenus.some((item) => item.type !== "divider" && item.title === "系统管理"),
+        false,
+    );
+});
+
 test("keeps sidebar menu to two levels", () => {
     assert.equal(hasNestedChildren(sidebarMenuItems), false);
 });

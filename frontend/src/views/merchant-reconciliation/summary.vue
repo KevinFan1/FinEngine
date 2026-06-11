@@ -25,9 +25,6 @@
                         <el-checkbox v-model="includeRelatedDetailsInExport" :disabled="!hasSelectedMonth">
                             导出附带明细
                         </el-checkbox>
-                        <el-button :disabled="!hasSelectedMonth || selectedCount === 0" @click="clearSelectedRows">
-                            清空选中
-                        </el-button>
                         <el-button :disabled="!hasSelectedMonth || selectedCount === 0" :loading="exportSelectedLoading" @click="handleExport('selected')">
                             <el-icon><Download /></el-icon>
                             导出选中

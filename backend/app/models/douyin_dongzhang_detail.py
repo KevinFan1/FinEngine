@@ -26,6 +26,12 @@ class DouyinDongzhangDetail(SoftDeleteMixin, Base):
             "summary_id",
             postgresql_where=text("is_deleted = false"),
         ),
+        Index(
+            "idx_douyin_dongzhang_detail_summary_id",
+            "summary_id",
+            "id",
+            postgresql_where=text("is_deleted = false"),
+        ),
         Index("idx_douyin_dongzhang_detail_id", "id"),
         Index("idx_douyin_dongzhang_detail_task", "task_id"),
         Index("idx_douyin_dongzhang_detail_file", "file_id"),

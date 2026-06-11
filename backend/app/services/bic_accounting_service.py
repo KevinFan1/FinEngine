@@ -1,9 +1,11 @@
 """Service layer for independent BIC accounting."""
 import io
+import logging
 import tempfile
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable
 
 from openpyxl.cell import WriteOnlyCell
@@ -37,6 +39,11 @@ BIC_RECONCILIATION_SOURCE_EXPORT_HEADERS = ["店铺", *DOUYIN_BIC_HEADERS]
 BIC_RESULT_TASK_STATUSES = ("success", "partial_success", "failed", "expired")
 BIC_ERROR_SAMPLE_LIMIT = 10
 BIC_EXPORT_BATCH_SIZE = 5000
+logger = logging.getLogger("finengine.bic_accounting")
+
+
+def _format_seconds(value: float) -> str:
+    return f"{value:.3f}"
 
 
 def _capture_bic_result_state(task: BicTask) -> dict[str, object]:
@@ -696,6 +703,10 @@ class BicAccountingService:
 
     @staticmethod
     async def execute_task(db: AsyncSession, *, task_id: int) -> BicTask:
+        task_started = perf_counter()
+        download_seconds = 0.0
+        period_seconds = 0.0
+        persist_seconds = 0.0
         task = await db.get(BicTask, task_id)
         if task is None or task.is_deleted:
             raise ValueError("BIC任务不存在")
@@ -714,7 +725,10 @@ class BicAccountingService:
         try:
             suffix = Path(upload_file.original_name).suffix or ".xlsx"
             with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+                download_started = perf_counter()
                 oss_service.download_to_temp(upload_file.oss_key, tmp.name)
+                download_seconds = perf_counter() - download_started
+                period_started = perf_counter()
                 period_header = await resolve_upload_period_header(db, upload_file.platform_code, "bic")
                 try:
                     upload_period = extract_upload_period(
@@ -726,10 +740,28 @@ class BicAccountingService:
                     upload_file.accounting_year = upload_period.year
                     upload_file.accounting_month = upload_period.month
                 except EmptyTabularDataError:
+                    period_seconds = perf_counter() - period_started
                     _mark_bic_empty_success(task, upload_file)
+                    logger.info(
+                        "BIC任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 符合条件行数=%s 失败行数=%s 明细分组数=%s 源数据行数=%s 文件下载耗时秒=%s 所属年月解析耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 空文件=是",
+                        task.id,
+                        upload_file.id,
+                        task.status,
+                        task.processed_rows,
+                        task.success_rows,
+                        task.failed_rows,
+                        0,
+                        0,
+                        _format_seconds(download_seconds),
+                        _format_seconds(period_seconds),
+                        _format_seconds(0.0),
+                        _format_seconds(perf_counter() - task_started),
+                    )
                     await db.flush()
                     await db.refresh(task)
                     return task
+                period_seconds = perf_counter() - period_started
+                persist_started = perf_counter()
                 summary = await BicAccountingService.persist_task_result(
                     db,
                     task=task,
@@ -739,6 +771,7 @@ class BicAccountingService:
                     shop_id=upload_file.shop_id,
                     shop_name=upload_file.shop_name or "",
                 )
+                persist_seconds = perf_counter() - persist_started
 
             task.processed_rows = int(summary.get("总行数", 0))
             task.success_rows = int(summary.get("符合条件行数", 0))
@@ -754,6 +787,21 @@ class BicAccountingService:
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "failed" if task.status == "failed" else "processed"
             upload_file.error_message = task.error_message
+            logger.info(
+                "BIC任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 符合条件行数=%s 失败行数=%s 明细分组数=%s 源数据行数=%s 文件下载耗时秒=%s 所属年月解析耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s",
+                task.id,
+                task.file_id,
+                task.status,
+                task.processed_rows,
+                task.success_rows,
+                task.failed_rows,
+                int((task.result_summary or {}).get("明细分组数") or 0),
+                int((task.result_summary or {}).get("源数据行数") or 0),
+                _format_seconds(download_seconds),
+                _format_seconds(period_seconds),
+                _format_seconds(persist_seconds),
+                _format_seconds(perf_counter() - task_started),
+            )
         except Exception as exc:
             await db.rollback()
             task = await db.get(BicTask, task_id)
@@ -770,6 +818,17 @@ class BicAccountingService:
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "expired" if is_expired else "failed"
             upload_file.error_message = task.error_message
+            logger.warning(
+                "BIC任务处理失败 task_id=%s file_id=%s 任务状态=%s 文件下载耗时秒=%s 所属年月解析耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s error=%s",
+                task.id,
+                upload_file.id,
+                task.status,
+                _format_seconds(download_seconds),
+                _format_seconds(period_seconds),
+                _format_seconds(persist_seconds),
+                _format_seconds(perf_counter() - task_started),
+                task.error_message,
+            )
 
         await db.flush()
         await db.refresh(task)
@@ -1131,8 +1190,6 @@ class BicAccountingService:
             filters.append(BicSourceRow.detail_id == detail_id)
         elif task_id is not None:
             filters.append(BicSourceRow.task_id == task_id)
-        else:
-            filters.append(BicSourceRow.task_id.in_(BicAccountingService._latest_result_task_ids_select()))
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicSourceRow.platform_code.in_(platform_codes))
@@ -1222,14 +1279,7 @@ class BicAccountingService:
             .outerjoin(Organization, Organization.id == BicSourceRow.org_id)
             .where(*filters)
             .order_by(
-                BicSourceRow.accounting_year.desc(),
-                BicSourceRow.accounting_month.desc(),
-                BicSourceRow.platform_code,
-                BicSourceRow.service_provider,
-                BicSourceRow.shop_id,
-                BicSourceRow.shop_name,
-                BicSourceRow.qic_warehouse,
-                BicSourceRow.source_row_number,
+                BicSourceRow.id.desc(),
             )
         )
         total = None

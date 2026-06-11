@@ -1256,7 +1256,6 @@ async function fetchHeaderDownloadJobs() {
 
 async function handleDownloadCenterShow() {
     downloadCenterPopoverVisible.value = true;
-    if (headerDownloadJobsLoaded.value) return;
     await fetchHeaderDownloadJobs();
 }
 
@@ -1267,6 +1266,10 @@ async function refreshHeaderDownloadJobs() {
 async function openDownloadCenterEntry() {
     downloadCenterPopoverVisible.value = false;
     await nextTick();
+    if (currentRouteName.value === "DownloadCenter") {
+        await refreshCurrentPage();
+        return;
+    }
     await navigateToDownloadCenter(router, window.location);
 }
 

@@ -115,12 +115,6 @@
                             导出附带源明细
                         </el-checkbox>
                         <el-button
-                            :disabled="selectedCount === 0"
-                            @click="clearSelectedRows"
-                        >
-                            清空选中
-                        </el-button>
-                        <el-button
                             :loading="exportSelectedLoading"
                             :disabled="selectedCount === 0"
                             @click="handleExport('selected')"

@@ -175,11 +175,6 @@
                     </div>
                     <div class="card-header-actions">
                         <el-button
-                            :disabled="selectedRows.length === 0"
-                            @click="clearSelectedRows"
-                            >清空选中</el-button
-                        >
-                        <el-button
                             :loading="exportSelectedLoading"
                             :disabled="selectedRows.length === 0"
                             @click="handleExport('selected')"

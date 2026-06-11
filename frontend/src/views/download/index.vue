@@ -254,7 +254,7 @@
 <script setup lang="ts">
 defineOptions({ name: "DownloadCenter" });
 
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onActivated, onMounted, onUnmounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Download, Loading, Refresh } from "@element-plus/icons-vue";
 import {
@@ -268,6 +268,7 @@ import {
     DOWNLOAD_CENTER_MODULE_OPTIONS,
     getDownloadCenterModuleLabel,
 } from "@/utils/downloadCenterModules";
+import { usePageRefresh } from "@/composables/pageRefresh";
 
 const loading = ref(false);
 const downloadingId = ref<number | null>(null);
@@ -385,9 +386,15 @@ onMounted(() => {
     }, 6000);
 });
 
+onActivated(() => {
+    fetchData();
+});
+
 onUnmounted(() => {
     if (refreshTimer) window.clearInterval(refreshTimer);
 });
+
+usePageRefresh(fetchData);
 </script>
 
 <style scoped lang="scss">
