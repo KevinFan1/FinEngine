@@ -742,6 +742,13 @@ class BicAccountingService:
                 except EmptyTabularDataError:
                     period_seconds = perf_counter() - period_started
                     _mark_bic_empty_success(task, upload_file)
+                    task.result_summary = {
+                        **(task.result_summary or {}),
+                        "文件下载耗时秒": round(download_seconds, 3),
+                        "所属年月解析耗时秒": round(period_seconds, 3),
+                        "结果入库耗时秒": 0.0,
+                        "任务总耗时秒": round(perf_counter() - task_started, 3),
+                    }
                     logger.info(
                         "BIC任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 符合条件行数=%s 失败行数=%s 明细分组数=%s 源数据行数=%s 文件下载耗时秒=%s 所属年月解析耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 空文件=是",
                         task.id,
@@ -776,7 +783,13 @@ class BicAccountingService:
             task.processed_rows = int(summary.get("总行数", 0))
             task.success_rows = int(summary.get("符合条件行数", 0))
             task.failed_rows = int(summary.get("失败行数", 0))
-            task.result_summary = summary
+            task.result_summary = {
+                **summary,
+                "文件下载耗时秒": round(download_seconds, 3),
+                "所属年月解析耗时秒": round(period_seconds, 3),
+                "结果入库耗时秒": round(persist_seconds, 3),
+                "任务总耗时秒": round(perf_counter() - task_started, 3),
+            }
             task.progress = 100
             if summary.get("文件解析失败"):
                 task.status = "failed"
@@ -918,6 +931,7 @@ class BicAccountingService:
             "失败行数": parse_result.get("failed_rows", 0),
             "明细分组数": len(detail_rows),
             "源数据行数": len(source_rows),
+            "结果入库耗时秒": 0.0,
         }
         errors = parse_result.get("errors", [])[:BIC_ERROR_SAMPLE_LIMIT]
         if errors:

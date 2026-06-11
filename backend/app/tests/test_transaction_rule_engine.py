@@ -622,7 +622,7 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
 
     assert task.status == "success"
     assert task.total_rows == 1
-    assert task.matched_rows == 2
+    assert task.matched_rows == 1
     assert task.unmatched_rows == 0
     assert task.failed_rows == 0
     assert len(detail_rows) == 2
@@ -632,14 +632,13 @@ async def test_execute_task_uses_transaction_time_period_and_expands_multi_rule_
     assert {detail.raw_row["明细类型"] for detail in detail_rows} == {"聚合明细"}
     assert {detail.raw_row["原始匹配明细数"] for detail in detail_rows} == {1}
     json.dumps(detail_rows[0].raw_row)
-    assert task.result_summary == {
-        "总行数": 1,
-        "成功行数": 1,
-        "匹配明细数": 2,
-        "未匹配行数": 0,
-        "失败行数": 0,
-        "汇总分组数": 2,
-    }
+    assert task.result_summary["总行数"] == 1
+    assert task.result_summary["成功行数"] == 1
+    assert task.result_summary["匹配行数"] == 1
+    assert task.result_summary["匹配明细数"] == 2
+    assert task.result_summary["未匹配行数"] == 0
+    assert task.result_summary["失败行数"] == 0
+    assert task.result_summary["汇总分组数"] == 2
     assert len(summary_rows) == 2
     assert {(row.subject_id, row.category_id, row.total_amount) for row in summary_rows} == {
         (1, 11, Decimal("100.00")),
@@ -704,15 +703,15 @@ async def test_execute_task_marks_header_only_file_success_with_empty_reason(mon
     assert task.unmatched_rows == 0
     assert task.failed_rows == 0
     assert task.error_message == "空表，没有数据"
-    assert task.result_summary == {
-        "总行数": 0,
-        "成功行数": 0,
-        "匹配明细数": 0,
-        "未匹配行数": 0,
-        "失败行数": 0,
-        "汇总分组数": 0,
-        "错误明细": ["空表，没有数据"],
-    }
+    assert task.result_summary["总行数"] == 0
+    assert task.result_summary["成功行数"] == 0
+    assert task.result_summary["匹配行数"] == 0
+    assert task.result_summary["匹配明细数"] == 0
+    assert task.result_summary["未匹配行数"] == 0
+    assert task.result_summary["失败行数"] == 0
+    assert task.result_summary["汇总分组数"] == 0
+    assert task.result_summary["错误明细"] == ["空表，没有数据"]
+    assert "任务总耗时秒" in task.result_summary
     assert upload_file.status == "processed"
     assert upload_file.error_message == "空表，没有数据"
     assert db.added_rows == []
@@ -794,6 +793,9 @@ async def test_execute_task_aggregates_detail_rows_during_processing(monkeypatch
     assert len(summary_rows) == 1
     assert summary_rows[0].total_amount == Decimal("130.00")
     assert task.result_summary["汇总分组数"] == 1
+    assert "行处理耗时秒" in task.result_summary
+    assert "结果入库耗时秒" in task.result_summary
+    assert "任务总耗时秒" in task.result_summary
 
 
 @pytest.mark.asyncio
@@ -877,6 +879,83 @@ async def test_execute_task_records_row_error_reasons_without_blank_detail_rows(
     assert task.result_summary is not None
     assert task.result_summary["错误明细"] == (task.error_message or "").splitlines()
     assert any("动账场景=未知场景" in message for message in task.result_summary["错误明细"])
+
+
+@pytest.mark.asyncio
+async def test_execute_task_counts_multi_rule_failures_once_per_source_row(monkeypatch) -> None:
+    task = TransactionTask(id=14, file_id=24, org_id=1, user_id=2, status="queued", progress=0)
+    upload_file = TransactionUploadFile(
+        id=24,
+        org_id=1,
+        user_id=2,
+        original_name="26年02月_动账_抖音旗舰店.xlsx",
+        oss_key="oss-key",
+        platform_code="douyin",
+        shop_name="抖音旗舰店",
+        accounting_year=2026,
+        accounting_month=2,
+    )
+    db = _TransactionAccountingSession(
+        task=task,
+        upload_file=upload_file,
+        subjects=[],
+        categories=[],
+    )
+    row = {
+        "动账时间": datetime(2026, 3, 16, 10, 0, 0),
+        "动账方向": "入账",
+        "备注": "订单结算",
+        "订单实付应结": "abc",
+        "实际平台补贴": "xyz",
+    }
+    rules = [
+        make_rule(
+            rule_id=1,
+            priority=10,
+            subject_id=1,
+            category_id=11,
+            transaction_direction="入账",
+            remark_pattern="订单结算",
+            amount_field="订单实付应结",
+            result_direction="positive",
+        ),
+        make_rule(
+            rule_id=2,
+            priority=20,
+            subject_id=2,
+            category_id=21,
+            transaction_direction="入账",
+            remark_pattern="订单结算",
+            amount_field="实际平台补贴",
+            result_direction="positive",
+        ),
+    ]
+
+    async def fake_load_rule_candidates(_db, *, platform_code: str | None) -> list[TransactionRuleCandidate]:
+        _ = platform_code
+        return rules
+
+    _mock_dongzhang_row_stream(
+        monkeypatch,
+        header=["动账时间", "动账方向", "备注", "订单实付应结", "实际平台补贴"],
+        rows=[row],
+        period=(2026, 2),
+    )
+    monkeypatch.setattr(
+        TransactionAccountingService,
+        "_load_rule_candidates",
+        staticmethod(fake_load_rule_candidates),
+    )
+
+    await TransactionAccountingService.execute_task(db, task_id=14)  # type: ignore[arg-type]
+
+    assert task.status == "partial_success"
+    assert task.total_rows == 1
+    assert task.matched_rows == 0
+    assert task.unmatched_rows == 0
+    assert task.failed_rows == 1
+    assert task.result_summary["匹配明细数"] == 0
+    assert len((task.error_message or "").splitlines()) == 2
 
 
 @pytest.mark.asyncio

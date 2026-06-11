@@ -51,7 +51,7 @@ async def get_oss_sts(
     if batch is None:
         return ApiResponse(code=404, message="上传批次不存在或无权访问")
 
-    prefix = f"user-upload/tmp/{batch.org_id}/{batch.id}/"
+    prefix = "upload/"
 
     session_name = f"finengine-{batch.org_id}-{batch.id}-{current_user.id}"
 

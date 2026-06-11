@@ -39,6 +39,7 @@ from app.services.audit_service import AuditService
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error, oss_service
 from app.tasks.processors.base import open_tabular_rows, parse_datetime, safe_str
 from app.utils.money import safe_decimal
+from app.utils.oss_paths import checklist_manual_edit_dir, current_oss_period, sanitize_oss_filename
 from app.utils.query_filters import resolve_org_ids
 
 logger = logging.getLogger("finengine.reconciliation_checklist")
@@ -1087,8 +1088,10 @@ class ReconciliationChecklistService:
         )
         db.add(upload_file)
         await db.flush()
-        safe_name = Path(original_name).name.replace("\\", "_").replace("/", "_")
-        upload_file.oss_key = f"user-upload/reconciliation-checklist/manual-edits/{org_id}/{upload_file.id}/{safe_name}"
+        upload_file.oss_key = (
+            f"upload/{checklist_manual_edit_dir(task_type)}/{current_oss_period(datetime.now())}/"
+            f"{upload_file.id}_{sanitize_oss_filename(original_name)}"
+        )
         await db.flush()
         await db.refresh(upload_file)
         return upload_file

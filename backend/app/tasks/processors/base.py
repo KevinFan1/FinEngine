@@ -8,6 +8,7 @@ field formulas.
 import csv
 import codecs
 from html.parser import HTMLParser
+from itertools import chain
 import logging
 import re
 from zipfile import BadZipFile
@@ -21,6 +22,7 @@ from typing import Iterable, Iterator
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
+from python_calamine import CalamineError, CalamineWorkbook
 from xlrd import XL_CELL_DATE, XL_CELL_NUMBER, XLRDError, open_workbook, xldate_as_datetime
 
 from app.utils.money import ZERO_MONEY, safe_decimal
@@ -286,6 +288,18 @@ def iter_xls_rows(file_path: str) -> Iterator[tuple[object, ...]]:
         yield tuple(values)
 
 
+def iter_calamine_rows(file_path: str) -> Iterator[tuple[object, ...]]:
+    workbook = CalamineWorkbook.from_path(file_path)
+    try:
+        sheet = workbook.get_sheet_by_index(0)
+        if sheet is None:
+            return
+        for row in sheet.iter_rows():
+            yield tuple(row)
+    finally:
+        workbook.close()
+
+
 def _tabular_open_error(file_path: str, reason: str) -> TabularFileOpenError:
     suffix = Path(file_path).suffix.lower() or "无后缀"
     return TabularFileOpenError(f"无法打开表格文件：文件内容不是支持的 Excel/CSV 格式（后缀 {suffix}，{reason}）")
@@ -310,6 +324,17 @@ def open_tabular_rows(file_path: str) -> Iterator[Iterable[tuple[object, ...] | 
         return
 
     if _has_zip_signature(sample):
+        try:
+            calamine_rows = iter_calamine_rows(file_path)
+            try:
+                first_row = next(calamine_rows)
+            except StopIteration:
+                yield iter(())
+            else:
+                yield chain((first_row,), calamine_rows)
+            return
+        except (CalamineError, OSError, ValueError) as exc:
+            logger.info("xlsx读取回退openpyxl file=%s reason=%s", file_path, exc)
         try:
             wb = load_workbook(file_path, read_only=True, data_only=True)
         except (BadZipFile, InvalidFileException, OSError) as exc:

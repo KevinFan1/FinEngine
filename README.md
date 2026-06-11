@@ -214,24 +214,135 @@ backend/app/
 └── utils/               # 金额、文本分类等工具
 ```
 
-## 常用开发命令
+## OSS 目录约定
 
-后端：
+上传和导出文件统一按当前年月归档，方便后续整批清理：
+
+```text
+upload/{type}/{YYYYMM}/{token}_{filename}
+export/{type}/{YYYYMM}/{job_id}_{token}.xlsx
+```
+
+说明：
+
+- `YYYYMM` 使用上传或导出当天的当前年月，例如 `202606`。
+- 不再从文件名或业务数据里识别年月。
+- `type` 使用英文目录名，例如 `dongzhang`、`bic`、`red-sheet`、`bank-flow`、`reconciliation-checklist-source`。
+- 对账清单手工修改文件分别进入 `reconciliation-checklist-invoice-edit` 和 `reconciliation-checklist-merchant-edit` 目录。
+
+## CLI 命令速查
+
+后端启动与检查：
 
 ```bash
 cd backend
+uv sync
+uv run dev
+uv run worker
+uv run recover-queued-tasks
+uv run debug-worker /path/to/file.xlsx
 uv run ruff check app scripts
 uv run pytest
-uv run alembic current
-uv run alembic upgrade head
-uv run alembic revision --autogenerate -m "message"
+```
+
+数据库迁移：
+
+```bash
+cd backend
+uv run migrate-current
+uv run migrate-history
+uv run migrate-check
+uv run migrate-upgrade
+uv run migrate-downgrade -1
+uv run migrate-generate -m "message"
+```
+
+初始化与基础数据：
+
+```bash
+cd backend
+uv run seed-all
+uv run seed-platforms
+uv run seed-users
+uv run seed-file-specs
+uv run seed-category-dicts
+uv run seed-transaction-accounting-defaults
+uv run seed-transaction-accounting-rules
+uv run seed-transaction-major-subjects
+```
+
+分区维护：
+
+```bash
+cd backend
+uv run ensure-source-partitions
+uv run ensure-reconciliation-checklist-partitions
+uv run repair-reconciliation-checklist-partitions --start 202601 --end 202612
 ```
 
 前端：
 
 ```bash
 cd frontend
+npm install
+npm run dev
 npm run build
+npm run preview
+```
+
+## 源数据清理
+
+项目提供了手工清理源数据明细的脚本：
+
+```bash
+cd backend
+uv run python scripts/clear_source_detail_rows.py --help
+```
+
+说明：
+
+- 该脚本只清理 `fin_douyin_dongzhang_details` 和 `fin_bic_source_rows` 两张源数据表。
+- 不会删除任务表、上传文件表、汇总表，也不会影响其他业务表。
+- 推荐先执行 `--dry-run` 演练，确认待清理行数后再正式执行。
+- `dongzhang` 按 `source_period` 清理，`bic` 按 `accounting_period` 清理。
+
+常用命令：
+
+```bash
+# 先演练全量清理，查看两张源数据表会清掉多少行
+cd backend
+uv run python scripts/clear_source_detail_rows.py --all --dry-run
+
+# 全量清空动账明细和 BIC 源数据
+uv run python scripts/clear_source_detail_rows.py --all
+
+# 只清空动账明细源数据
+uv run python scripts/clear_source_detail_rows.py --target dongzhang --all
+
+# 只清空 BIC 源数据
+uv run python scripts/clear_source_detail_rows.py --target bic --all
+
+# 先演练清理指定年月，例如 202604
+uv run python scripts/clear_source_detail_rows.py --period 202604 --dry-run
+
+# 清理指定年月，例如 202604
+uv run python scripts/clear_source_detail_rows.py --period 202604
+
+# 只清理动账明细的指定年月
+uv run python scripts/clear_source_detail_rows.py --target dongzhang --period 202604
+
+# 只清理 BIC 源数据的指定年月
+uv run python scripts/clear_source_detail_rows.py --target bic --period 202604
+
+# 先演练清理年月范围，例如 202604 到 202606
+uv run python scripts/clear_source_detail_rows.py --period-start 202604 --period-end 202606 --dry-run
+
+# 清理年月范围，例如 202604 到 202606
+uv run python scripts/clear_source_detail_rows.py --period-start 202604 --period-end 202606
+
+# 按保留期清理创建时间早于 30 天前的源数据，适合后续接 Celery 定时任务
+uv run python scripts/clear_source_detail_rows.py --before-days 30 --dry-run
+uv run python scripts/clear_source_detail_rows.py --before-days 30
 ```
 
 ## 接入新平台

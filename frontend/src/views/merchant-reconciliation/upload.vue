@@ -140,7 +140,7 @@
                                     </el-button>
                                 </div>
                                 <p class="drop-zone-hint">
-                                    {{ isReadingFiles ? precheckHintText : "红单支持 .xlsx / .xlsm；银行流水支持 .xls / .xlsx / .xlsm / .csv，文件名需符合 YYYYMM_银行流水_xxxx" }}
+                                    {{ isReadingFiles ? precheckHintText : "红单支持 .xlsx / .xlsm；银行流水支持 .xls / .xlsx / .xlsm / .csv，文件名需符合 YYYYMM_银行流水_xxxx；大文件建议优先使用 .csv 上传" }}
                                 </p>
                             </div>
                         </div>
@@ -260,6 +260,7 @@ import { Upload } from "@element-plus/icons-vue";
 import { downloadRedSheetTemplate } from "@/api/merchantReconciliation";
 import { createBatch, getOssSts, uploadCallback, type OssStsCredential } from "@/api/upload";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
+import { buildUploadOssKey } from "@/utils/ossPath";
 import MerchantFilters from "./components/MerchantFilters.vue";
 import { downloadFile, loadXlsx } from "./common";
 import { useMerchantReconciliationFilters } from "./composables";
@@ -601,9 +602,8 @@ async function createOssClient(sts: OssStsCredential, batchId: number) {
     });
 }
 
-function buildOssKey(sts: OssStsCredential, fileName: string): string {
-    const safeName = fileName.replace(/[\\/]/g, "_");
-    return `${sts.oss_key_prefix}${Date.now()}_${safeName}`;
+function buildOssKey(sts: OssStsCredential, typeName: UploadFileType, fileName: string): string {
+    return buildUploadOssKey(sts.oss_key_prefix, typeName, fileName);
 }
 
 async function createUploadContext(rows: UploadQueueItem[], remark = "商家对账文件上传"): Promise<RedSheetUploadContext> {
@@ -631,7 +631,7 @@ async function uploadRow(row: UploadQueueItem, context: RedSheetUploadContext) {
     row.progress = 0;
     row.error = "";
     try {
-        const ossKey = buildOssKey(context.sts, row.file.name);
+        const ossKey = buildOssKey(context.sts, row.type, row.file.name);
         await context.ossClient.multipartUpload(ossKey, row.file, {
             timeout: OSS_REQUEST_TIMEOUT,
             partSize: OSS_MULTIPART_PART_SIZE,

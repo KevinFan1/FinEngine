@@ -27,6 +27,7 @@ from app.services.oss_service import assume_sts_role, oss_service
 from app.services.reconciliation_checklist_service import ReconciliationChecklistService
 from app.services.summary_service import SummaryService
 from app.services.transaction_accounting_service import TransactionAccountingService
+from app.utils.oss_paths import build_export_oss_key
 from app.utils.query_filters import resolve_org_ids
 
 
@@ -102,11 +103,11 @@ def _safe_filename(filename: str) -> str:
 
 
 def _export_oss_key(job: ExportJob) -> str:
-    now = datetime.now(timezone.utc)
-    org_part = str(job.org_id or "global")
-    return (
-        f"{settings.EXPORT_OSS_PREFIX.strip('/')}/{org_part}/{job.user_id}/"
-        f"{now:%Y/%m/%d}/{job.id}_{uuid.uuid4().hex}.xlsx"
+    return build_export_oss_key(
+        export_type=job.export_type,
+        job_id=job.id,
+        unique_token=uuid.uuid4().hex,
+        now=datetime.now(timezone.utc),
     )
 
 

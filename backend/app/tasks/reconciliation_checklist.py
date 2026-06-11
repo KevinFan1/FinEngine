@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.core.database import async_session_factory
 from app.models.reconciliation_checklist import ReconciliationChecklistTask
 from app.services.reconciliation_checklist_service import ReconciliationChecklistService
-from app.tasks.celery_app import _run_async_in_worker, celery_app
+from app.tasks.celery_app import _build_task_result_payload, _run_async_in_worker, celery_app
 
 
 @celery_app.task(
@@ -27,15 +27,14 @@ async def _run_reconciliation_checklist_task(task_id: int) -> dict:
     async with async_session_factory() as db:
         task = await ReconciliationChecklistService.execute_task(db, task_id=task_id)
         await db.commit()
-        return {
-            "task_id": task.id,
-            "status": task.status,
-            "total_rows": task.total_rows,
-            "success_rows": task.success_rows,
-            "failed_rows": task.failed_rows,
-            "inserted_rows": task.inserted_rows,
-            "updated_rows": task.updated_rows,
-        }
+        return _build_task_result_payload(
+            task,
+            extra={
+                "总行数": task.total_rows,
+                "新增行数": task.inserted_rows,
+                "更新行数": task.updated_rows,
+            },
+        )
 
 
 def recover_queued_reconciliation_checklist_tasks(limit: int = 100) -> int:

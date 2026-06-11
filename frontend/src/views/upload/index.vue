@@ -220,7 +220,7 @@
                                     {{
                                         isReadingHeaders
                                             ? precheckHintText
-                                            : "支持 .xlsx / .xlsm / .xls / .csv，可拖入文件夹，单文件最大 1024MB，上传前会检查本月上传额度是否充足"
+                                            : "支持 .xlsx / .xlsm / .xls / .csv，可拖入文件夹；大文件建议优先使用 .csv，预检和解析更快；单文件最大 1024MB，上传前会检查本月上传额度是否充足"
                                     }}
                                 </p>
                             </div>
@@ -1107,6 +1107,7 @@ import { getShopList, type Shop as ShopRecord } from "@/api/shop";
 import { checkUploadQuota } from "@/api/quota";
 import { useUserStore } from "@/stores/user";
 import { usePageRefresh } from "@/composables/pageRefresh";
+import { buildUploadOssKey } from "@/utils/ossPath";
 import PlatformBadge from "@/components/PlatformBadge.vue";
 import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
@@ -2450,9 +2451,8 @@ const UPLOAD_TYPE_PRIORITY: Record<string, number> = {
     GMV: 2,
 };
 
-function buildOssKey(sts: OssStsCredential, fileName: string): string {
-    const safeName = fileName.replace(/[\\/]/g, "_");
-    return `${sts.oss_key_prefix}${Date.now()}_${safeName}`;
+function buildOssKey(sts: OssStsCredential, typeName: string, fileName: string): string {
+    return buildUploadOssKey(sts.oss_key_prefix, typeName, fileName);
 }
 
 function toOssCredential(sts: OssStsCredential) {
@@ -2643,7 +2643,7 @@ async function uploadSingleFile(
     item.error = undefined;
 
     try {
-        const ossKey = buildOssKey(context.sts, item.file.name);
+        const ossKey = buildOssKey(context.sts, item.meta.type, item.file.name);
         await uploadFileToOss(context.ossClient, ossKey, item);
         await uploadCallback({
             batch_id: context.batchId,

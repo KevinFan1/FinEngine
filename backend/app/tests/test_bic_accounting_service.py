@@ -331,6 +331,7 @@ async def test_bic_accounting_result_summary_uses_chinese_keys(tmp_path: Path) -
         "失败行数": 0,
         "明细分组数": 1,
         "源数据行数": 1,
+        "结果入库耗时秒": 0.0,
     }
     assert not any(key in summary for key in ["total_rows", "success_rows", "failed_rows", "detail_ids"])
 

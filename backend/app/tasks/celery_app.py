@@ -103,6 +103,21 @@ def _capture_processing_result_state(task, upload_file) -> dict[str, object]:
     }
 
 
+def _build_task_result_payload(task, *, upload_file=None, extra: dict[str, object] | None = None) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "任务ID": task.id,
+        "任务状态": task.status,
+        "处理行数": int(getattr(task, "processed_rows", 0) or 0),
+        "成功行数": int(getattr(task, "success_rows", 0) or 0),
+        "失败行数": int(getattr(task, "failed_rows", 0) or 0),
+        "结果摘要": _json_safe(getattr(task, "result_summary", None)),
+        "上传行数": getattr(upload_file, "row_count", None) if upload_file is not None else None,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
 def _restore_processing_result_state(task, upload_file, state: dict[str, object] | None) -> None:
     if not state:
         return
@@ -185,6 +200,32 @@ def _mark_task_empty_success(task, upload_file, *, file_type: str) -> None:
         upload_file.status = "success"
         upload_file.error_message = task.error_message
         upload_file.row_count = 0
+
+
+def _apply_processing_stage_metrics(
+    task,
+    *,
+    file_type: str,
+    download_seconds: float,
+    period_seconds: float,
+    category_seconds: float,
+    processor_seconds: float,
+    postprocess_seconds: float,
+    total_seconds: float,
+) -> None:
+    summary = dict(task.result_summary or {})
+    summary.setdefault("文件类型", file_type)
+    summary.update(
+        {
+            "文件下载耗时秒": round(download_seconds, 3),
+            "所属年月解析耗时秒": round(period_seconds, 3),
+            "类目加载耗时秒": round(category_seconds, 3),
+            "处理器执行耗时秒": round(processor_seconds, 3),
+            "后处理入库耗时秒": round(postprocess_seconds, 3),
+            "任务总耗时秒": round(total_seconds, 3),
+        }
+    )
+    task.result_summary = _json_safe(summary)
 
 
 def _group_return_cost_by_order_created_time(
@@ -446,7 +487,7 @@ def process_file_platform(
     This bypasses the rule engine entirely. The processor handles column
     mapping, derived-column computation, and aggregation internally.
     """
-    _run_async_in_worker(
+    return _run_async_in_worker(
         _process_file_platform_async(
             self,
             file_id,
@@ -467,7 +508,7 @@ def process_merchant_red_sheet(
     oss_key: str,
 ):
     """Process a merchant red-sheet upload from OSS."""
-    _run_async_in_worker(
+    return _run_async_in_worker(
         _process_merchant_red_sheet_async(
             self,
             task_id=task_id,
@@ -485,7 +526,7 @@ def process_merchant_bank_flow(
     oss_key: str,
 ):
     """Process a merchant bank-flow upload from OSS."""
-    _run_async_in_worker(
+    return _run_async_in_worker(
         _process_merchant_bank_flow_async(
             self,
             task_id=task_id,
@@ -668,7 +709,7 @@ async def _process_merchant_red_sheet_async(
     task_id: int,
     file_id: int,
     oss_key: str,
-) -> None:
+) -> dict[str, object] | None:
     from sqlalchemy import select
 
     from app.core.database import async_session_factory
@@ -677,6 +718,29 @@ async def _process_merchant_red_sheet_async(
     from app.models.user import User
     from app.services.merchant_reconciliation_service import MerchantReconciliationService
     from app.services.oss_service import oss_service
+
+    task_started = perf_counter()
+    download_seconds = 0.0
+    read_seconds = 0.0
+    import_seconds = 0.0
+    persist_seconds = 0.0
+
+    def log_stage_summary() -> None:
+        logger.info(
+            "红单任务阶段总览 task_id=%s file_id=%s 文件类型=%s 任务状态=%s 总行数=%s 成功行数=%s 失败行数=%s 文件下载耗时秒=%s 文件读取耗时秒=%s 导入处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s",
+            task.id,
+            file_id,
+            "红单",
+            task.status,
+            task.processed_rows,
+            task.success_rows,
+            task.failed_rows,
+            _format_seconds(download_seconds),
+            _format_seconds(read_seconds),
+            _format_seconds(import_seconds),
+            _format_seconds(persist_seconds),
+            _format_seconds(perf_counter() - task_started),
+        )
 
     async with async_session_factory() as db:
         task_result = await db.execute(
@@ -695,7 +759,7 @@ async def _process_merchant_red_sheet_async(
         )
         upload_file = file_result.scalar_one_or_none()
         if task is None or upload_file is None:
-            return
+            return None
 
         previous_result_state = _capture_processing_result_state(task, upload_file)
         task.status = "running"
@@ -713,13 +777,18 @@ async def _process_merchant_red_sheet_async(
                 raise ValueError("红单任务缺少年月，请重新上传")
 
             with tempfile.NamedTemporaryFile(suffix=_infer_temp_suffix(upload_file, oss_key), delete=True) as tmp:
+                download_started = perf_counter()
                 oss_service.download_to_temp(oss_key, tmp.name)
+                download_seconds = perf_counter() - download_started
                 task.progress = 35
                 await db.commit()
 
+                read_started = perf_counter()
                 with open(tmp.name, "rb") as file_obj:
                     content = file_obj.read()
+                read_seconds = perf_counter() - read_started
 
+            import_started = perf_counter()
             result = await MerchantReconciliationService.import_red_sheet(
                 db,
                 content=content,
@@ -729,6 +798,7 @@ async def _process_merchant_red_sheet_async(
                 operator=operator,
                 org_id=upload_file.org_id,
             )
+            import_seconds = perf_counter() - import_started
 
             total_rows = result.purchase_rows + result.payment_rows
             task.status = "success"
@@ -747,12 +817,30 @@ async def _process_merchant_red_sheet_async(
                 "货款明细行数": result.payment_rows,
                 "处理提示": _json_safe(result.warnings[:50]),
                 "错误明细": _json_safe(result.errors[:10]),
+                "文件下载耗时秒": round(download_seconds, 3),
+                "文件读取耗时秒": round(read_seconds, 3),
+                "导入处理耗时秒": round(import_seconds, 3),
+                "结果入库耗时秒": 0.0,
+                "任务总耗时秒": round(perf_counter() - task_started, 3),
             }
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "success"
             upload_file.row_count = total_rows
             upload_file.error_message = None
+            persist_started = perf_counter()
             await db.commit()
+            persist_seconds = perf_counter() - persist_started
+            task.result_summary["结果入库耗时秒"] = round(persist_seconds, 3)
+            task.result_summary["任务总耗时秒"] = round(perf_counter() - task_started, 3)
+            log_stage_summary()
+            return _build_task_result_payload(
+                task,
+                upload_file=upload_file,
+                extra={
+                    "文件ID": upload_file.id,
+                    "文件类型": "红单",
+                },
+            )
         except Exception as exc:
             await db.rollback()
             task_result = await db.execute(
@@ -773,6 +861,19 @@ async def _process_merchant_red_sheet_async(
                 upload_file = file_result.scalar_one_or_none()
                 _mark_task_failed(task, upload_file, exc, previous_state=previous_result_state)
             await db.commit()
+            if task is not None:
+                logger.warning(
+                    "红单任务处理失败 task_id=%s file_id=%s 任务状态=%s 文件下载耗时秒=%s 文件读取耗时秒=%s 导入处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s error=%s",
+                    task_id,
+                    file_id,
+                    task.status,
+                    _format_seconds(download_seconds),
+                    _format_seconds(read_seconds),
+                    _format_seconds(import_seconds),
+                    _format_seconds(persist_seconds),
+                    _format_seconds(perf_counter() - task_started),
+                    task.error_message,
+                )
             logger.exception("红单任务处理失败 file_id=%s oss_key=%s", file_id, oss_key)
             raise
 
@@ -783,7 +884,7 @@ async def _process_merchant_bank_flow_async(
     task_id: int,
     file_id: int,
     oss_key: str,
-) -> None:
+) -> dict[str, object] | None:
     from sqlalchemy import select
 
     from app.core.database import async_session_factory
@@ -792,6 +893,28 @@ async def _process_merchant_bank_flow_async(
     from app.models.user import User
     from app.services.merchant_reconciliation_service import MerchantReconciliationService
     from app.services.oss_service import oss_service
+
+    task_started = perf_counter()
+    download_seconds = 0.0
+    import_seconds = 0.0
+    persist_seconds = 0.0
+
+    def log_stage_summary() -> None:
+        logger.info(
+            "银行流水任务阶段总览 task_id=%s file_id=%s 文件类型=%s 任务状态=%s 总行数=%s 成功行数=%s 失败行数=%s 匹配行数=%s 文件下载耗时秒=%s 导入处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s",
+            task.id,
+            file_id,
+            "银行流水",
+            task.status,
+            task.processed_rows,
+            task.success_rows,
+            task.failed_rows,
+            int((task.result_summary or {}).get("匹配行数") or 0),
+            _format_seconds(download_seconds),
+            _format_seconds(import_seconds),
+            _format_seconds(persist_seconds),
+            _format_seconds(perf_counter() - task_started),
+        )
 
     async with async_session_factory() as db:
         task_result = await db.execute(
@@ -810,7 +933,7 @@ async def _process_merchant_bank_flow_async(
         )
         upload_file = file_result.scalar_one_or_none()
         if task is None or upload_file is None:
-            return
+            return None
 
         previous_result_state = _capture_processing_result_state(task, upload_file)
         task.status = "running"
@@ -826,9 +949,12 @@ async def _process_merchant_bank_flow_async(
                 raise ValueError("上传用户不存在，无法处理银行流水")
 
             with tempfile.NamedTemporaryFile(suffix=_infer_temp_suffix(upload_file, oss_key), delete=True) as tmp:
+                download_started = perf_counter()
                 oss_service.download_to_temp(oss_key, tmp.name)
+                download_seconds = perf_counter() - download_started
                 task.progress = 35
                 await db.commit()
+                import_started = perf_counter()
                 result = await MerchantReconciliationService.import_bank_flow(
                     db,
                     file_path=tmp.name,
@@ -838,6 +964,7 @@ async def _process_merchant_bank_flow_async(
                     file_size=upload_file.file_size,
                     file_hash=upload_file.file_hash,
                 )
+                import_seconds = perf_counter() - import_started
 
             task.status = "success"
             task.progress = 100
@@ -854,12 +981,29 @@ async def _process_merchant_bank_flow_async(
                 "匹配行数": result.matched_row_count,
                 "处理提示": _json_safe(result.warnings[:50]),
                 "错误明细": _json_safe(result.errors[:10]),
+                "文件下载耗时秒": round(download_seconds, 3),
+                "导入处理耗时秒": round(import_seconds, 3),
+                "结果入库耗时秒": 0.0,
+                "任务总耗时秒": round(perf_counter() - task_started, 3),
             }
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "success"
             upload_file.row_count = result.row_count
             upload_file.error_message = None
+            persist_started = perf_counter()
             await db.commit()
+            persist_seconds = perf_counter() - persist_started
+            task.result_summary["结果入库耗时秒"] = round(persist_seconds, 3)
+            task.result_summary["任务总耗时秒"] = round(perf_counter() - task_started, 3)
+            log_stage_summary()
+            return _build_task_result_payload(
+                task,
+                upload_file=upload_file,
+                extra={
+                    "文件ID": upload_file.id,
+                    "文件类型": "银行流水",
+                },
+            )
         except Exception as exc:
             await db.rollback()
             task_result = await db.execute(
@@ -880,6 +1024,18 @@ async def _process_merchant_bank_flow_async(
                 upload_file = file_result.scalar_one_or_none()
                 _mark_task_failed(task, upload_file, exc, previous_state=previous_result_state)
             await db.commit()
+            if task is not None:
+                logger.warning(
+                    "银行流水任务处理失败 task_id=%s file_id=%s 任务状态=%s 文件下载耗时秒=%s 导入处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s error=%s",
+                    task_id,
+                    file_id,
+                    task.status,
+                    _format_seconds(download_seconds),
+                    _format_seconds(import_seconds),
+                    _format_seconds(persist_seconds),
+                    _format_seconds(perf_counter() - task_started),
+                    task.error_message,
+                )
             logger.exception("银行流水任务处理失败 file_id=%s oss_key=%s", file_id, oss_key)
             raise
 
@@ -908,7 +1064,7 @@ async def _process_file_platform_async(
     platform_code: str,
     shop_name: str,
     shop_id: int | None = None,
-):
+) -> dict[str, object] | None:
     from sqlalchemy import select
 
     from app.core.database import async_session_factory
@@ -962,7 +1118,7 @@ async def _process_file_platform_async(
         result = await db.execute(stmt)
         task = result.scalar_one_or_none()
         if not task:
-            return
+            return None
         task_id = task.id
 
         previous_result_state = _capture_processing_result_state(task, None)
@@ -1047,9 +1203,28 @@ async def _process_file_platform_async(
                 if int(proc_result.get("total_rows") or 0) == 0 and not proc_result.get("errors"):
                     _mark_task_empty_success(task, upload_file, file_type=file_type)
                     task.processed_rows = 0
+                    _apply_processing_stage_metrics(
+                        task,
+                        file_type=file_type,
+                        download_seconds=download_seconds,
+                        period_seconds=period_seconds,
+                        category_seconds=category_seconds,
+                        processor_seconds=processor_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        total_seconds=perf_counter() - task_started,
+                    )
                     log_stage_summary(empty_file=True)
                     await db.commit()
-                    return
+                    return _build_task_result_payload(
+                        task,
+                        upload_file=upload_file,
+                        extra={
+                            "文件ID": file_id,
+                            "文件类型": file_type,
+                            "来源平台": platform_code,
+                            "报表平台": report_platform_code,
+                        },
+                    )
                 upload_period_counts = proc_result.get("upload_period_counts") or {}
                 if upload_period_counts and len(upload_period_counts) > 1:
                     summary = "、".join(f"{period} 共 {count} 行" for period, count in sorted(upload_period_counts.items()))
@@ -1133,8 +1308,27 @@ async def _process_file_platform_async(
                         await db.commit()
                         await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
                         postprocess_seconds = perf_counter() - postprocess_started
+                        _apply_processing_stage_metrics(
+                            task,
+                            file_type=file_type,
+                            download_seconds=download_seconds,
+                            period_seconds=period_seconds,
+                            category_seconds=category_seconds,
+                            processor_seconds=processor_seconds,
+                            postprocess_seconds=postprocess_seconds,
+                            total_seconds=perf_counter() - task_started,
+                        )
                         log_stage_summary()
-                        return
+                        return _build_task_result_payload(
+                            task,
+                            upload_file=upload_file,
+                            extra={
+                                "文件ID": file_id,
+                                "文件类型": file_type,
+                                "来源平台": platform_code,
+                                "报表平台": report_platform_code,
+                            },
+                        )
 
                 if file_type == "订单":
                     raise ValueError(f"订单索引解析结果为空，错误: {proc_result['errors'][:3]}")
@@ -1169,8 +1363,27 @@ async def _process_file_platform_async(
 
                         await db.commit()
                         postprocess_seconds = perf_counter() - postprocess_started
+                        _apply_processing_stage_metrics(
+                            task,
+                            file_type=file_type,
+                            download_seconds=download_seconds,
+                            period_seconds=period_seconds,
+                            category_seconds=category_seconds,
+                            processor_seconds=processor_seconds,
+                            postprocess_seconds=postprocess_seconds,
+                            total_seconds=perf_counter() - task_started,
+                        )
                         log_stage_summary()
-                        return
+                        return _build_task_result_payload(
+                            task,
+                            upload_file=upload_file,
+                            extra={
+                                "文件ID": file_id,
+                                "文件类型": file_type,
+                                "来源平台": platform_code,
+                                "报表平台": report_platform_code,
+                            },
+                        )
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
@@ -1225,8 +1438,27 @@ async def _process_file_platform_async(
 
                     await db.commit()
                     postprocess_seconds = perf_counter() - postprocess_started
+                    _apply_processing_stage_metrics(
+                        task,
+                        file_type=file_type,
+                        download_seconds=download_seconds,
+                        period_seconds=period_seconds,
+                        category_seconds=category_seconds,
+                        processor_seconds=processor_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        total_seconds=perf_counter() - task_started,
+                    )
                     log_stage_summary()
-                    return
+                    return _build_task_result_payload(
+                        task,
+                        upload_file=upload_file,
+                        extra={
+                            "文件ID": file_id,
+                            "文件类型": file_type,
+                            "来源平台": platform_code,
+                            "报表平台": report_platform_code,
+                        },
+                    )
 
                 if file_type in {"动账", "其他服务款"} and "return_cost_contribution_rows" in proc_result:
                     from app.services.order_index_service import OrderIndexService
@@ -1258,8 +1490,27 @@ async def _process_file_platform_async(
                             upload_file.row_count = proc_result["total_rows"]
                         await db.commit()
                         postprocess_seconds = perf_counter() - postprocess_started
+                        _apply_processing_stage_metrics(
+                            task,
+                            file_type=file_type,
+                            download_seconds=download_seconds,
+                            period_seconds=period_seconds,
+                            category_seconds=category_seconds,
+                            processor_seconds=processor_seconds,
+                            postprocess_seconds=postprocess_seconds,
+                            total_seconds=perf_counter() - task_started,
+                        )
                         log_stage_summary()
-                        return
+                        return _build_task_result_payload(
+                            task,
+                            upload_file=upload_file,
+                            extra={
+                                "文件ID": file_id,
+                                "文件类型": file_type,
+                                "来源平台": platform_code,
+                                "报表平台": report_platform_code,
+                            },
+                        )
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
@@ -1309,8 +1560,27 @@ async def _process_file_platform_async(
                         upload_file.row_count = proc_result["total_rows"]
                     await db.commit()
                     postprocess_seconds = perf_counter() - postprocess_started
+                    _apply_processing_stage_metrics(
+                        task,
+                        file_type=file_type,
+                        download_seconds=download_seconds,
+                        period_seconds=period_seconds,
+                        category_seconds=category_seconds,
+                        processor_seconds=processor_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        total_seconds=perf_counter() - task_started,
+                    )
                     log_stage_summary()
-                    return
+                    return _build_task_result_payload(
+                        task,
+                        upload_file=upload_file,
+                        extra={
+                            "文件ID": file_id,
+                            "文件类型": file_type,
+                            "来源平台": platform_code,
+                            "报表平台": report_platform_code,
+                        },
+                    )
 
                 if file_type == "运费险" and "insurance_fee_rows" in proc_result:
                     from app.services.order_index_service import OrderIndexService
@@ -1340,8 +1610,27 @@ async def _process_file_platform_async(
                             upload_file.row_count = proc_result["total_rows"]
                         await db.commit()
                         postprocess_seconds = perf_counter() - postprocess_started
+                        _apply_processing_stage_metrics(
+                            task,
+                            file_type=file_type,
+                            download_seconds=download_seconds,
+                            period_seconds=period_seconds,
+                            category_seconds=category_seconds,
+                            processor_seconds=processor_seconds,
+                            postprocess_seconds=postprocess_seconds,
+                            total_seconds=perf_counter() - task_started,
+                        )
                         log_stage_summary()
-                        return
+                        return _build_task_result_payload(
+                            task,
+                            upload_file=upload_file,
+                            extra={
+                                "文件ID": file_id,
+                                "文件类型": file_type,
+                                "来源平台": platform_code,
+                                "报表平台": report_platform_code,
+                            },
+                        )
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
@@ -1393,8 +1682,27 @@ async def _process_file_platform_async(
                         upload_file.row_count = proc_result["total_rows"]
                     await db.commit()
                     postprocess_seconds = perf_counter() - postprocess_started
+                    _apply_processing_stage_metrics(
+                        task,
+                        file_type=file_type,
+                        download_seconds=download_seconds,
+                        period_seconds=period_seconds,
+                        category_seconds=category_seconds,
+                        processor_seconds=processor_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        total_seconds=perf_counter() - task_started,
+                    )
                     log_stage_summary()
-                    return
+                    return _build_task_result_payload(
+                        task,
+                        upload_file=upload_file,
+                        extra={
+                            "文件ID": file_id,
+                            "文件类型": file_type,
+                            "来源平台": platform_code,
+                            "报表平台": report_platform_code,
+                        },
+                    )
 
                 if file_type == "动账" and "order_summary_rows" in proc_result:
                     from app.services.order_index_service import OrderIndexService
@@ -1425,8 +1733,27 @@ async def _process_file_platform_async(
                             upload_file.row_count = proc_result["total_rows"]
                         await db.commit()
                         postprocess_seconds = perf_counter() - postprocess_started
+                        _apply_processing_stage_metrics(
+                            task,
+                            file_type=file_type,
+                            download_seconds=download_seconds,
+                            period_seconds=period_seconds,
+                            category_seconds=category_seconds,
+                            processor_seconds=processor_seconds,
+                            postprocess_seconds=postprocess_seconds,
+                            total_seconds=perf_counter() - task_started,
+                        )
                         log_stage_summary()
-                        return
+                        return _build_task_result_payload(
+                            task,
+                            upload_file=upload_file,
+                            extra={
+                                "文件ID": file_id,
+                                "文件类型": file_type,
+                                "来源平台": platform_code,
+                                "报表平台": report_platform_code,
+                            },
+                        )
 
                     order_created_times = await OrderIndexService.get_order_created_times(
                         db,
@@ -1475,8 +1802,27 @@ async def _process_file_platform_async(
                         upload_file.row_count = proc_result["total_rows"]
                     await db.commit()
                     postprocess_seconds = perf_counter() - postprocess_started
+                    _apply_processing_stage_metrics(
+                        task,
+                        file_type=file_type,
+                        download_seconds=download_seconds,
+                        period_seconds=period_seconds,
+                        category_seconds=category_seconds,
+                        processor_seconds=processor_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        total_seconds=perf_counter() - task_started,
+                    )
                     log_stage_summary()
-                    return
+                    return _build_task_result_payload(
+                        task,
+                        upload_file=upload_file,
+                        extra={
+                            "文件ID": file_id,
+                            "文件类型": file_type,
+                            "来源平台": platform_code,
+                            "报表平台": report_platform_code,
+                        },
+                    )
 
                 if not proc_result["groups"]:
                     if proc_result.get("errors"):
@@ -1501,8 +1847,27 @@ async def _process_file_platform_async(
 
                     await db.commit()
                     postprocess_seconds = perf_counter() - postprocess_started
+                    _apply_processing_stage_metrics(
+                        task,
+                        file_type=file_type,
+                        download_seconds=download_seconds,
+                        period_seconds=period_seconds,
+                        category_seconds=category_seconds,
+                        processor_seconds=processor_seconds,
+                        postprocess_seconds=postprocess_seconds,
+                        total_seconds=perf_counter() - task_started,
+                    )
                     log_stage_summary()
-                    return
+                    return _build_task_result_payload(
+                        task,
+                        upload_file=upload_file,
+                        extra={
+                            "文件ID": file_id,
+                            "文件类型": file_type,
+                            "来源平台": platform_code,
+                            "报表平台": report_platform_code,
+                        },
+                    )
 
                 # 7. Upsert each group into the summary table
                 task.progress = 80
@@ -1583,6 +1948,16 @@ async def _process_file_platform_async(
                     await _requeue_order_dependent_tasks_after_order_upload_async(file_id)
                 postprocess_seconds = perf_counter() - postprocess_started
                 log_stage_summary()
+                return _build_task_result_payload(
+                    task,
+                    upload_file=upload_file,
+                    extra={
+                        "文件ID": file_id,
+                        "文件类型": file_type,
+                        "来源平台": platform_code,
+                        "报表平台": report_platform_code,
+                    },
+                )
 
         except Exception as e:
             await db.rollback()

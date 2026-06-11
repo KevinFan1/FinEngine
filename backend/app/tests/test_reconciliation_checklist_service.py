@@ -2888,6 +2888,32 @@ async def test_manual_edit_upload_callback_reuses_initialized_upload_file(
 
 
 @pytest.mark.asyncio
+async def test_init_manual_edit_upload_uses_current_period_oss_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _CreateManualEditTaskSession()
+    user = SimpleNamespace(id=7, username="tester", display_name="测试用户", role="admin", org_id=9)
+
+    class _FixedDatetime:
+        @staticmethod
+        def now():
+            return datetime(2026, 6, 11, 14, 30)
+
+    monkeypatch.setattr("app.services.reconciliation_checklist_service.datetime", _FixedDatetime)
+
+    upload_file = await ReconciliationChecklistService.init_manual_edit_upload(
+        session,  # type: ignore[arg-type]
+        org_id=9,
+        user=user,  # type: ignore[arg-type]
+        original_name="merchant-edit.xlsx",
+        file_size=4096,
+        task_type=CHECKLIST_TASK_TYPE_MERCHANT_EDIT,
+    )
+
+    assert upload_file.oss_key == "upload/reconciliation-checklist-merchant-edit/202606/200_merchant-edit.xlsx"
+
+
+@pytest.mark.asyncio
 async def test_create_manual_edit_upload_task_rejects_wrong_manual_task_type() -> None:
     session = _CreateManualEditTaskSession()
     user = SimpleNamespace(id=7, username="tester", display_name="测试用户", role="admin", org_id=9)

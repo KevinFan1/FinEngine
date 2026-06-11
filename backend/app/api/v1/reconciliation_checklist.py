@@ -168,7 +168,7 @@ async def _manual_edit_upload_init(
         )
     except Exception:
         return ApiResponse(code=502, message="获取 OSS 上传凭证失败，请稍后重试")
-    prefix = f"user-upload/reconciliation-checklist/manual-edits/{upload_file.org_id}/{upload_file.id}/"
+    prefix = "upload/"
     return ApiResponse(
         data=ReconciliationChecklistManualEditUploadInitResponse(
             file=ReconciliationChecklistManualEditUploadFileOut.model_validate(upload_file),

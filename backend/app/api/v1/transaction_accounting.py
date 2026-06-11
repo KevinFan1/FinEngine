@@ -552,7 +552,7 @@ async def upload_init(
         )
     except Exception:
         return ApiResponse(code=502, message="获取 OSS 上传凭证失败，请稍后重试")
-    prefix = f"user-upload/transaction-accounting/{upload_file.org_id}/{upload_file.id}/"
+    prefix = "upload/"
     return ApiResponse(
         data=TransactionUploadInitResponse(
             file=TransactionUploadFileOut.model_validate(upload_file),

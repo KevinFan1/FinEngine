@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +7,7 @@ from app.core.database import run_after_commit_callbacks
 from app.models.export_job import ExportJob
 from app.models.user import User
 from app.schemas.export_job import ExportJobCreate
+from app.services import export_job_service as export_job_service_module
 from app.services.export_job_service import ExportJobService
 
 
@@ -307,3 +309,34 @@ async def test_export_job_mark_running_persists_worker_state() -> None:
     assert job.started_at is not None
     assert job.error_message is None
     assert session.flushed == 1
+
+
+def test_export_job_oss_key_uses_export_type_and_current_period(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixed_now = datetime(2026, 6, 11, 14, 30, tzinfo=timezone.utc)
+
+    class _FixedDatetime:
+        @staticmethod
+        def now(tz=None):
+            return fixed_now if tz is not None else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(export_job_service_module, "datetime", _FixedDatetime)
+    monkeypatch.setattr(
+        export_job_service_module.uuid,
+        "uuid4",
+        lambda: SimpleNamespace(hex="fixedtoken123"),
+    )
+
+    job = ExportJob(
+        id=321,
+        org_id=9,
+        user_id=7,
+        module="summary",
+        export_type="summary.detail",
+        title="汇总明细导出",
+        filename="汇总明细.xlsx",
+        params={},
+        status="queued",
+        progress=0,
+    )
+
+    assert export_job_service_module._export_oss_key(job) == "export/summary-detail/202606/321_fixedtoken123.xlsx"

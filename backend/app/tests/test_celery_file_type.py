@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
@@ -11,8 +12,10 @@ import app.core.database as database_module
 import app.services.oss_service as oss_service_module
 import app.tasks.processors as processors_module
 from app.tasks.celery_app import (
+    _apply_processing_stage_metrics,
     _build_order_dependency_summary,
     _build_order_or_fallback_time_summary,
+    _build_task_result_payload,
     _group_money_by_order_created_time,
     _group_return_cost_by_order_created_time,
     _group_money_by_order_or_fallback_time,
@@ -373,6 +376,105 @@ def test_celery_enables_worker_events_for_flower_monitoring() -> None:
     assert celery_module.celery_app.conf.task_send_sent_event is True
 
 
+def test_build_task_result_payload_includes_result_summary_for_flower() -> None:
+    task = SimpleNamespace(
+        id=12,
+        status="success",
+        processed_rows=100,
+        success_rows=95,
+        failed_rows=5,
+        result_summary={"任务总耗时秒": 12.345, "处理器执行耗时秒": 4.321},
+    )
+    upload_file = SimpleNamespace(row_count=100)
+
+    payload = _build_task_result_payload(task, upload_file=upload_file, extra={"文件ID": 34})
+
+    assert payload == {
+        "任务ID": 12,
+        "任务状态": "success",
+        "处理行数": 100,
+        "成功行数": 95,
+        "失败行数": 5,
+        "结果摘要": {"任务总耗时秒": 12.345, "处理器执行耗时秒": 4.321},
+        "上传行数": 100,
+        "文件ID": 34,
+    }
+
+
+def test_process_file_platform_returns_result_summary_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    task = _RollbackSensitiveTask()
+    task.status = "success"
+    task.processed_rows = 1
+    task.success_rows = 1
+    task.failed_rows = 0
+    task.result_summary = {"任务总耗时秒": 1.234, "汇总分组数": 0}
+
+    async def fake_process_file_platform_async(*args, **kwargs):
+        _ = args, kwargs
+        return {
+            "任务ID": task.id,
+            "任务状态": task.status,
+            "处理行数": task.processed_rows,
+            "成功行数": task.success_rows,
+            "失败行数": task.failed_rows,
+            "结果摘要": task.result_summary,
+            "上传行数": 1,
+            "文件ID": 456,
+            "文件类型": "动账",
+        }
+
+    monkeypatch.setattr(celery_module, "_process_file_platform_async", fake_process_file_platform_async)
+    monkeypatch.setattr(celery_module, "_run_async_in_worker", lambda coro: asyncio.run(coro))
+
+    task_instance = SimpleNamespace(request=SimpleNamespace(id="celery-task-id"))
+    payload = celery_module.process_file_platform.run(
+        task_instance,
+        456,
+        "oss-key",
+        1,
+        "douyin",
+        "抖音旗舰店",
+    )
+
+    assert payload["结果摘要"] == {"任务总耗时秒": 1.234, "汇总分组数": 0}
+    assert payload["文件类型"] == "动账"
+
+
+def test_apply_processing_stage_metrics_uses_unified_chinese_keys() -> None:
+    task = SimpleNamespace(
+        result_summary={
+            "文件类型": "动账",
+            "总行数": 10,
+            "成功行数": 9,
+            "失败行数": 1,
+        }
+    )
+
+    _apply_processing_stage_metrics(
+        task,
+        file_type="动账",
+        download_seconds=1.111,
+        period_seconds=2.222,
+        category_seconds=3.333,
+        processor_seconds=4.444,
+        postprocess_seconds=5.555,
+        total_seconds=6.666,
+    )
+
+    assert task.result_summary == {
+        "文件类型": "动账",
+        "总行数": 10,
+        "成功行数": 9,
+        "失败行数": 1,
+        "文件下载耗时秒": 1.111,
+        "所属年月解析耗时秒": 2.222,
+        "类目加载耗时秒": 3.333,
+        "处理器执行耗时秒": 4.444,
+        "后处理入库耗时秒": 5.555,
+        "任务总耗时秒": 6.666,
+    }
+
+
 def test_celery_initializes_backend_logging_for_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     called = {"count": 0}
 
@@ -496,6 +598,11 @@ class _FakeProcessor:
         }
 
 
+class _MerchantSession(_ProcessFileSession):
+    async def get(self, _model, _pk):
+        return SimpleNamespace(id=2)
+
+
 @pytest.mark.asyncio
 async def test_process_file_exception_reloads_task_without_accessing_expired_task_id(monkeypatch) -> None:
     task = _RollbackSensitiveTask()
@@ -599,7 +706,7 @@ async def test_process_file_platform_logs_chinese_stage_summary(
     task_instance = SimpleNamespace(request=SimpleNamespace(id="celery-task-id"))
 
     with caplog.at_level(logging.INFO, logger="finengine.worker"):
-        await celery_module._process_file_platform_async(
+        payload = await celery_module._process_file_platform_async(
             task_instance,
             file_id=456,
             oss_key="oss-key",
@@ -609,11 +716,129 @@ async def test_process_file_platform_logs_chinese_stage_summary(
             shop_id=None,
         )
 
+    assert payload is not None
+    assert payload["结果摘要"]["文件下载耗时秒"] >= 0
+    assert payload["结果摘要"]["所属年月解析耗时秒"] >= 0
+    assert payload["结果摘要"]["类目加载耗时秒"] >= 0
+    assert payload["结果摘要"]["处理器执行耗时秒"] >= 0
+    assert payload["结果摘要"]["后处理入库耗时秒"] >= 0
+    assert payload["结果摘要"]["任务总耗时秒"] >= 0
     assert "核算任务阶段总览" in caplog.text
     assert "任务状态=success" in caplog.text
     assert "文件下载耗时秒=" in caplog.text
     assert "处理器执行耗时秒=" in caplog.text
     assert "后处理入库耗时秒=" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_process_merchant_red_sheet_returns_unified_stage_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = _RollbackSensitiveTask()
+    upload_file = UploadFile(
+        id=456,
+        batch_id=1,
+        org_id=1,
+        user_id=2,
+        original_name="2026年02月_红单_测试店.xlsx",
+        oss_key="oss-key",
+        file_size=100,
+        parsed_year=2026,
+        parsed_month=2,
+        parsed_type="红单",
+        parsed_shop="测试店",
+        detected_platform="douyin",
+        status="uploaded",
+    )
+    session = _MerchantSession(task, upload_file, Platform(id=1, code="douyin", name="抖音", status=1))
+
+    monkeypatch.setattr(database_module, "async_session_factory", _ProcessFileSessionFactory(session))
+    monkeypatch.setattr(oss_service_module.oss_service, "download_to_temp", lambda *_args, **_kwargs: None)
+
+    async def fake_import_red_sheet(*_args, **_kwargs):
+        return SimpleNamespace(
+            red_sheet_id=88,
+            purchase_rows=3,
+            payment_rows=2,
+            warnings=["提示1"],
+            errors=[],
+        )
+
+    monkeypatch.setattr(
+        "app.services.merchant_reconciliation_service.MerchantReconciliationService.import_red_sheet",
+        fake_import_red_sheet,
+    )
+
+    task_instance = SimpleNamespace(request=SimpleNamespace(id="celery-task-id"))
+    payload = await celery_module._process_merchant_red_sheet_async(
+        task_instance,
+        task_id=task.id,
+        file_id=upload_file.id,
+        oss_key="oss-key",
+    )
+
+    assert payload is not None
+    assert payload["文件类型"] == "红单"
+    assert payload["结果摘要"]["文件下载耗时秒"] >= 0
+    assert payload["结果摘要"]["文件读取耗时秒"] >= 0
+    assert payload["结果摘要"]["导入处理耗时秒"] >= 0
+    assert payload["结果摘要"]["结果入库耗时秒"] >= 0
+    assert payload["结果摘要"]["任务总耗时秒"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_process_merchant_bank_flow_returns_unified_stage_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = _RollbackSensitiveTask()
+    upload_file = UploadFile(
+        id=456,
+        batch_id=1,
+        org_id=1,
+        user_id=2,
+        original_name="2026年02月_银行流水_测试店.xlsx",
+        oss_key="oss-key",
+        file_size=100,
+        parsed_year=2026,
+        parsed_month=2,
+        parsed_type="银行流水",
+        parsed_shop="测试店",
+        detected_platform="douyin",
+        status="uploaded",
+    )
+    session = _MerchantSession(task, upload_file, Platform(id=1, code="douyin", name="抖音", status=1))
+
+    monkeypatch.setattr(database_module, "async_session_factory", _ProcessFileSessionFactory(session))
+    monkeypatch.setattr(oss_service_module.oss_service, "download_to_temp", lambda *_args, **_kwargs: None)
+
+    async def fake_import_bank_flow(*_args, **_kwargs):
+        return SimpleNamespace(
+            bank_flow_file_id=66,
+            row_count=7,
+            matched_row_count=5,
+            warnings=["提示1"],
+            errors=[],
+        )
+
+    monkeypatch.setattr(
+        "app.services.merchant_reconciliation_service.MerchantReconciliationService.import_bank_flow",
+        fake_import_bank_flow,
+    )
+
+    task_instance = SimpleNamespace(request=SimpleNamespace(id="celery-task-id"))
+    payload = await celery_module._process_merchant_bank_flow_async(
+        task_instance,
+        task_id=task.id,
+        file_id=upload_file.id,
+        oss_key="oss-key",
+    )
+
+    assert payload is not None
+    assert payload["文件类型"] == "银行流水"
+    assert payload["结果摘要"]["文件下载耗时秒"] >= 0
+    assert payload["结果摘要"]["导入处理耗时秒"] >= 0
+    assert payload["结果摘要"]["结果入库耗时秒"] >= 0
+    assert payload["结果摘要"]["任务总耗时秒"] >= 0
 
 
 @pytest.mark.asyncio

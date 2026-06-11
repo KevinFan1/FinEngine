@@ -54,6 +54,7 @@ from app.services.transaction_rule_engine import TransactionEvaluationResult, Tr
 from app.services.upload_period_service import parse_period_value, resolve_upload_period_header
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DouyinProcessor
+from app.utils.oss_paths import build_upload_oss_key
 from app.utils.query_filters import datetime_range_filters, resolve_org_ids
 
 TRANSACTION_FILENAME_PATTERN = re.compile(
@@ -724,7 +725,12 @@ class TransactionAccountingService:
         )
         db.add(upload_file)
         await db.flush()
-        upload_file.oss_key = f"user-upload/transaction-accounting/{scoped_org_id}/{upload_file.id}/{Path(data.original_name).name}"
+        upload_file.oss_key = build_upload_oss_key(
+            type_name="动账",
+            filename=data.original_name,
+            unique_token=str(upload_file.id),
+            now=datetime.now(),
+        )
         await db.flush()
         await db.refresh(upload_file)
         return upload_file
@@ -1710,8 +1716,9 @@ class TransactionAccountingService:
                 summary_accumulator: dict[tuple[int, int, int | None, int | None], dict[str, object]] = {}
                 rule_accumulator: dict[tuple[int, int | None, int | None], dict[str, object]] = {}
                 error_messages: list[str] = []
-                counts = defaultdict(int)
-                source_success_rows = 0
+                row_counts = defaultdict(int)
+                matched_detail_count = 0
+                error_detail_count = 0
                 total_rows = 0
                 rule_map = {rule.id: rule for rule in rules}
                 direction_fields = [rule.direction_field for rule in rules]
@@ -1734,12 +1741,14 @@ class TransactionAccountingService:
                         remark_field=remark_field,
                     )
                     row_has_match = False
+                    row_has_failure = False
+                    row_has_unmatched = False
                     for evaluation in evaluations:
                         detail_evaluation = TransactionAccountingService._period_failed_result(evaluation=evaluation, message=period_error) if period_error else evaluation
-                        counts[detail_evaluation.status] += 1
                         matched_rule = rule_map.get(detail_evaluation.rule_id) if detail_evaluation.rule_id else None
                         if detail_evaluation.status == "matched" and matched_rule is not None:
                             row_has_match = True
+                            matched_detail_count += 1
                             key = (
                                 matched_rule.subject_id,
                                 matched_rule.category_id,
@@ -1758,6 +1767,11 @@ class TransactionAccountingService:
                             continue
 
                         if detail_evaluation.status in {"unmatched", "failed"}:
+                            error_detail_count += 1
+                            if detail_evaluation.status == "failed":
+                                row_has_failure = True
+                            else:
+                                row_has_unmatched = True
                             error_message = TransactionAccountingService._build_transaction_row_error_message(
                                 row=row,
                                 evaluation=detail_evaluation,
@@ -1768,8 +1782,12 @@ class TransactionAccountingService:
                             )
                             if len(error_messages) < TRANSACTION_ERROR_SAMPLE_LIMIT:
                                 error_messages.append(error_message)
-                    if row_has_match:
-                        source_success_rows += 1
+                    if row_has_failure:
+                        row_counts["failed"] += 1
+                    elif row_has_match:
+                        row_counts["matched"] += 1
+                    elif row_has_unmatched:
+                        row_counts["unmatched"] += 1
 
                 process_seconds = perf_counter() - process_started
                 if total_rows == 0:
@@ -1782,10 +1800,19 @@ class TransactionAccountingService:
                     task.result_summary = {
                         "总行数": 0,
                         "成功行数": 0,
+                        "匹配行数": 0,
                         "匹配明细数": 0,
                         "未匹配行数": 0,
                         "失败行数": 0,
                         "汇总分组数": 0,
+                        "文件下载耗时秒": round(download_seconds or 0.0, 3),
+                        "打开文件耗时秒": round(open_seconds or 0.0, 3),
+                        "文件加载耗时秒": round(load_seconds, 3),
+                        "规则加载耗时秒": round(rules_seconds, 3),
+                        "行处理耗时秒": round(process_seconds, 3),
+                        "结果入库耗时秒": 0.0,
+                        "任务总耗时秒": round(perf_counter() - task_started, 3),
+                        "行处理速度": 0.0,
                         "错误明细": ["空表，没有数据"],
                     }
                     task.error_message = "空表，没有数据"
@@ -1793,7 +1820,7 @@ class TransactionAccountingService:
                     upload_file.status = "processed"
                     upload_file.error_message = task.error_message
                     logger.info(
-                        "transaction_accounting.task_perf task_id=%s file_id=%s rows=0 matched=0 unmatched=0 failed=0 rules=%s groups=0 download_seconds=%.3f open_seconds=%.3f load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=0.000 total_seconds=%.3f rows_per_second=0.0 empty=true",
+                        "transaction_accounting.task_perf task_id=%s file_id=%s rows=0 matched=0 matched_details=0 unmatched=0 failed=0 rules=%s groups=0 download_seconds=%.3f open_seconds=%.3f load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=0.000 total_seconds=%.3f rows_per_second=0.0 empty=true",
                         task.id,
                         upload_file.id,
                         len(rules),
@@ -1805,12 +1832,13 @@ class TransactionAccountingService:
                         perf_counter() - task_started,
                     )
                     logger.info(
-                        "动账资金核算任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 规则数=%s 汇总分组数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 行处理速度=%s 空文件=是",
+                        "动账资金核算任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 规则数=%s 汇总分组数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 行处理速度=%s 空文件=是",
                         task.id,
                         upload_file.id,
                         task.status,
                         task.total_rows,
                         task.matched_rows,
+                        0,
                         task.unmatched_rows,
                         task.failed_rows,
                         len(rules),
@@ -1850,21 +1878,30 @@ class TransactionAccountingService:
             await db.flush()
             persist_seconds = perf_counter() - persist_started
             task.total_rows = total_rows
-            task.matched_rows = counts["matched"]
-            task.unmatched_rows = counts["unmatched"]
-            task.failed_rows = counts["failed"]
+            task.matched_rows = row_counts["matched"]
+            task.unmatched_rows = row_counts["unmatched"]
+            task.failed_rows = row_counts["failed"]
             task.progress = 100
             task.status = "success" if task.unmatched_rows == 0 and task.failed_rows == 0 else "partial_success"
             task.result_summary = {
                 "总行数": task.total_rows,
-                "成功行数": source_success_rows,
-                "匹配明细数": task.matched_rows,
+                "成功行数": task.matched_rows,
+                "匹配行数": task.matched_rows,
+                "匹配明细数": matched_detail_count,
                 "未匹配行数": task.unmatched_rows,
                 "失败行数": task.failed_rows,
                 "汇总分组数": len(summary_accumulator),
+                "文件下载耗时秒": round(download_seconds or 0.0, 3),
+                "打开文件耗时秒": round(open_seconds or 0.0, 3),
+                "文件加载耗时秒": round(load_seconds, 3),
+                "规则加载耗时秒": round(rules_seconds, 3),
+                "行处理耗时秒": round(process_seconds, 3),
+                "结果入库耗时秒": round(persist_seconds, 3),
+                "任务总耗时秒": round(perf_counter() - task_started, 3),
+                "行处理速度": round((task.total_rows / process_seconds) if process_seconds > 0 else 0.0, 3),
             }
             if error_messages:
-                hidden_error_count = task.unmatched_rows + task.failed_rows - len(error_messages)
+                hidden_error_count = error_detail_count - len(error_messages)
                 task.result_summary["错误明细"] = error_messages
                 if hidden_error_count > 0:
                     task.result_summary["错误明细截断提示"] = f"另有 {hidden_error_count} 条错误未展示，请查看任务错误信息或后台日志"
@@ -1876,11 +1913,12 @@ class TransactionAccountingService:
             task.finished_at = datetime.now(timezone.utc)
             upload_file.status = "processed"
             logger.info(
-                "transaction_accounting.task_perf task_id=%s file_id=%s rows=%s matched=%s unmatched=%s failed=%s rules=%s groups=%s download_seconds=%.3f open_seconds=%.3f load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f rows_per_second=%.1f",
+                "transaction_accounting.task_perf task_id=%s file_id=%s rows=%s matched=%s matched_details=%s unmatched=%s failed=%s rules=%s groups=%s download_seconds=%.3f open_seconds=%.3f load_seconds=%.3f rules_seconds=%.3f process_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f rows_per_second=%.1f",
                 task.id,
                 upload_file.id,
                 task.total_rows,
                 task.matched_rows,
+                matched_detail_count,
                 task.unmatched_rows,
                 task.failed_rows,
                 len(rules),
@@ -1895,12 +1933,13 @@ class TransactionAccountingService:
                 (task.total_rows / process_seconds) if process_seconds > 0 else 0.0,
             )
             logger.info(
-                "动账资金核算任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 规则数=%s 汇总分组数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 行处理速度=%s",
+                "动账资金核算任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 匹配行数=%s 匹配明细数=%s 未匹配行数=%s 失败行数=%s 规则数=%s 汇总分组数=%s 文件下载耗时秒=%s 打开文件耗时秒=%s 文件加载耗时秒=%s 规则加载耗时秒=%s 行处理耗时秒=%s 结果入库耗时秒=%s 任务总耗时秒=%s 行处理速度=%s",
                 task.id,
                 upload_file.id,
                 task.status,
                 task.total_rows,
                 task.matched_rows,
+                matched_detail_count,
                 task.unmatched_rows,
                 task.failed_rows,
                 len(rules),
@@ -2708,21 +2747,21 @@ class TransactionAccountingService:
             amount = bucket["amount"]
             row_count = int(bucket["count"])
             first_row = int(bucket["first_row"])
-            # logger.info(
-            #     "transaction_accounting.category_result task_id=%s file_id=%s platform=%s shop=%s subject_id=%s subject=%s category_id=%s category=%s accounting_period=%s row_count=%s total_amount=%s first_row=%s",
-            #     task.id,
-            #     upload_file.id,
-            #     upload_file.platform_code,
-            #     upload_file.shop_name,
-            #     subject_id,
-            #     subject.name,
-            #     category_id,
-            #     category.name,
-            #     TransactionAccountingService._format_month(accounting_year, accounting_month),
-            #     row_count,
-            #     amount,
-            #     first_row,
-            # )
+            logger.info(
+                "transaction_accounting.category_result task_id=%s file_id=%s platform=%s shop=%s subject_id=%s subject=%s category_id=%s category=%s accounting_period=%s row_count=%s total_amount=%s first_row=%s",
+                task.id,
+                upload_file.id,
+                upload_file.platform_code,
+                upload_file.shop_name,
+                subject_id,
+                subject.name,
+                category_id,
+                category.name,
+                TransactionAccountingService._format_month(accounting_year, accounting_month),
+                row_count,
+                amount,
+                first_row,
+            )
             detail_rows.append(
                 TransactionDetail(
                     task_id=task.id,

@@ -211,6 +211,7 @@ import { createBatch, getOssSts, uploadCallback, type OssStsCredential } from "@
 import { getAllOrganizations, type Organization } from "@/api/organization";
 import { useUserStore } from "@/stores/user";
 import { ApiBusinessError } from "@/api";
+import { buildUploadOssKey } from "@/utils/ossPath";
 import {
     CHECKLIST_FILE_TYPE,
     checklistFileTypeLabel,
@@ -484,8 +485,8 @@ async function createOssClient(sts: OssStsCredential, batchId: number) {
     });
 }
 
-function buildOssKey(sts: OssStsCredential, fileName: string) {
-    return `${sts.oss_key_prefix}${Date.now()}_${fileName.replace(/[\\/]/g, "_")}`;
+function buildOssKey(sts: OssStsCredential, fileType: string, fileName: string) {
+    return buildUploadOssKey(sts.oss_key_prefix, fileType, fileName);
 }
 
 async function createUploadContext(rows: UploadItem[]): Promise<UploadContext> {
@@ -559,7 +560,7 @@ async function uploadOne(item: UploadItem, context: UploadContext) {
     uploadingFileName.value = item.name;
     patchItem(item, { status: "uploading", progress: 0, error: "" });
     try {
-        const ossKey = buildOssKey(context.sts, item.file.name);
+        const ossKey = buildOssKey(context.sts, item.fileType || CHECKLIST_FILE_TYPE, item.file.name);
         await context.ossClient.multipartUpload(ossKey, item.file, {
             timeout: 2 * 60 * 1000,
             partSize: 1024 * 1024,

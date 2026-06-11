@@ -89,6 +89,44 @@ class _ScalarResult:
         return _Scalars()
 
 
+@pytest.mark.asyncio
+async def test_transaction_accounting_init_upload_uses_current_period_oss_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _CreateOnlySession()
+    user = make_user(user_id=7, org_id=9)
+
+    async def fake_get_or_create_shop(*_args, **_kwargs):
+        return SimpleNamespace(id=12, shop_name="云上叙珍珠臻品店")
+
+    class _FixedDatetime:
+        @staticmethod
+        def now():
+            return datetime(2026, 6, 11, 14, 30)
+
+    monkeypatch.setattr(
+        "app.services.transaction_accounting_service.ShopService.get_or_create_shop",
+        fake_get_or_create_shop,
+    )
+    monkeypatch.setattr("app.services.transaction_accounting_service.datetime", _FixedDatetime)
+
+    upload_file = await TransactionAccountingService.init_upload(
+        session,  # type: ignore[arg-type]
+        data=SimpleNamespace(
+            original_name="26年04月_动账_云上叙珍珠臻品店.xlsx",
+            file_size=12345,
+            platform_code="douyin",
+            shop_name="云上叙珍珠臻品店",
+            accounting_year=None,
+            accounting_month=None,
+        ),
+        user=user,
+        org_id=9,
+    )
+
+    assert upload_file.oss_key == "upload/dongzhang/202606/100_26年04月_动账_云上叙珍珠臻品店.xlsx"
+
+
 class _ExistingBusinessSession(_CreateOnlySession):
     def __init__(self, *, existing_upload: TransactionUploadFile) -> None:
         super().__init__()

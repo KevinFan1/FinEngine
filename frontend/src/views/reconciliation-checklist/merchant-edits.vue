@@ -239,6 +239,7 @@ import {
 } from "@/api/reconciliationChecklist";
 import { useUserStore } from "@/stores/user";
 import { formatRawDateTime } from "@/utils/format";
+import { buildUploadOssKey } from "@/utils/ossPath";
 import { CHECKLIST_FILE_TYPE_MERCHANT } from "./common";
 import {
     MANUAL_EDIT_AMOUNT_COLUMNS,
@@ -517,7 +518,7 @@ function triggerImport() {
 }
 
 function buildOssKey(sts: ReconciliationChecklistManualEditOssCredential, fileName: string): string {
-    return `${sts.oss_key_prefix}${Date.now()}_${fileName.replace(/[\\/]/g, "_")}`;
+    return buildUploadOssKey(sts.oss_key_prefix, "merchant_edit", fileName, sts.file_id);
 }
 
 function loadOss() {

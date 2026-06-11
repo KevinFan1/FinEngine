@@ -144,7 +144,7 @@
                                     <em v-if="!isReadingHeaders">点击选择</em>
                                 </p>
                                 <p class="drop-zone-hint">
-                                    支持 .xlsx / .xlsm / .xls / .csv，单文件最大 1024MB
+                                    支持 .xlsx / .xlsm / .xls / .csv；大文件建议优先使用 .csv，预检和解析更快；单文件最大 1024MB
                                 </p>
                             </div>
                         </div>
@@ -576,6 +576,7 @@ import FileTypeBadge from "@/components/FileTypeBadge.vue";
 import ShopBadge from "@/components/ShopBadge.vue";
 import { useUserStore } from "@/stores/user";
 import { decodeCsvBuffer } from "@/utils/csvEncoding";
+import { buildUploadOssKey } from "@/utils/ossPath";
 
 interface ParsedTransactionFileName {
     year: number;
@@ -1243,7 +1244,7 @@ function isFileReadyForUpload(item: FileItem): boolean {
 }
 
 function buildOssKey(sts: TransactionOssCredential, fileName: string): string {
-    return `${sts.oss_key_prefix}${Date.now()}_${fileName.replace(/[\\/]/g, "_")}`;
+    return buildUploadOssKey(sts.oss_key_prefix, "动账", fileName, sts.file_id);
 }
 
 function loadOss() {

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.core.database import async_session_factory
 from app.models.bic_accounting import BicTask
 from app.services.bic_accounting_service import BicAccountingService
-from app.tasks.celery_app import _run_async_in_worker, celery_app
+from app.tasks.celery_app import _build_task_result_payload, _run_async_in_worker, celery_app
 
 
 @celery_app.task(
@@ -27,13 +27,7 @@ async def _run_bic_accounting_task(task_id: int) -> dict:
     async with async_session_factory() as db:
         task = await BicAccountingService.execute_task(db, task_id=task_id)
         await db.commit()
-        return {
-            "task_id": task.id,
-            "status": task.status,
-            "processed_rows": task.processed_rows,
-            "success_rows": task.success_rows,
-            "failed_rows": task.failed_rows,
-        }
+        return _build_task_result_payload(task)
 
 
 def recover_queued_bic_tasks(limit: int = 100) -> int:
