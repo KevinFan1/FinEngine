@@ -510,6 +510,10 @@ def _copy_stage_column_names(rows: Sequence[dict[str, object]]) -> list[str]:
     return list(rows[0].keys())
 
 
+def _format_seconds(value: float) -> str:
+    return f"{value:.3f}"
+
+
 SOURCE_DETAIL_COMPARE_FIELDS = (
     "org_id",
     "accounting_year",
@@ -1320,7 +1324,7 @@ class ReconciliationChecklistService:
             upload_file.error_message = task.error_message
 
         logger.info(
-            "reconciliation_checklist.task_perf task_id=%s file_id=%s status=%s total_rows=%s inserted_rows=%s updated_rows=%s unchanged_rows=%s download_seconds=%.3f parse_seconds=%.3f persist_seconds=%.3f summary_seconds=%.3f total_seconds=%.3f",
+            "对账清单任务阶段总览 task_id=%s file_id=%s 任务状态=%s 总行数=%s 新增行数=%s 更新行数=%s 未变更行数=%s 文件下载耗时秒=%s 解析耗时秒=%s 明细入库耗时秒=%s 汇总重建耗时秒=%s 任务总耗时秒=%s",
             task.id,
             task.file_id,
             task.status,
@@ -1328,11 +1332,11 @@ class ReconciliationChecklistService:
             task.inserted_rows,
             task.updated_rows,
             int((task.result_summary or {}).get("未变更行数") or 0),
-            float((task.result_summary or {}).get("文件下载耗时秒") or 0),
-            float((task.result_summary or {}).get("解析耗时秒") or 0),
-            float((task.result_summary or {}).get("明细入库耗时秒") or 0),
-            float((task.result_summary or {}).get("汇总重建耗时秒") or 0),
-            perf_counter() - task_started,
+            _format_seconds(float((task.result_summary or {}).get("文件下载耗时秒") or 0)),
+            _format_seconds(float((task.result_summary or {}).get("解析耗时秒") or 0)),
+            _format_seconds(float((task.result_summary or {}).get("明细入库耗时秒") or 0)),
+            _format_seconds(float((task.result_summary or {}).get("汇总重建耗时秒") or 0)),
+            _format_seconds(perf_counter() - task_started),
         )
         await db.flush()
         await db.commit()
@@ -1416,6 +1420,21 @@ class ReconciliationChecklistService:
                 await ReconciliationChecklistService._rebuild_summaries(db, org_id=task.org_id, periods=affected_periods)
                 summary_seconds += perf_counter() - summary_started
             await db.flush()
+
+        logger.info(
+            "对账清单导入阶段耗时 task_id=%s file_id=%s 文件类型=%s 总行数=%s 新增行数=%s 更新行数=%s 未变更行数=%s 解析耗时秒=%s 明细入库耗时秒=%s 汇总重建耗时秒=%s 涉及年月=%s",
+            task.id,
+            upload_file.id,
+            parse_result.get("file_type") or upload_file.original_name,
+            parse_result.get("total_rows", 0),
+            inserted_rows,
+            updated_rows,
+            unchanged_rows,
+            _format_seconds(float(parse_result.get("parse_seconds") or 0.0)),
+            _format_seconds(persist_seconds),
+            _format_seconds(summary_seconds),
+            sorted(affected_periods),
+        )
 
         summary = {
             "文件类型": parse_result.get("file_type") or upload_file.original_name,
@@ -1830,13 +1849,19 @@ class ReconciliationChecklistService:
         task: ReconciliationChecklistTask,
         upload_file: ReconciliationChecklistUploadFile,
         rows: Iterable[dict[str, object]],
+        accounting_period: int | None = None,
     ) -> tuple[int, int, int, set[int]]:
         deduped = ReconciliationChecklistService._dedupe_rows(rows)
         if not deduped:
             return 0, 0, 0, set()
+        shard_period = accounting_period
+        if shard_period is None:
+            shard_periods = {int(row.get("accounting_period") or 0) for row in deduped if int(row.get("accounting_period") or 0) > 0}
+            shard_period = next(iter(shard_periods)) if len(shard_periods) == 1 else None
         moved_periods: set[int] = set()
         detail_rows = [ReconciliationChecklistService._detail_values(task=task, upload_file=upload_file, row=row) for row in deduped]
         stage_table = _source_stage_table()
+        stage_prepare_started = perf_counter()
         await db.execute(text(f"DROP TABLE IF EXISTS {CHECKLIST_SOURCE_STAGE_TABLE_NAME}"))
         await db.execute(
             text(
@@ -1847,8 +1872,10 @@ class ReconciliationChecklistService:
                 """
             )
         )
+        stage_prepare_seconds = perf_counter() - stage_prepare_started
 
         loaded_by_copy = False
+        stage_load_started = perf_counter()
         try:
             loaded_by_copy = await ReconciliationChecklistService._copy_stage_rows_with_savepoint(
                 db,
@@ -1867,6 +1894,7 @@ class ReconciliationChecklistService:
         if not loaded_by_copy:
             for chunk in _chunk_records(detail_rows):
                 await db.execute(insert(stage_table).values(list(chunk)))
+        stage_load_seconds = perf_counter() - stage_load_started
 
         join_condition = (
             (ReconciliationChecklistDetail.org_id == stage_table.c.org_id)
@@ -1874,6 +1902,8 @@ class ReconciliationChecklistService:
             & (ReconciliationChecklistDetail.row_fingerprint == stage_table.c.row_fingerprint)
             & ReconciliationChecklistDetail.is_deleted.is_(False)
         )
+        if shard_period is not None:
+            join_condition = join_condition & (ReconciliationChecklistDetail.accounting_period == shard_period)
         business_changes = or_(
             *(
                 getattr(ReconciliationChecklistDetail, field_name).is_distinct_from(stage_table.c[field_name])
@@ -1882,6 +1912,7 @@ class ReconciliationChecklistService:
         )
         joined_stage = stage_table.outerjoin(ReconciliationChecklistDetail, join_condition)
 
+        compare_started = perf_counter()
         counts_result = await db.execute(
             select(
                 func.count().filter(ReconciliationChecklistDetail.id.is_(None)),
@@ -1890,7 +1921,23 @@ class ReconciliationChecklistService:
             ).select_from(joined_stage)
         )
         insert_count, update_count, unchanged_count = tuple(int(value or 0) for value in counts_result.one())
+        compare_seconds = perf_counter() - compare_started
         if insert_count == 0 and update_count == 0:
+            logger.info(
+                "对账清单分片入库统计 task_id=%s file_id=%s 分片账期=%s 分片行数=%s 临时表准备耗时秒=%s 分片装载耗时秒=%s 分片比对耗时秒=%s 分片写入耗时秒=%s 新增行数=%s 更新行数=%s 未变更行数=%s COPY装载=%s",
+                task.id,
+                upload_file.id,
+                shard_period,
+                len(detail_rows),
+                _format_seconds(stage_prepare_seconds),
+                _format_seconds(stage_load_seconds),
+                _format_seconds(compare_seconds),
+                _format_seconds(0.0),
+                insert_count,
+                update_count,
+                unchanged_count,
+                "是" if loaded_by_copy else "否",
+            )
             return insert_count, update_count, unchanged_count, moved_periods
 
         detail_column_names = list(detail_rows[0].keys())
@@ -1907,7 +1954,25 @@ class ReconciliationChecklistService:
             index_where=text("is_deleted = false AND row_fingerprint <> ''"),
             set_=update_values,
         )
+        write_started = perf_counter()
         await db.execute(stmt)
+        write_seconds = perf_counter() - write_started
+
+        logger.info(
+            "对账清单分片入库统计 task_id=%s file_id=%s 分片账期=%s 分片行数=%s 临时表准备耗时秒=%s 分片装载耗时秒=%s 分片比对耗时秒=%s 分片写入耗时秒=%s 新增行数=%s 更新行数=%s 未变更行数=%s COPY装载=%s",
+            task.id,
+            upload_file.id,
+            shard_period,
+            len(detail_rows),
+            _format_seconds(stage_prepare_seconds),
+            _format_seconds(stage_load_seconds),
+            _format_seconds(compare_seconds),
+            _format_seconds(write_seconds),
+            insert_count,
+            update_count,
+            unchanged_count,
+            "是" if loaded_by_copy else "否",
+        )
 
         return insert_count, update_count, unchanged_count, moved_periods
 
@@ -1993,18 +2058,18 @@ class ReconciliationChecklistService:
             else:
                 rows_without_period.append(row)
 
-        ordered_shards: list[list[dict[str, object]]] = []
-        for _, period_rows in sorted(rows_by_period.items(), key=lambda item: item[0]):
+        ordered_shards: list[tuple[int | None, list[dict[str, object]]]] = []
+        for period, period_rows in sorted(rows_by_period.items(), key=lambda item: item[0]):
             ordered_shards.extend(
                 [
-                    period_rows[start : start + CHECKLIST_SOURCE_PERSIST_SHARD_SIZE]
+                    (period, period_rows[start : start + CHECKLIST_SOURCE_PERSIST_SHARD_SIZE])
                     for start in range(0, len(period_rows), CHECKLIST_SOURCE_PERSIST_SHARD_SIZE)
                 ]
             )
         if rows_without_period:
             ordered_shards.extend(
                 [
-                    rows_without_period[start : start + CHECKLIST_SOURCE_PERSIST_SHARD_SIZE]
+                    (None, rows_without_period[start : start + CHECKLIST_SOURCE_PERSIST_SHARD_SIZE])
                     for start in range(0, len(rows_without_period), CHECKLIST_SOURCE_PERSIST_SHARD_SIZE)
                 ]
             )
@@ -2014,18 +2079,31 @@ class ReconciliationChecklistService:
         unchanged_total = 0
         moved_periods: set[int] = set()
 
-        for shard_rows in ordered_shards:
+        for shard_period, shard_rows in ordered_shards:
+            shard_started = perf_counter()
             inserted, updated, unchanged, shard_moved_periods = await ReconciliationChecklistService._persist_source_rows(
                 db,
                 task=task,
                 upload_file=upload_file,
                 rows=shard_rows,
+                accounting_period=shard_period,
             )
             inserted_total += inserted
             updated_total += updated
             unchanged_total += unchanged
             moved_periods.update(shard_moved_periods)
             await db.commit()
+            logger.info(
+                "对账清单分片提交完成 task_id=%s file_id=%s 分片账期=%s 分片行数=%s 新增行数=%s 更新行数=%s 未变更行数=%s 分片总耗时秒=%s",
+                task.id,
+                upload_file.id,
+                shard_period,
+                len(shard_rows),
+                inserted,
+                updated,
+                unchanged,
+                _format_seconds(perf_counter() - shard_started),
+            )
 
         return inserted_total, updated_total, unchanged_total, moved_periods
 

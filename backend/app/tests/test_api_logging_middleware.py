@@ -65,12 +65,12 @@ def test_setup_logging_falls_back_when_queue_creation_fails(tmp_path, monkeypatc
     logging_module.setup_logging()
 
     file_handler_calls = [
-        call for call in added_handlers if call["args"] and call["args"][0] != logging_module.sys.stderr
+        call for call in added_handlers if call["args"] and call["args"][0] != logging_module.sys.stdout
     ]
-    stderr_handler_calls = [
-        call for call in added_handlers if call["args"] and call["args"][0] == logging_module.sys.stderr
+    stdout_handler_calls = [
+        call for call in added_handlers if call["args"] and call["args"][0] == logging_module.sys.stdout
     ]
 
     assert [call["kwargs"].get("enqueue") for call in file_handler_calls] == [True, False, True, False]
-    assert len(stderr_handler_calls) == 1
-    assert stderr_handler_calls[0]["kwargs"].get("enqueue") is None
+    assert len(stdout_handler_calls) == 1
+    assert stdout_handler_calls[0]["kwargs"].get("enqueue") is None

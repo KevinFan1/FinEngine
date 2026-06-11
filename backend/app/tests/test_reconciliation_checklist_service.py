@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 from collections.abc import Sequence
+import logging
 
 from openpyxl import Workbook, load_workbook
 import pytest
@@ -1373,6 +1374,58 @@ async def test_execute_task_parses_file_before_reentering_database_work(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_execute_task_logs_chinese_stage_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="queued", progress=0)
+    upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
+    session = _ChecklistExecuteSession(task=task, upload_file=upload_file)
+
+    def fake_parse_file(_file_path: str) -> dict:
+        return {
+            "file_type": CHECKLIST_FILE_TYPE_SOURCE,
+            "total_rows": 0,
+            "success_rows": 0,
+            "failed_rows": 0,
+            "errors": [],
+            "warnings": [],
+            "fatal_error": False,
+            "rows": [],
+            "result_message": CHECKLIST_EMPTY_SUMMARY_MESSAGE,
+        }
+
+    async def fake_persist_parsed_result(*_args, **kwargs) -> dict:
+        return {
+            "文件类型": CHECKLIST_FILE_TYPE_SOURCE,
+            "处理结果": CHECKLIST_EMPTY_SUMMARY_MESSAGE,
+            "总行数": 0,
+            "成功行数": 0,
+            "失败行数": 0,
+            "新增行数": 0,
+            "更新行数": 0,
+            "未变更行数": 0,
+            "文件下载耗时秒": kwargs["parse_result"]["download_seconds"],
+            "解析耗时秒": kwargs["parse_result"]["parse_seconds"],
+            "明细入库耗时秒": 0.0,
+            "汇总重建耗时秒": 0.0,
+        }
+
+    monkeypatch.setattr("app.services.reconciliation_checklist_service.oss_service.download_to_temp", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ReconciliationChecklistService, "parse_file", staticmethod(fake_parse_file))
+    monkeypatch.setattr(ReconciliationChecklistService, "persist_parsed_result", staticmethod(fake_persist_parsed_result))
+
+    with caplog.at_level(logging.INFO, logger="finengine.reconciliation_checklist"):
+        await ReconciliationChecklistService.execute_task(session, task_id=1)  # type: ignore[arg-type]
+
+    assert "对账清单任务阶段总览" in caplog.text
+    assert "任务状态=success" in caplog.text
+    assert "文件下载耗时秒=" in caplog.text
+    assert "解析耗时秒=" in caplog.text
+    assert "任务总耗时秒=" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_execute_task_skips_partition_precreate_for_parsed_cross_year_periods(monkeypatch: pytest.MonkeyPatch) -> None:
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="queued", progress=0)
     upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
@@ -1602,6 +1655,63 @@ async def test_persist_parsed_result_shards_source_rows_by_accounting_period(mon
 
 
 @pytest.mark.asyncio
+async def test_persist_parsed_result_logs_source_stage_timings_in_chinese(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = _PersistTaskSession()
+    task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
+    upload_file = ReconciliationChecklistUploadFile(id=2, org_id=3, user_id=4, original_name="source.xlsx", oss_key="oss-key", status="uploaded")
+
+    async def fake_persist_source_rows_sharded(*_args, **_kwargs):
+        return 3, 2, 1, {202608}
+
+    async def fake_rebuild_summaries(_db, *, org_id: int, periods):
+        assert org_id == 3
+        assert sorted(periods) == [202606, 202607, 202608]
+
+    monkeypatch.setattr(
+        ReconciliationChecklistService,
+        "_persist_source_rows_sharded",
+        staticmethod(fake_persist_source_rows_sharded),
+    )
+    monkeypatch.setattr(ReconciliationChecklistService, "_rebuild_summaries", staticmethod(fake_rebuild_summaries))
+
+    with caplog.at_level(logging.INFO, logger="finengine.reconciliation_checklist"):
+        await ReconciliationChecklistService.persist_parsed_result(
+            session,  # type: ignore[arg-type]
+            task=task,
+            upload_file=upload_file,
+            parse_result={
+                "file_type": CHECKLIST_FILE_TYPE_SOURCE,
+                "total_rows": 6,
+                "success_rows": 6,
+                "failed_rows": 0,
+                "download_seconds": 1.234,
+                "parse_seconds": 2.345,
+                "errors": [],
+                "warnings": [],
+                "fatal_error": False,
+                "rows": [
+                    {"accounting_period": 202606},
+                    {"accounting_period": 202606},
+                    {"accounting_period": 202607},
+                    {"accounting_period": 202607},
+                    {"accounting_period": 202608},
+                    {"accounting_period": 202608},
+                ],
+                "result_message": "处理完成",
+            },
+        )
+
+    assert "对账清单导入阶段耗时" in caplog.text
+    assert "文件类型=对账清单-原始数据" in caplog.text
+    assert "解析耗时秒=" in caplog.text
+    assert "明细入库耗时秒=" in caplog.text
+    assert "汇总重建耗时秒=" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_persist_source_rows_sharded_splits_large_single_period_batches(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _BatchWriteSession()
     task = ReconciliationChecklistTask(id=1, file_id=2, org_id=3, user_id=4, status="running", progress=5)
@@ -1666,7 +1776,9 @@ async def test_persist_source_rows_uses_staging_sql_path() -> None:
     assert session.detail_upsert_calls == 1
     sql = "\n".join(session.statements)
     assert "CREATE TEMP TABLE" in sql
+    assert "CREATE INDEX tmp_fin_reconciliation_checklist_source_stage_key_idx" in sql
     assert "tmp_fin_reconciliation_checklist_source_stage" in sql
+    assert "fin_reconciliation_checklist_details.accounting_period = %(accounting_period_1)s" in sql
     assert "JOIN (VALUES" not in sql
 
 

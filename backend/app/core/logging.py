@@ -131,7 +131,7 @@ def setup_logging() -> None:
         format=_structured_log_format,
     )
     logger.add(
-        sys.stderr,
+        sys.stdout,
         level=settings.LOG_LEVEL,
         format=_structured_log_format,
         backtrace=False,
