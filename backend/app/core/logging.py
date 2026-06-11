@@ -12,7 +12,6 @@ from loguru import logger
 
 from app.core.config import settings
 
-
 STANDARD_LOG_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level:<8}</level> | "
@@ -97,9 +96,7 @@ def _add_handler_with_queue_fallback(sink: Any, **kwargs: Any) -> int:
 
         fallback_kwargs = dict(kwargs)
         fallback_kwargs["enqueue"] = False
-        sys.stderr.write(
-            f"Log queue unavailable for {sink!s}: {exc}. Falling back to synchronous logging.\n"
-        )
+        sys.stderr.write(f"Log queue unavailable for {sink!s}: {exc}. Falling back to synchronous logging.\n")
         return logger.add(sink, **fallback_kwargs)
 
 
@@ -114,7 +111,7 @@ def setup_logging() -> None:
         rotation=settings.LOG_ROTATION_TIME,
         retention=f"{settings.LOG_RETENTION_DAYS} days",
         encoding="utf-8",
-        enqueue=True,
+        enqueue=False,
         backtrace=False,
         diagnose=False,
         format=_structured_log_format,
@@ -125,7 +122,7 @@ def setup_logging() -> None:
         rotation=settings.LOG_ROTATION_TIME,
         retention=f"{settings.LOG_RETENTION_DAYS} days",
         encoding="utf-8",
-        enqueue=True,
+        enqueue=False,
         backtrace=False,
         diagnose=False,
         format=_structured_log_format,

@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Font
-from sqlalchemy import and_, func, select, tuple_
+from sqlalchemy import and_, delete, func, insert, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
@@ -25,8 +26,12 @@ from app.tasks.processors.base import parse_datetime
 from app.utils.money import safe_decimal
 from app.utils.product_code import extract_product_code
 
+logger = logging.getLogger(__name__)
+
 DONGZHANG_DETAIL_EXPORT_ROW_LIMIT = 1_000_000_000
 DONGZHANG_DETAIL_EXPORT_BATCH_SIZE = 5000
+DONGZHANG_DETAIL_INSERT_BATCH_SIZE = 500
+DONGZHANG_DETAIL_INSERT_BIND_PARAM_LIMIT = 30000
 PLATFORM_LABELS = {
     "douyin": "抖音",
     "抖音": "抖音",
@@ -155,6 +160,30 @@ def _write_only_header_row(sheet, headers: list[str]) -> list[WriteOnlyCell]:
     return cells
 
 
+def _iter_insert_batches(rows: list[dict[str, object]]) -> Iterable[list[dict[str, object]]]:
+    batch: list[dict[str, object]] = []
+    bind_params = 0
+    for row in rows:
+        row_bind_params = max(len(row), 1)
+        if batch and (
+            len(batch) >= DONGZHANG_DETAIL_INSERT_BATCH_SIZE
+            or bind_params + row_bind_params > DONGZHANG_DETAIL_INSERT_BIND_PARAM_LIMIT
+        ):
+            yield batch
+            batch = []
+            bind_params = 0
+        batch.append(row)
+        bind_params += row_bind_params
+    if batch:
+        yield batch
+
+
+def _copy_column_names(rows: Sequence[dict[str, object]]) -> list[str]:
+    if not rows:
+        return []
+    return [column_name for column_name in rows[0].keys() if column_name not in {"id", "is_deleted", "deleted_at"}]
+
+
 class DouyinDongzhangDetailService:
     @staticmethod
     async def sync_details(
@@ -186,21 +215,35 @@ class DouyinDongzhangDetailService:
             DouyinDongzhangDetail.source_period == _source_period(source_year, source_month),
             DouyinDongzhangDetail.is_deleted.is_(False),
         )
-        existing_rows = (await db.execute(existing_stmt)).scalars().all()
-        previous_summary_ids = {int(row.summary_id) for row in existing_rows if row.summary_id is not None}
-        for row in existing_rows:
-            # 同店铺同期间重传时，旧明细先整体软删除，确保后续汇总只基于最新文件。
-            row.is_deleted = True
-            row.deleted_at = now
+        existing_summary_ids = (
+            (await db.execute(existing_stmt.with_only_columns(DouyinDongzhangDetail.summary_id).distinct()))
+            .scalars()
+            .all()
+        )
+        previous_summary_ids = {int(summary_id) for summary_id in existing_summary_ids if summary_id is not None}
+        await db.execute(
+            delete(DouyinDongzhangDetail)
+            .where(
+                DouyinDongzhangDetail.org_id == org_id,
+                DouyinDongzhangDetail.shop_id == shop_id,
+                DouyinDongzhangDetail.source_platform_code == source_platform_code,
+                DouyinDongzhangDetail.source_period == _source_period(source_year, source_month),
+                DouyinDongzhangDetail.is_deleted.is_(False),
+            )
+        )
 
-        created_rows: list[DouyinDongzhangDetail] = []
+        insert_rows: list[dict[str, object]] = []
+        current_summary_ids: set[int] = set()
         for payload in detail_rows:
             summary_year = int(payload["summary_year"])
             summary_month = int(payload["summary_month"])
-            detail = DouyinDongzhangDetail(
+            summary_id = summary_lookup.get((summary_year, summary_month))
+            if summary_id is not None:
+                current_summary_ids.add(int(summary_id))
+            row_values = dict(
                 task_id=task_id,
                 file_id=file_id,
-                summary_id=summary_lookup.get((summary_year, summary_month)),
+                summary_id=summary_id,
                 org_id=org_id,
                 shop_id=shop_id,
                 source_platform_code=source_platform_code,
@@ -209,13 +252,30 @@ class DouyinDongzhangDetailService:
                 source_year=source_year,
                 source_month=source_month,
                 source_period=_source_period(source_year, source_month),
+                created_at=now,
+                updated_at=now,
                 **DouyinDongzhangDetailService._normalize_payload(payload),
             )
-            created_rows.append(detail)
-        if created_rows:
-            db.add_all(created_rows)
+            insert_rows.append(row_values)
+        loaded_by_copy = False
+        try:
+            loaded_by_copy = await DouyinDongzhangDetailService._copy_detail_rows_with_savepoint(
+                db,
+                table_name=DouyinDongzhangDetail.__tablename__,
+                rows=insert_rows,
+            )
+        except Exception:
+            logger.warning(
+                "动账明细COPY入库失败，回退到批量INSERT task_id=%s file_id=%s 行数=%s",
+                task_id,
+                file_id,
+                len(insert_rows),
+                exc_info=True,
+            )
+        if not loaded_by_copy:
+            for batch in _iter_insert_batches(insert_rows):
+                await db.execute(insert(DouyinDongzhangDetail).values(batch))
 
-        current_summary_ids = {int(row.summary_id) for row in created_rows if row.summary_id is not None}
         stale_summary_ids = previous_summary_ids - current_summary_ids
         if stale_summary_ids:
             # 新文件不再覆盖到的汇总年月，需要同步清理旧汇总，避免页面展示过期结果。
@@ -231,7 +291,56 @@ class DouyinDongzhangDetailService:
             for summary in (await db.execute(stale_stmt)).scalars().all():
                 summary.is_deleted = True
                 summary.deleted_at = now
-        return created_rows
+        return []
+
+    @staticmethod
+    async def _copy_detail_rows_with_savepoint(
+        db: AsyncSession,
+        *,
+        table_name: str,
+        rows: Sequence[dict[str, object]],
+    ) -> bool:
+        begin_nested = getattr(db, "begin_nested", None)
+        if not callable(begin_nested):
+            return await DouyinDongzhangDetailService._copy_detail_rows(db, table_name=table_name, rows=rows)
+
+        nested_transaction = await begin_nested()
+        try:
+            loaded = await DouyinDongzhangDetailService._copy_detail_rows(db, table_name=table_name, rows=rows)
+        except Exception:
+            await nested_transaction.rollback()
+            raise
+
+        await nested_transaction.commit()
+        return loaded
+
+    @staticmethod
+    async def _copy_detail_rows(
+        db: AsyncSession,
+        *,
+        table_name: str,
+        rows: Sequence[dict[str, object]],
+    ) -> bool:
+        if not rows:
+            return True
+
+        column_names = _copy_column_names(rows)
+        copy_hook = getattr(db, "_copy_records_to_table", None)
+        if callable(copy_hook):
+            return bool(await copy_hook(table_name, list(rows), column_names))
+
+        session_connection = await db.connection()
+        raw_connection = await session_connection.get_raw_connection()
+        driver_connection = getattr(raw_connection, "driver_connection", None)
+        if driver_connection is None or not hasattr(driver_connection, "copy_records_to_table"):
+            return False
+
+        await driver_connection.copy_records_to_table(
+            table_name,
+            records=(tuple(row.get(column_name) for column_name in column_names) for row in rows),
+            columns=column_names,
+        )
+        return True
 
     @staticmethod
     async def get_summary_details(
@@ -740,9 +849,9 @@ class DouyinDongzhangDetailService:
         normalized: dict[str, object] = {}
         for key, value in payload.items():
             if key in MONEY_FIELDS:
-                normalized[key] = safe_decimal(value)
+                normalized[key] = value if isinstance(value, Decimal) else safe_decimal(value)
             elif key in DATETIME_FIELDS:
-                normalized[key] = parse_datetime(value)
+                normalized[key] = value if isinstance(value, datetime) else parse_datetime(value)
             elif key in {"source_row_number", "summary_year", "summary_month"}:
                 normalized[key] = int(value or 0)
             else:
@@ -753,6 +862,9 @@ class DouyinDongzhangDetailService:
 
     @staticmethod
     def _clean_excel_text_prefix(value: object) -> str:
+        if isinstance(value, str):
+            text = value.strip()
+            return text[1:].strip() if text.startswith("'") else text
         text = str(value or "").strip()
         if text.startswith("'"):
             return text[1:].strip()

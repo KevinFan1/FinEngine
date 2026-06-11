@@ -85,6 +85,97 @@ def test_douyin_dongzhang_preserves_platform_formulas(tmp_path: Path) -> None:
     assert "donation_fee" not in agg
 
 
+def test_douyin_dongzhang_returns_upload_period_from_processing_pass(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_upload_period.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(DOUYIN_DONGZHANG_HEADERS, 动账时间="2026-05-02 10:00:00", 下单时间="2026-04-20 12:00:00"),
+            _row(DOUYIN_DONGZHANG_HEADERS, 动账时间="2026-05-03 10:00:00", 下单时间="2026-04-21 12:00:00"),
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+
+    assert result["upload_year"] == 2026
+    assert result["upload_month"] == 5
+    assert result["upload_period_header"] == "动账时间"
+    assert result["upload_period_counts"] == {"2026-05": 2}
+
+
+def test_douyin_dongzhang_detail_rows_keep_parsed_datetime_values(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_detail_datetime.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(
+                DOUYIN_DONGZHANG_HEADERS,
+                动账时间="2026-05-02 10:00:00",
+                下单时间="2026-04-20 12:00:00",
+            ),
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+    detail_row = result["detail_rows"][0]
+
+    assert detail_row["transaction_time"] == datetime(2026, 5, 2, 10, 0, 0)
+    assert detail_row["order_time"] == datetime(2026, 4, 20, 12, 0, 0)
+
+
+def test_douyin_dongzhang_returns_upload_period_counts_for_mixed_months(tmp_path: Path) -> None:
+    file_path = tmp_path / "douyin_upload_period_mixed.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(DOUYIN_DONGZHANG_HEADERS, 动账时间="2026-05-02 10:00:00", 下单时间="2026-04-20 12:00:00"),
+            _row(DOUYIN_DONGZHANG_HEADERS, 动账时间="2026-06-03 10:00:00", 下单时间="2026-05-21 12:00:00"),
+        ],
+    )
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+
+    assert "upload_year" not in result
+    assert "upload_month" not in result
+    assert result["upload_period_counts"] == {"2026-05": 1, "2026-06": 1}
+
+
+def test_douyin_dongzhang_reuses_row_computation_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file_path = tmp_path / "douyin_cached_row_logic.xlsx"
+    _write_workbook(
+        file_path,
+        DOUYIN_DONGZHANG_HEADERS,
+        [
+            _row(DOUYIN_DONGZHANG_HEADERS, 下单时间="2026-05-01 10:00:00", 动账时间="2026-05-02 10:00:00", 备注="订单结算"),
+            _row(DOUYIN_DONGZHANG_HEADERS, 下单时间="2026-05-03 10:00:00", 动账时间="2026-05-04 10:00:00", 备注="退款转赔付", 动账金额="3"),
+        ],
+    )
+
+    strategy = douyin_processor.summary_strategy
+    original_compute_summary_period = strategy.compute_summary_period
+    original_compute_detail_logic = strategy._compute_detail_logic
+    calls = {"period": 0, "detail_logic": 0}
+
+    def counted_compute_summary_period(vals):
+        calls["period"] += 1
+        return original_compute_summary_period(vals)
+
+    def counted_compute_detail_logic(vals, category_dict=None):
+        calls["detail_logic"] += 1
+        return original_compute_detail_logic(vals, category_dict)
+
+    monkeypatch.setattr(strategy, "compute_summary_period", counted_compute_summary_period)
+    monkeypatch.setattr(strategy, "_compute_detail_logic", counted_compute_detail_logic)
+
+    result = douyin_processor.process(str(file_path), shop_name="抖音店铺", type_code="动账")
+
+    assert result["success_rows"] == 2
+    assert calls == {"period": 2, "detail_logic": 2}
+
+
 def test_douyin_dongzhang_computes_paid_refund_and_positive_fee_totals(tmp_path: Path) -> None:
     file_path = tmp_path / "douyin_positive_fees.xlsx"
     _write_workbook(

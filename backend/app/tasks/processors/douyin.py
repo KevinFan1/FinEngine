@@ -83,6 +83,7 @@ DOUYIN_DONGZHANG_DECIMAL_FIELDS: frozenset[str] = frozenset(
         "commission_free_amount",
     }
 )
+DOUYIN_DONGZHANG_DATETIME_FIELDS: frozenset[str] = frozenset({"transaction_time", "order_time"})
 
 # ── Douyin 动账 expected headers ─────────────────────────────────────────────
 DOUYIN_DONGZHANG_HEADERS: list[str] = [
@@ -312,8 +313,14 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         self,
         vals: dict[str, object],
         category_dict: dict[str, list[str]] | None = None,
+        row_context: dict[str, object] | None = None,
     ) -> dict[str, Decimal]:
-        detail_logic = self._compute_detail_logic(vals, category_dict)
+        _ = category_dict
+        detail_logic = (
+            row_context.get("detail_logic")
+            if row_context is not None and "detail_logic" in row_context
+            else self._compute_detail_logic(vals, category_dict)
+        )
 
         order_paid = safe_decimal(vals.get("订单实付应结"))
         order_refund = safe_decimal(vals.get("订单退款"))
@@ -361,12 +368,21 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
         row_values: dict[str, Decimal],
         source_row_number: int,
         category_dict: dict[str, list[str]] | None = None,
+        row_context: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
-        period = self.compute_summary_period(vals)
+        period = (
+            row_context.get("summary_period")
+            if row_context is not None and "summary_period" in row_context
+            else self.compute_summary_period(vals)
+        )
         if period is None:
             return None
 
-        detail_logic = self._compute_detail_logic(vals, category_dict)
+        detail_logic = (
+            row_context.get("detail_logic")
+            if row_context is not None and "detail_logic" in row_context
+            else self._compute_detail_logic(vals, category_dict)
+        )
         detail_row: dict[str, object] = {
             "source_row_number": source_row_number,
             "summary_year": period[0],
@@ -390,10 +406,24 @@ class DouyinDongzhangStrategy(FinancialSummaryStrategy):
             raw_value = vals.get(header)
             if field_name in DOUYIN_DONGZHANG_DECIMAL_FIELDS:
                 detail_row[field_name] = safe_decimal(raw_value)
+            elif field_name in DOUYIN_DONGZHANG_DATETIME_FIELDS:
+                detail_row[field_name] = parse_datetime(raw_value)
             else:
                 detail_row[field_name] = safe_str(raw_value)
         detail_row["product_code"] = extract_product_code(detail_row.get("product_name"))
         return detail_row
+
+    def build_row_context(
+        self,
+        vals: dict[str, object],
+        category_dict: dict[str, list[str]] | None = None,
+    ) -> dict[str, object]:
+        period = self.compute_summary_period(vals)
+        return {
+            "summary_period": period,
+            "year_month": None if period is None else (period[0], period[1]),
+            "detail_logic": self._compute_detail_logic(vals, category_dict),
+        }
 
     def _compute_detail_logic(
         self,

@@ -101,6 +101,25 @@ def parse_datetime(value: object) -> datetime | None:
     return None
 
 
+def _parse_upload_period_value(value: object) -> tuple[int, int] | None:
+    parsed = parse_datetime(value)
+    if parsed is not None:
+        return parsed.year, parsed.month
+    text = safe_str(value)
+    if not text:
+        return None
+    text = text.replace("年", "-").replace("月", "").replace("/", "-").replace(".", "-")
+    match = re.match(r"^(20\d{2})-(0?[1-9]|1[0-2])(?:-\d{1,2})?(?:\s|$)", text)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    compact = re.sub(r"\D", "", text)
+    if re.match(r"^20\d{4}$", compact):
+        month = int(compact[4:6])
+        if 1 <= month <= 12:
+            return int(compact[:4]), month
+    return None
+
+
 def safe_str(value: object) -> str:
     """Convert a cell value to stripped string, returning '' for None."""
     if value is None:
@@ -402,6 +421,7 @@ class FinancialSummaryStrategy(ABC):
         self,
         vals: dict[str, object],
         category_dict: dict[str, list[str]] | None = None,
+        row_context: dict[str, object] | None = None,
     ) -> dict[str, Decimal]:
         """Return FinancialSummary-compatible values for a row."""
 
@@ -418,9 +438,18 @@ class FinancialSummaryStrategy(ABC):
         row_values: dict[str, Decimal],
         source_row_number: int,
         category_dict: dict[str, list[str]] | None = None,
+        row_context: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
-        _ = vals, row_values, source_row_number, category_dict
+        _ = vals, row_values, source_row_number, category_dict, row_context
         return None
+
+    def build_row_context(
+        self,
+        vals: dict[str, object],
+        category_dict: dict[str, list[str]] | None = None,
+    ) -> dict[str, object]:
+        _ = category_dict
+        return {"year_month": self.compute_year_month(vals)}
 
 
 class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
@@ -489,12 +518,21 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
             groups: dict[GroupKey, dict[str, Decimal]] = {}
 
             detail_rows: list[dict[str, object]] = []
+            upload_period_header = "动账时间"
+            upload_period_counts: dict[tuple[int, int], int] = {}
+            upload_period_index = col_idx.get(upload_period_header)
 
             for row_number, row in enumerate(row_iter, start=_header_row_number + 1):
                 result["total_rows"] += 1
                 try:
                     vals = self._row_to_values(row, col_idx)
-                    year_month = strategy.compute_year_month(vals)
+                    if upload_period_index is not None:
+                        upload_period = _parse_upload_period_value(row[upload_period_index] if upload_period_index < len(row) else None)
+                        if upload_period is not None:
+                            upload_period_counts[upload_period] = upload_period_counts.get(upload_period, 0) + 1
+
+                    row_context = strategy.build_row_context(vals, category_dict)
+                    year_month = row_context.get("year_month")
                     if year_month is None:
                         result["failed_rows"] += 1
                         result["errors"].append(f"Row {row_number}: 无法解析归属年月")
@@ -502,7 +540,7 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
 
                     key = GroupKey(shop=shop_name, year=year_month[0], month=year_month[1])
                     agg = groups.setdefault(key, strategy.empty_agg())
-                    row_values = strategy.compute_values(vals, category_dict)
+                    row_values = strategy.compute_values(vals, category_dict, row_context=row_context)
                     for field, value in row_values.items():
                         agg[field] = agg.get(field, ZERO_MONEY) + safe_decimal(value)
 
@@ -511,6 +549,7 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
                         row_values=row_values,
                         source_row_number=row_number,
                         category_dict=category_dict,
+                        row_context=row_context,
                     )
                     if detail_row:
                         detail_rows.append(detail_row)
@@ -521,6 +560,13 @@ class FinancialSummaryExcelProcessorMixin(BasePlatformProcessor):
                     result["errors"].append(f"Row {row_number}: {e}")
 
         result["groups"] = self._serialize_groups({key: strategy.finalize_agg(agg) for key, agg in groups.items()})
+        if upload_period_counts:
+            result["upload_period_header"] = upload_period_header
+            result["upload_period_counts"] = {f"{year}-{month:02d}": count for (year, month), count in upload_period_counts.items()}
+            if len(upload_period_counts) == 1:
+                (upload_year, upload_month), _count = next(iter(upload_period_counts.items()))
+                result["upload_year"] = upload_year
+                result["upload_month"] = upload_month
         if detail_rows:
             result["detail_rows"] = detail_rows
         return result

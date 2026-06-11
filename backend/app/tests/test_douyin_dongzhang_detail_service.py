@@ -12,6 +12,8 @@ from app.models.douyin_dongzhang_detail import DouyinDongzhangDetail
 from app.models.summary import FinancialSummary
 from app.services.upload_period_service import get_upload_period_header
 
+ASYNC_PG_BIND_LIMIT = 32767
+
 
 def test_douyin_detail_partition_key_uses_source_period_from_upload_period_rule() -> None:
     table_options = DouyinDongzhangDetail.__table_args__[-1]
@@ -212,6 +214,258 @@ def test_build_export_workbook_header_order_matches_frontend() -> None:
     assert "商家收款主体" not in headers
 
 
+class _SyncDetailsBulkSession:
+    def __init__(self, *, copy_should_fail: bool = False) -> None:
+        self.statements: list[object] = []
+        self.add_all_calls = 0
+        self.scalar_rows_by_call: list[list[int]] = [[99], []]
+        self.copy_should_fail = copy_should_fail
+        self.copy_calls = 0
+        self.copy_columns: list[str] = []
+        self.copied_row_count = 0
+        self.fallback_insert_calls = 0
+
+    async def execute(self, statement: object):
+        self.statements.append(statement)
+        if str(statement).lstrip().startswith("INSERT INTO fin_douyin_dongzhang_details"):
+            self.fallback_insert_calls += 1
+        scalar_rows = self.scalar_rows_by_call.pop(0) if self.scalar_rows_by_call else []
+
+        class _Result:
+            def scalars(self_inner):
+                return self_inner
+
+            def all(self_inner):
+                return scalar_rows
+
+        return _Result()
+
+    def add_all(self, _rows: list[object]) -> None:
+        self.add_all_calls += 1
+
+    async def _copy_records_to_table(self, table_name: str, rows: list[dict[str, object]], columns: list[str]) -> bool:
+        assert table_name == "fin_douyin_dongzhang_details"
+        self.copy_calls += 1
+        self.copy_columns = list(columns)
+        self.copied_row_count += len(rows)
+        if self.copy_should_fail:
+            raise RuntimeError("copy failed")
+        return True
+
+
+class _RawCopyConnection:
+    def __init__(self) -> None:
+        self.records_type: type[object] | None = None
+        self.copied_rows: list[tuple[object, ...]] = []
+
+    async def copy_records_to_table(self, table_name: str, *, records, columns: list[str]) -> None:
+        assert table_name == "fin_douyin_dongzhang_details"
+        assert columns == ["task_id", "transaction_flow_no"]
+        self.records_type = type(records)
+        self.copied_rows = list(records)
+
+
+class _RawCopySession:
+    def __init__(self) -> None:
+        self.raw_copy_connection = _RawCopyConnection()
+
+    async def connection(self):
+        raw_copy_connection = self.raw_copy_connection
+
+        class _SessionConnection:
+            async def get_raw_connection(self_inner):
+                class _RawConnection:
+                    driver_connection = raw_copy_connection
+
+                return _RawConnection()
+
+        return _SessionConnection()
+
+
+@pytest.mark.asyncio
+async def test_copy_detail_rows_streams_records_without_materializing_list() -> None:
+    session = _RawCopySession()
+
+    loaded = await DouyinDongzhangDetailService._copy_detail_rows(
+        session,  # type: ignore[arg-type]
+        table_name="fin_douyin_dongzhang_details",
+        rows=[
+            {"task_id": 1, "transaction_flow_no": "flow-1"},
+            {"task_id": 2, "transaction_flow_no": "flow-2"},
+        ],
+    )
+
+    assert loaded is True
+    assert session.raw_copy_connection.records_type is not list
+    assert session.raw_copy_connection.copied_rows == [(1, "flow-1"), (2, "flow-2")]
+
+
+@pytest.mark.asyncio
+async def test_sync_details_prefers_copy_for_detail_loading() -> None:
+    session = _SyncDetailsBulkSession()
+
+    await DouyinDongzhangDetailService.sync_details(
+        session,  # type: ignore[arg-type]
+        task_id=1,
+        file_id=2,
+        org_id=3,
+        shop_id=4,
+        shop_name="抖音旗舰店",
+        source_year=2026,
+        source_month=5,
+        source_platform_code="douyin",
+        report_platform_code="douyin",
+        detail_rows=[
+            {
+                "source_row_number": 2,
+                "summary_year": 2026,
+                "summary_month": 4,
+                "period_source": "order_time",
+                "transaction_time": "2026-05-02 10:00:00",
+                "transaction_flow_no": "flow-1",
+                "transaction_direction": "入账",
+                "transaction_amount": Decimal("12.30"),
+                "transaction_account": "账户A",
+                "transaction_scene": "订单结算",
+                "order_time": "2026-04-20 12:00:00",
+            }
+        ],
+        summary_lookup={(2026, 4): 5},
+    )
+
+    compiled_sql = "\n".join(str(statement.compile(compile_kwargs={"literal_binds": True})) for statement in session.statements)
+    assert session.add_all_calls == 0
+    assert session.copy_calls == 1
+    assert session.copied_row_count == 1
+    assert session.fallback_insert_calls == 0
+    assert "id" not in session.copy_columns
+    assert "is_deleted" not in session.copy_columns
+    assert "deleted_at" not in session.copy_columns
+    assert "SELECT DISTINCT fin_douyin_dongzhang_details.summary_id" in compiled_sql
+    assert "DELETE FROM fin_douyin_dongzhang_details" in compiled_sql
+    assert "fin_douyin_dongzhang_details.org_id = 3" in compiled_sql
+    assert "fin_douyin_dongzhang_details.shop_id = 4" in compiled_sql
+    assert "fin_douyin_dongzhang_details.source_platform_code = 'douyin'" in compiled_sql
+    assert "fin_douyin_dongzhang_details.source_period = 202605" in compiled_sql
+    assert "UPDATE fin_douyin_dongzhang_details SET" not in compiled_sql
+    assert "INSERT INTO fin_douyin_dongzhang_details" not in compiled_sql
+    assert "fin_financial_summaries.id IN (99)" in compiled_sql
+
+
+@pytest.mark.asyncio
+async def test_sync_details_falls_back_to_insert_when_copy_fails() -> None:
+    session = _SyncDetailsBulkSession(copy_should_fail=True)
+
+    await DouyinDongzhangDetailService.sync_details(
+        session,  # type: ignore[arg-type]
+        task_id=1,
+        file_id=2,
+        org_id=3,
+        shop_id=4,
+        shop_name="抖音旗舰店",
+        source_year=2026,
+        source_month=5,
+        source_platform_code="douyin",
+        report_platform_code="douyin",
+        detail_rows=[_bulk_detail_payload(1)],
+        summary_lookup={(2026, 4): 5},
+    )
+
+    assert session.copy_calls == 1
+    assert session.fallback_insert_calls == 1
+
+
+def _bulk_detail_payload(index: int) -> dict[str, object]:
+    return {
+        "source_row_number": index + 2,
+        "summary_year": 2026,
+        "summary_month": 4,
+        "period_source": "order_time",
+        "transaction_time": "2026-05-02 10:00:00",
+        "transaction_flow_no": f"flow-{index}",
+        "transaction_direction": "入账",
+        "transaction_amount": Decimal("12.30"),
+        "transaction_account": "账户A",
+        "transaction_scene": "订单结算",
+        "billing_type": "精选联盟",
+        "sub_order_no": f"sub-{index}",
+        "order_no": f"order-{index}",
+        "after_sale_no": "",
+        "order_time": "2026-04-20 12:00:00",
+        "product_id": f"prod-{index}",
+        "product_code": "CAN123",
+        "product_name": "商品A",
+        "author_id": "author-1",
+        "author_name": "达人A",
+        "order_type": "普通订单",
+        "order_paid_amount_raw": Decimal("100.00"),
+        "shipping_fee": Decimal("8.00"),
+        "platform_subsidy_shipping": Decimal("1.00"),
+        "platform_subsidy": Decimal("2.00"),
+        "other_platform_subsidy": Decimal("3.00"),
+        "trade_in_deduction": Decimal("4.00"),
+        "gov_subsidy_platform": Decimal("5.00"),
+        "author_subsidy": Decimal("6.00"),
+        "douyin_pay_subsidy": Decimal("7.00"),
+        "douyin_monthly_subsidy": Decimal("8.00"),
+        "bank_subsidy": Decimal("9.00"),
+        "order_refund_raw": Decimal("10.00"),
+        "platform_fee_raw": Decimal("-11.00"),
+        "commission_raw": Decimal("-12.00"),
+        "provider_commission_raw": Decimal("-13.00"),
+        "channel_share": Decimal("14.00"),
+        "merchant_fee_raw": Decimal("-15.00"),
+        "promotion_fee_raw": Decimal("-16.00"),
+        "other_share": Decimal("17.00"),
+        "is_commission_free": "否",
+        "commission_free_amount": Decimal("18.00"),
+        "merchant_name": "商户主体A",
+        "remark": "备注A",
+        "matched_compensation": "",
+        "refund_to_compensation": Decimal("0"),
+        "cashback": Decimal("0"),
+        "order_paid": Decimal("100.00"),
+        "refund_amount": Decimal("10.00"),
+        "gmv": Decimal("90.00"),
+        "platform_income": Decimal("2.00"),
+        "platform_fee_positive": Decimal("11.00"),
+        "return_cost": Decimal("0"),
+        "commission_derived": Decimal("12.00"),
+        "bic": Decimal("0"),
+        "insurance_fee": Decimal("0"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_sync_details_splits_bulk_insert_under_asyncpg_bind_limit() -> None:
+    session = _SyncDetailsBulkSession(copy_should_fail=True)
+
+    await DouyinDongzhangDetailService.sync_details(
+        session,  # type: ignore[arg-type]
+        task_id=1,
+        file_id=2,
+        org_id=3,
+        shop_id=4,
+        shop_name="抖音旗舰店",
+        source_year=2026,
+        source_month=5,
+        source_platform_code="douyin",
+        report_platform_code="douyin",
+        detail_rows=[_bulk_detail_payload(index) for index in range(1000)],
+        summary_lookup={(2026, 4): 5},
+    )
+
+    insert_statements = [
+        statement
+        for statement in session.statements
+        if str(statement).startswith("INSERT INTO fin_douyin_dongzhang_details")
+    ]
+    assert session.copy_calls == 1
+    assert len(insert_statements) > 1
+    for statement in insert_statements:
+        assert len(statement.compile().params) <= ASYNC_PG_BIND_LIMIT
+
+
 def test_normalize_payload_strips_excel_text_prefix() -> None:
     normalized = DouyinDongzhangDetailService._normalize_payload(
         {
@@ -236,6 +490,37 @@ def test_normalize_payload_strips_excel_text_prefix() -> None:
     assert normalized["transaction_flow_no"] == "2026040101172401977718277000"
     assert normalized["sub_order_no"] == "6925040387642719692"
     assert normalized["order_no"] == "6925040387642719692"
+    assert normalized["transaction_amount"] == Decimal("83.16")
+
+
+def test_normalize_payload_skips_redundant_converters_for_ready_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.douyin_dongzhang_detail_service as detail_service_module
+
+    def fail_safe_decimal(_value: object):
+        raise AssertionError("Decimal values should not be converted again")
+
+    def fail_parse_datetime(_value: object):
+        raise AssertionError("datetime values should not be parsed again")
+
+    monkeypatch.setattr(detail_service_module, "safe_decimal", fail_safe_decimal)
+    monkeypatch.setattr(detail_service_module, "parse_datetime", fail_parse_datetime)
+
+    transaction_time = datetime(2026, 4, 1, 1, 17, 29)
+    order_time = datetime(2026, 3, 22, 16, 17, 29)
+    normalized = DouyinDongzhangDetailService._normalize_payload(
+        {
+            "source_row_number": 2,
+            "summary_year": 2026,
+            "summary_month": 4,
+            "transaction_time": transaction_time,
+            "order_time": order_time,
+            "transaction_amount": Decimal("83.16"),
+            "product_code": "CAN123",
+        }
+    )
+
+    assert normalized["transaction_time"] is transaction_time
+    assert normalized["order_time"] is order_time
     assert normalized["transaction_amount"] == Decimal("83.16")
 
 

@@ -16,7 +16,7 @@ from celery.signals import worker_process_shutdown
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.services.oss_service import SOURCE_FILE_UNAVAILABLE_MESSAGE, is_oss_object_unavailable_error
-from app.services.upload_period_service import EmptyTabularDataError, extract_upload_period, resolve_upload_period_header
+from app.services.upload_period_service import extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import normalize_positive_summary_fields, safe_str
 
 celery_app = Celery("finengine", broker=settings.CELERY_REDIS_URL, backend=settings.CELERY_REDIS_URL)
@@ -1014,38 +1014,6 @@ async def _process_file_platform_async(
 
                 period_started = perf_counter()
                 period_header = await resolve_upload_period_header(db, platform_code, file_type)
-                try:
-                    upload_period = extract_upload_period(
-                        tmp.name,
-                        platform_code=platform_code,
-                        type_code=file_type,
-                        header_name=period_header,
-                    )
-                    source_year = upload_period.year
-                    source_month = upload_period.month
-                    if upload_file:
-                        if (
-                            upload_file.parsed_year is not None
-                            and upload_file.parsed_month is not None
-                            and (upload_file.parsed_year, upload_file.parsed_month) != (source_year, source_month)
-                        ):
-                            logger.warning(
-                                "上传年月和文件所属时间列不一致，使用文件内容 file_id=%s stored=%s-%s extracted=%s-%s header=%s",
-                                upload_file.id,
-                                upload_file.parsed_year,
-                                upload_file.parsed_month,
-                                source_year,
-                                source_month,
-                                upload_period.header,
-                            )
-                        upload_file.parsed_year = source_year
-                        upload_file.parsed_month = source_month
-                except EmptyTabularDataError:
-                    period_seconds = perf_counter() - period_started
-                    _mark_task_empty_success(task, upload_file, file_type=file_type)
-                    log_stage_summary(empty_file=True)
-                    await db.commit()
-                    return
                 period_seconds = perf_counter() - period_started
 
                 # 4. Load category dictionary (best-effort)
@@ -1076,6 +1044,48 @@ async def _process_file_platform_async(
                     category_dict=category_dict,
                 )
                 processor_seconds = perf_counter() - processor_started
+                if int(proc_result.get("total_rows") or 0) == 0 and not proc_result.get("errors"):
+                    _mark_task_empty_success(task, upload_file, file_type=file_type)
+                    task.processed_rows = 0
+                    log_stage_summary(empty_file=True)
+                    await db.commit()
+                    return
+                upload_period_counts = proc_result.get("upload_period_counts") or {}
+                if upload_period_counts and len(upload_period_counts) > 1:
+                    summary = "、".join(f"{period} 共 {count} 行" for period, count in sorted(upload_period_counts.items()))
+                    header_label = proc_result.get("upload_period_header") or period_header or "所属时间"
+                    raise ValueError(f"{header_label}列检测到多个所属年月：{summary}。请按月份拆分文件后重新上传")
+                if proc_result.get("upload_year") is None or proc_result.get("upload_month") is None:
+                    fallback_period_started = perf_counter()
+                    upload_period = extract_upload_period(
+                        tmp.name,
+                        platform_code=platform_code,
+                        type_code=file_type,
+                        header_name=period_header,
+                    )
+                    period_seconds += perf_counter() - fallback_period_started
+                    proc_result["upload_year"] = upload_period.year
+                    proc_result["upload_month"] = upload_period.month
+                    proc_result["upload_period_header"] = upload_period.header
+                source_year = int(proc_result["upload_year"])
+                source_month = int(proc_result["upload_month"])
+                if upload_file:
+                    if (
+                        upload_file.parsed_year is not None
+                        and upload_file.parsed_month is not None
+                        and (upload_file.parsed_year, upload_file.parsed_month) != (source_year, source_month)
+                    ):
+                        logger.warning(
+                            "上传年月和文件所属时间列不一致，使用文件内容 file_id=%s stored=%s-%s extracted=%s-%s header=%s",
+                            upload_file.id,
+                            upload_file.parsed_year,
+                            upload_file.parsed_month,
+                            source_year,
+                            source_month,
+                            proc_result.get("upload_period_header") or period_header,
+                        )
+                    upload_file.parsed_year = source_year
+                    upload_file.parsed_month = source_month
 
                 task.progress = 60
                 task.processed_rows = proc_result["total_rows"]
