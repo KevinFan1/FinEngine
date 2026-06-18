@@ -4,7 +4,9 @@ import fs from "node:fs";
 import { filterSidebarMenuByRole, sidebarMenuItems } from "./sidebarMenu.ts";
 
 test("flattens common functions above the sidebar divider", () => {
-    const dividerIndex = sidebarMenuItems.findIndex((item) => item.type === "divider");
+    const dividerIndex = sidebarMenuItems.findIndex(
+        (item) => item.type === "divider",
+    );
     const primaryMenus = sidebarMenuItems.slice(0, dividerIndex);
     const dividerMenu = sidebarMenuItems[dividerIndex];
 
@@ -74,14 +76,21 @@ test("promotes accounting upload center to a top-level menu item", () => {
                 !item.children?.length,
         ),
     );
-    const uploadIndex = sidebarMenuItems.findIndex((item) => item.path === "/upload");
-    const shopsIndex = sidebarMenuItems.findIndex((item) => item.path === "/shops");
+    const uploadIndex = sidebarMenuItems.findIndex(
+        (item) => item.path === "/upload",
+    );
+    const shopsIndex = sidebarMenuItems.findIndex(
+        (item) => item.path === "/shops",
+    );
     assert.ok(uploadIndex >= 0);
     assert.equal(shopsIndex, uploadIndex + 1);
 });
 
 test("keeps user management under system management and only visible for admin roles", () => {
-    const orgAdminMenus = filterSidebarMenuByRole(sidebarMenuItems, "org_admin");
+    const orgAdminMenus = filterSidebarMenuByRole(
+        sidebarMenuItems,
+        "org_admin",
+    );
     const regularMenus = filterSidebarMenuByRole(sidebarMenuItems, "operator");
     const orgSystemManagement = orgAdminMenus.find(
         (item) => item.type !== "divider" && item.title === "系统管理",
@@ -93,7 +102,9 @@ test("keeps user management under system management and only visible for admin r
     assert.ok(
         orgSystemManagement &&
             "children" in orgSystemManagement &&
-            orgSystemManagement.children?.some((item) => item.title === "用户管理"),
+            orgSystemManagement.children?.some(
+                (item) => item.title === "用户管理",
+            ),
     );
     assert.equal(
         regularMenus.some((item) => item.title === "用户管理"),
@@ -102,8 +113,10 @@ test("keeps user management under system management and only visible for admin r
     assert.equal(
         Boolean(
             regularSystemManagement &&
-                "children" in regularSystemManagement &&
-                regularSystemManagement.children?.some((item) => item.title === "用户管理"),
+            "children" in regularSystemManagement &&
+            regularSystemManagement.children?.some(
+                (item) => item.title === "用户管理",
+            ),
         ),
         false,
     );
@@ -118,6 +131,7 @@ test("limits organization members to the designated accounting and shop menus", 
             .map((item) => item.title),
         [
             "核算上传中心",
+            "下载中心",
             "店铺管理",
             "动账核算",
             "动账资金核算",
@@ -125,12 +139,31 @@ test("limits organization members to the designated accounting and shop menus", 
         ],
     );
     assert.equal(
-        memberMenus.some((item) => item.type !== "divider" && item.title === "规则配置"),
+        memberMenus.some(
+            (item) => item.type !== "divider" && item.title === "规则配置",
+        ),
         false,
     );
     assert.equal(
-        memberMenus.some((item) => item.type !== "divider" && item.title === "系统管理"),
+        memberMenus.some(
+            (item) => item.type !== "divider" && item.title === "系统管理",
+        ),
         false,
+    );
+});
+
+test("keeps download center visible for external organization members", () => {
+    const memberMenus = filterSidebarMenuByRole(
+        sidebarMenuItems,
+        "member",
+        false,
+    );
+
+    assert.deepEqual(
+        memberMenus
+            .filter((item) => item.type !== "divider")
+            .map((item) => item.title),
+        ["下载中心"],
     );
 });
 
@@ -156,11 +189,17 @@ test("keeps leaf menu titles aligned with route tab titles", () => {
     }
 });
 
-function countMenuItemsByPath(items: Array<{ path: string; children?: unknown[] }>, path: string): number {
+function countMenuItemsByPath(
+    items: Array<{ path: string; children?: unknown[] }>,
+    path: string,
+): number {
     return items.reduce((count, item) => {
         const childCount = item.children
             ? countMenuItemsByPath(
-                  item.children as Array<{ path: string; children?: unknown[] }>,
+                  item.children as Array<{
+                      path: string;
+                      children?: unknown[];
+                  }>,
                   path,
               )
             : 0;
@@ -171,16 +210,20 @@ function countMenuItemsByPath(items: Array<{ path: string; children?: unknown[] 
 function hasNestedChildren(items: Array<{ children?: unknown[] }>): boolean {
     return items.some((item) =>
         Boolean(
-            item.children?.some(
-                (child) =>
-                    Boolean((child as { children?: unknown[] }).children?.length),
+            item.children?.some((child) =>
+                Boolean((child as { children?: unknown[] }).children?.length),
             ),
         ),
     );
 }
 
 function flattenLeafMenuItems(
-    items: Array<{ type?: string; path: string; title?: string; children?: unknown[] }>,
+    items: Array<{
+        type?: string;
+        path: string;
+        title?: string;
+        children?: unknown[];
+    }>,
 ): Array<{ path: string; title: string }> {
     return items.flatMap((item) => {
         if (item.type === "divider") return [];

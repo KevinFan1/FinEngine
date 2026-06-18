@@ -42,6 +42,7 @@ export interface ResolvedSidebarMenuItem
 
 const merchantReconciliationMenuEnabled = false;
 const memberVisibleTopLevelPaths = new Set([
+    "/downloads",
     "/upload",
     "/shops",
     "/order-accounting",

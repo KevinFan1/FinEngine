@@ -37,7 +37,7 @@
 
             <div class="rule-summary">
                 共 {{ subjectNodes.length }} 个科目，{{ categories.length }} 个重分类，{{ rules.length }} 条规则
-                <span v-if="searchText.trim()">
+                <span v-if="searchText.trim() || treeSearchText.trim()">
                     · 当前显示 {{ filteredCategoryCount }} 个重分类，{{ filteredRuleCount }} 条规则
                 </span>
             </div>
@@ -54,6 +54,19 @@
                         <span class="panel-header__count">
                             {{ filteredSubjectNodes.length }} 个科目
                         </span>
+                    </div>
+                    <div class="tree-search">
+                        <el-input
+                            v-model="treeSearchText"
+                            placeholder="搜索科目或重分类..."
+                            size="small"
+                            clearable
+                            class="tree-search__input"
+                        >
+                            <template #prefix>
+                                <el-icon><Search /></el-icon>
+                            </template>
+                        </el-input>
                     </div>
                 </template>
 
@@ -248,7 +261,20 @@
                             class="rule-list__row rule-list__row--editing"
                         >
                             <div class="rule-list__platform">
-                                {{ platformLabel(editingDraft.platform_code) }}
+                                <el-select
+                                    v-model="editingDraft.platform_code"
+                                    size="small"
+                                    class="rule-editor__field rule-editor__field--platform"
+                                    clearable
+                                    placeholder="通用"
+                                >
+                                    <el-option
+                                        v-for="item in platforms"
+                                        :key="item.code"
+                                        :label="item.name"
+                                        :value="item.code"
+                                    />
+                                </el-select>
                             </div>
                             <div class="rule-list__condition">
                                 <div class="rule-editor">
@@ -335,7 +361,20 @@
                             >
                                 <template v-if="isEditingRule(rule)">
                                     <div class="rule-list__platform">
-                                        {{ platformLabel(editingDraft.platform_code) }}
+                                        <el-select
+                                            v-model="editingDraft.platform_code"
+                                            size="small"
+                                            class="rule-editor__field rule-editor__field--platform"
+                                            clearable
+                                            placeholder="通用"
+                                        >
+                                            <el-option
+                                                v-for="item in platforms"
+                                                :key="item.code"
+                                                :label="item.name"
+                                                :value="item.code"
+                                            />
+                                        </el-select>
                                     </div>
                                     <div class="rule-list__condition">
                                         <div class="rule-editor">
@@ -622,6 +661,7 @@ const ruleMatchOptions: Array<{ label: string; value: RuleMatchType }> = [
 
 const loading = ref(false);
 const searchText = ref("");
+const treeSearchText = ref("");
 const subjects = ref<TransactionSubject[]>([]);
 const categories = ref<TransactionCategory[]>([]);
 const rules = ref<TransactionRule[]>([]);
@@ -634,7 +674,9 @@ const activeCategoryKey = ref<string | null>(null);
 
 const editingDraft = computed<any>(() => editingState.value?.draft ?? {});
 const nodeEditingDraft = computed<any>(() => nodeEditor.value?.draft ?? {});
-const forceExpandAll = computed(() => Boolean(searchText.value.trim()));
+const forceExpandAll = computed(
+    () => Boolean(searchText.value.trim()) || Boolean(treeSearchText.value.trim()),
+);
 const isBusy = computed(
     () => Boolean(editingState.value) || Boolean(nodeEditor.value),
 );
@@ -700,7 +742,9 @@ const subjectNodes = computed<SubjectNode[]>(() => {
 });
 
 const filteredSubjectNodes = computed<SubjectNode[]>(() => {
-    const keyword = normalizeKeyword(searchText.value);
+    const keyword = normalizeKeyword(
+        treeSearchText.value.trim() || searchText.value,
+    );
     if (!keyword) return subjectNodes.value;
     return subjectNodes.value
         .map((subject) => filterSubjectNode(subject, keyword))
@@ -1410,8 +1454,8 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 
     :deep(.el-card__header) {
         display: flex;
-        align-items: center;
-        min-height: 68px;
+        flex-direction: column;
+        gap: 12px;
         padding: 12px 16px;
     }
 
@@ -1464,7 +1508,10 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 }
 
 .tree-group__children {
-    padding: 0 8px 8px 30px;
+    padding: 4px 8px 8px 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .tree-row {
@@ -1474,6 +1521,16 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     align-items: center;
     padding: 8px 10px;
     background: var(--bg-card);
+    transition: background 0.15s ease;
+    border-radius: 6px;
+}
+
+.tree-row--subject {
+    border-radius: 6px;
+}
+
+.tree-row--subject:hover {
+    background: color-mix(in srgb, var(--primary) 4%, var(--bg-card));
 }
 
 .tree-row--category {
@@ -1481,10 +1538,20 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     padding: 0;
     border: 0;
     border-radius: 6px;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tree-row--category:hover {
+    background: color-mix(in srgb, var(--primary) 6%, var(--bg-card));
 }
 
 .tree-row--category.is-active {
-    background: color-mix(in srgb, var(--primary) 5%, var(--bg-card));
+    background: color-mix(in srgb, var(--primary) 7%, var(--bg-card));
+    box-shadow: inset 2px 0 0 var(--el-color-primary);
+}
+
+.tree-row--category.is-active:hover {
+    background: color-mix(in srgb, var(--primary) 9%, var(--bg-card));
 }
 
 .tree-row__main {
@@ -1498,6 +1565,7 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     text-align: left;
     background: transparent;
     cursor: pointer;
+    border-radius: 4px;
 }
 
 .tree-row__main--category {
@@ -1505,11 +1573,22 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     padding: 8px 10px;
 }
 
+.tree-row__main--category:focus-visible {
+    outline: 2px solid var(--el-color-primary);
+    outline-offset: -1px;
+}
+
 .tree-row__icon {
     display: inline-flex;
     width: 14px;
+    flex-shrink: 0;
     justify-content: center;
     color: var(--text-tertiary);
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.tree-row--subject .tree-row__icon {
+    transition: transform 0.2s ease;
 }
 
 .tree-row__copy {
@@ -1522,13 +1601,21 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     overflow: hidden;
     color: var(--text-primary);
     font-size: 13px;
+    font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: color 0.15s ease;
+}
+
+.tree-row--category.is-active .tree-row__copy strong {
+    color: var(--el-color-primary);
+    font-weight: 700;
 }
 
 .tree-row__copy small {
     color: var(--text-tertiary);
     font-size: 12px;
+    transition: color 0.15s ease;
 }
 
 .tree-row__more {
@@ -1540,11 +1627,19 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
     border: 0;
     border-radius: 6px;
     background: transparent;
+    transition: color 0.15s ease, background 0.15s ease;
+    opacity: 0;
+}
+
+.tree-row--subject:hover .tree-row__more,
+.tree-row--category:hover .tree-row__more,
+.tree-row--category.is-active .tree-row__more {
+    opacity: 1;
 }
 
 .tree-row__more:hover:not(:disabled) {
     color: var(--text-primary);
-    background: color-mix(in srgb, var(--primary) 6%, transparent);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
 .tree-row__more:disabled {
@@ -1696,6 +1791,17 @@ usePageRefresh(() => loadData({ keepExpansion: true }));
 
 .rule-editor__field--md {
     width: 150px;
+}
+
+.rule-editor__field--platform {
+    width: 120px;
+}
+
+.tree-search {
+}
+
+.tree-search__input {
+    width: 100%;
 }
 
 .node-dialog {
