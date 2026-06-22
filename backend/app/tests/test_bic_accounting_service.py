@@ -201,7 +201,7 @@ class _BicSourceRowsQuerySession:
         self.active_rows.extend([row for row in rows if isinstance(row, BicSourceRow)])
 
 
-def test_bic_accounting_parse_file_allows_all_fee_items_by_default_and_normalizes_qic_suffixes(tmp_path: Path) -> None:
+def test_bic_accounting_parse_file_allows_all_fee_items_by_default_and_normalizes_provider_suffixes(tmp_path: Path) -> None:
     file_path = tmp_path / "douyin_bic_qic.xlsx"
     _write_workbook(
         file_path,
@@ -217,8 +217,8 @@ def test_bic_accounting_parse_file_allows_all_fee_items_by_default_and_normalize
                 业务发生时间="2026-04-25T19:04:59",
                 结算时间="2026-04-25T19:05:15",
             ),
-            _row(DOUYIN_BIC_HEADERS, 费用项="质检费(拒绝)", 服务商="服务商A", QIC仓="华东仓(仓)", 结算金额="99.00"),
-            _row(DOUYIN_BIC_HEADERS, 费用项="质检费(通过)", 服务商="服务商B", QIC仓="华南仓（配）", 结算金额="7.70"),
+            _row(DOUYIN_BIC_HEADERS, 费用项="质检费(拒绝)", 服务商="服务商A(仓)", QIC仓="华东仓(仓)", 结算金额="99.00"),
+            _row(DOUYIN_BIC_HEADERS, 费用项="质检费(通过)", 服务商="服务商B（配）", QIC仓="华南仓（配）", 结算金额="7.70"),
             _row(DOUYIN_BIC_HEADERS, 费用项="其他费用项", 服务商="服务商C", QIC仓="华北仓", 结算金额="5.00"),
         ],
     )
@@ -230,8 +230,8 @@ def test_bic_accounting_parse_file_allows_all_fee_items_by_default_and_normalize
     assert result["failed_rows"] == 0
     assert [(row["service_provider"], row["qic_warehouse"], row["amount"]) for row in result["bic_rows"]] == [
         ("服务商A", "华东仓", Decimal("12.30")),
-        ("服务商A", "华东仓", Decimal("99.00")),
-        ("服务商B", "华南仓", Decimal("7.70")),
+        ("服务商A", "华东仓(仓)", Decimal("99.00")),
+        ("服务商B", "华南仓（配）", Decimal("7.70")),
         ("服务商C", "华北仓", Decimal("5.00")),
     ]
     assert result["bic_rows"][0]["billing_completed_time"] == datetime(2026, 4, 25, 19, 5, 14)
@@ -521,6 +521,17 @@ def test_service_provider_filter_uses_fuzzy_multi_value_matching() -> None:
     assert "LIKE" in statement
     assert "%服务商A%" in statement
     assert "%服务商B%" in statement
+
+
+def test_service_provider_filter_normalizes_provider_suffixes() -> None:
+    expr = _service_provider_filter(BicDetail.service_provider, "服务商A(仓)，服务商B（配）")
+
+    statement = str(Select(BicDetail).where(expr).compile(compile_kwargs={"literal_binds": True}))
+
+    assert "%服务商A%" in statement
+    assert "%服务商B%" in statement
+    assert "(仓)" not in statement
+    assert "（配）" not in statement
     assert " OR " in statement
 
 
@@ -878,7 +889,7 @@ def test_bic_reconciliation_workbook_merges_all_rows_into_single_source_sheet() 
     assert workbook["明细"].cell(row=3, column=17).value == "FLOW-2"
 
 
-def test_bic_detail_rows_group_by_service_provider_and_qic() -> None:
+def test_bic_detail_rows_group_by_normalized_service_provider_and_qic() -> None:
     task = BicTask(id=1, file_id=2, org_id=3, user_id=4, status="success", progress=100)
     upload_file = BicUploadFile(
         id=2,
@@ -898,7 +909,7 @@ def test_bic_detail_rows_group_by_service_provider_and_qic() -> None:
         upload_file=upload_file,
         rows=[
             {"service_provider": "服务商A", "qic_warehouse": "华东仓", "amount": Decimal("1.20"), "raw_row": {}},
-            {"service_provider": "服务商A", "qic_warehouse": "华东仓(配)", "amount": Decimal("2.30"), "raw_row": {}},
+            {"service_provider": "服务商A(配)", "qic_warehouse": "华东仓(配)", "amount": Decimal("2.30"), "raw_row": {}},
             {"service_provider": "服务商B", "qic_warehouse": "华东仓", "amount": Decimal("4.50"), "raw_row": {}},
         ],
         platform_code="douyin",
@@ -907,7 +918,8 @@ def test_bic_detail_rows_group_by_service_provider_and_qic() -> None:
     )
 
     assert sorted((row.service_provider, row.qic_warehouse, row.row_count, row.total_amount) for row in rows) == [
-        ("服务商A", "华东仓", 2, Decimal("3.50")),
+        ("服务商A", "华东仓", 1, Decimal("1.20")),
+        ("服务商A", "华东仓(配)", 1, Decimal("2.30")),
         ("服务商B", "华东仓", 1, Decimal("4.50")),
     ]
 
@@ -931,7 +943,7 @@ def test_bic_source_rows_link_to_detail_rows() -> None:
         upload_file=upload_file,
         rows=[
             {"service_provider": "服务商A", "qic_warehouse": "华东仓", "amount": Decimal("1.20")},
-            {"service_provider": "服务商A", "qic_warehouse": "华东仓", "amount": Decimal("2.30")},
+            {"service_provider": "服务商A", "qic_warehouse": "华东仓(配)", "amount": Decimal("2.30")},
             {"service_provider": "服务商B", "qic_warehouse": "华东仓", "amount": Decimal("4.50")},
         ],
         platform_code="douyin",
@@ -948,8 +960,8 @@ def test_bic_source_rows_link_to_detail_rows() -> None:
         rows=[
             {"service_provider": "服务商A", "qic_warehouse": "华东仓", "amount": Decimal("1.20"), "fee_item": "质检费(通过)", "transaction_flow_no": "SCP-1"},
             {
-                "service_provider": "服务商A",
-                "qic_warehouse": "华东仓",
+                "service_provider": "服务商A（配）",
+                "qic_warehouse": "华东仓(配)",
                 "amount": Decimal("2.30"),
                 "fee_item": "质检费(通过)",
                 "transaction_flow_no": "SCP-2",
@@ -966,8 +978,8 @@ def test_bic_source_rows_link_to_detail_rows() -> None:
 
     assert sorted((row.service_provider, row.qic_warehouse, row.detail_id, row.settlement_amount) for row in source_rows) == [
         ("服务商A", "华东仓", 10, Decimal("1.20")),
-        ("服务商A", "华东仓", 10, Decimal("2.30")),
-        ("服务商B", "华东仓", 11, Decimal("4.50")),
+        ("服务商A", "华东仓(配)", 11, Decimal("2.30")),
+        ("服务商B", "华东仓", 12, Decimal("4.50")),
     ]
     source_row_with_times = next(row for row in source_rows if row.transaction_flow_no == "SCP-2")
     assert source_row_with_times.billing_completed_time == datetime(2026, 4, 25, 19, 5, 14)

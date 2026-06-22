@@ -88,7 +88,11 @@ def _mark_bic_empty_success(task: BicTask, upload_file: BicUploadFile) -> None:
 
 def _service_provider_filter(column, service_provider: str | None):
     normalized = service_provider.replace("，", ",") if service_provider else service_provider
-    values = TransactionAccountingService._split_filter_values(normalized)
+    values = [
+        normalized_value
+        for value in TransactionAccountingService._split_filter_values(normalized)
+        if (normalized_value := _normalize_service_provider(value))
+    ]
     if not values:
         return None
     return or_(*(column.ilike(f"%{value}%") for value in values))
@@ -112,7 +116,7 @@ def _is_included_bic_fee_item(fee_item: str) -> bool:
     return not BIC_INCLUDED_FEE_ITEMS or fee_item in BIC_INCLUDED_FEE_ITEMS
 
 
-def _normalize_qic_warehouse(value: object) -> str:
+def _normalize_service_provider(value: object) -> str:
     text = _normalize_bic_text(value)
     for suffix in ("(仓)", "(配)", "（仓）", "（配）"):
         text = text.replace(suffix, "")
@@ -155,7 +159,7 @@ def _source_row_payload(
         accounting_year=int(upload_file.accounting_year),
         accounting_month=int(upload_file.accounting_month),
         accounting_period=_bic_accounting_period(upload_file.accounting_year, upload_file.accounting_month),
-        service_provider=_format_source_value(source_row.get("service_provider")) or "-",
+        service_provider=_normalize_service_provider(source_row.get("service_provider")) or "-",
         qic_warehouse=_format_source_value(source_row.get("qic_warehouse")) or "-",
         source_row_number=source_row_number,
         settlement_no=_format_source_value(source_row.get("settlement_no")),
@@ -1006,8 +1010,8 @@ class BicAccountingService:
                             "related_order_no": safe_str(vals.get("关联订单号")),
                             "related_waybill_no": safe_str(vals.get("关联运单号")),
                             "fee_item": fee_item,
-                            "service_provider": safe_str(vals.get("服务商")) or "-",
-                            "qic_warehouse": _normalize_qic_warehouse(vals.get("QIC仓")) or "-",
+                            "service_provider": _normalize_service_provider(vals.get("服务商")) or "-",
+                            "qic_warehouse": safe_str(vals.get("QIC仓")) or "-",
                             "amount": safe_decimal(vals.get("结算金额")),
                             "billing_params": safe_str(vals.get("计费参数")),
                             "billing_completed_time": parse_datetime(vals.get("计费完成时间")),
@@ -1046,8 +1050,8 @@ class BicAccountingService:
     ) -> list[BicDetail]:
         groups: dict[tuple[str, str], dict[str, object]] = {}
         for row in rows:
-            service_provider = safe_str(row.get("service_provider")) or "-"
-            qic_warehouse = _normalize_qic_warehouse(row.get("qic_warehouse")) or "-"
+            service_provider = _normalize_service_provider(row.get("service_provider")) or "-"
+            qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
             group_key = (service_provider, qic_warehouse)
             group = groups.setdefault(group_key, {"amount": Decimal("0"), "row_count": 0})
             group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.get("amount"))
@@ -1085,8 +1089,8 @@ class BicAccountingService:
         detail_map = {(row.service_provider, row.qic_warehouse): row.id for row in detail_rows}
         source_rows: list[BicSourceRow] = []
         for row in rows:
-            service_provider = safe_str(row.get("service_provider")) or "-"
-            qic_warehouse = _normalize_qic_warehouse(row.get("qic_warehouse")) or "-"
+            service_provider = _normalize_service_provider(row.get("service_provider")) or "-"
+            qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
             detail_id = detail_map.get((service_provider, qic_warehouse))
             if detail_id is None:
                 continue
@@ -1226,7 +1230,11 @@ class BicAccountingService:
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicSourceRow.platform_code.in_(platform_codes))
-        service_provider_values = TransactionAccountingService._split_filter_values(service_provider.replace("，", ",") if service_provider else service_provider)
+        service_provider_values = [
+            normalized_value
+            for value in TransactionAccountingService._split_filter_values(service_provider.replace("，", ",") if service_provider else service_provider)
+            if (normalized_value := _normalize_service_provider(value))
+        ]
         if exact_service_provider and service_provider_values:
             filters.append(BicSourceRow.service_provider == service_provider_values[0])
         else:
@@ -1336,7 +1344,11 @@ class BicAccountingService:
         shop_ids: str | None = None,
         qic_warehouse: str | None = None,
     ) -> io.BytesIO:
-        service_provider_values = TransactionAccountingService._split_filter_values(service_provider.replace("，", ","))
+        service_provider_values = [
+            normalized_value
+            for value in TransactionAccountingService._split_filter_values(service_provider.replace("，", ","))
+            if (normalized_value := _normalize_service_provider(value))
+        ]
         if len(service_provider_values) != 1:
             raise ValueError("请选择服务商")
         normalized_provider = service_provider_values[0]
