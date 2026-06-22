@@ -1,6 +1,6 @@
 """normalize bic service provider names
 
-Revision ID: 055_normalize_bic_service_provider
+Revision ID: 055_bic_provider_norm
 Revises: 054_fast_source_row_id_order
 Create Date: 2026-06-22
 
@@ -10,7 +10,7 @@ from typing import Sequence, Union
 from alembic import op
 
 
-revision: str = "055_normalize_bic_service_provider"
+revision: str = "055_bic_provider_norm"
 down_revision: Union[str, None] = "054_fast_source_row_id_order"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
