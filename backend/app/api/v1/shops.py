@@ -14,6 +14,14 @@ from app.services.shop_service import ShopService
 router = APIRouter()
 
 
+def _xlsx_response(buffer, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 @router.get("", response_model=ApiResponse[PageResponse[ShopOut]])
 async def list_shops(
     page: int = 1,
@@ -59,6 +67,30 @@ async def download_shop_import_template(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+@router.get("/export")
+async def export_shops(
+    keyword: str | None = None,
+    platform_name: str | None = None,
+    org_id: str | None = None,
+    ids: str | None = None,
+    current_user: User = Depends(ensure_internal_org_access),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """导出店铺信息，字段与导入模板一致。"""
+    scoped_org_id = current_user.org_id if current_user.role != "superadmin" else org_id
+    rows, _ = await ShopService.list_shops(
+        db,
+        org_id=scoped_org_id,
+        ids=ids,
+        keyword=keyword,
+        platform_name=platform_name,
+        page=None,
+        page_size=None,
+    )
+    buffer = ShopService.build_export_workbook(rows)
+    return _xlsx_response(buffer, "店铺信息.xlsx")
 
 
 @router.post("/import", response_model=ApiResponse[ShopImportResult])

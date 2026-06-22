@@ -120,10 +120,11 @@ class ShopService:
         db: AsyncSession,
         *,
         org_id: str | int | None = None,
+        ids: str | int | None = None,
         keyword: str | None = None,
         platform_name: str | None = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> tuple[list[tuple[Shop, str | None]], int]:
         stmt = (
             select(Shop, Organization.name.label("org_name"))
@@ -132,13 +133,17 @@ class ShopService:
                 and_(Organization.id == Shop.org_id, Organization.is_deleted.is_(False)),
             )
             .where(ShopService.active_filter())
-            .order_by(Shop.id.desc())
+            .order_by(Shop.updated_at.desc(), Shop.id.desc())
         )
         count_stmt = select(func.count()).select_from(Shop).where(ShopService.active_filter())
         org_ids = split_int_filter_values(org_id)
         if org_ids:
             stmt = stmt.where(Shop.org_id.in_(org_ids))
             count_stmt = count_stmt.where(Shop.org_id.in_(org_ids))
+        shop_ids = split_int_filter_values(ids)
+        if shop_ids:
+            stmt = stmt.where(Shop.id.in_(shop_ids))
+            count_stmt = count_stmt.where(Shop.id.in_(shop_ids))
         if platform_name:
             platform_values = [item.strip() for item in platform_name.split(",") if item.strip()]
             report_platform_codes = set()
@@ -168,7 +173,9 @@ class ShopService:
             stmt = stmt.where(cond)
             count_stmt = count_stmt.where(cond)
         total = (await db.execute(count_stmt)).scalar() or 0
-        items = list((await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).all())
+        if page is not None and page_size is not None:
+            stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        items = list((await db.execute(stmt)).all())
         return items, total
 
     @staticmethod
@@ -429,6 +436,60 @@ class ShopService:
             note_sheet.cell(row=row_index, column=2, value=text_value)
         note_sheet.column_dimensions["A"].width = 16
         note_sheet.column_dimensions["B"].width = 92
+
+        buffer = BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def build_export_workbook(rows: list[tuple[Shop, str | None]]) -> BytesIO:
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "店铺信息"
+
+        header_font = Font(bold=True, color="111827")
+        header_fill = PatternFill("solid", fgColor="E0F2FE")
+        for index, header in enumerate(SHOP_IMPORT_HEADERS, start=1):
+            cell = worksheet.cell(row=1, column=index, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        export_fields = (
+            "platform_name",
+            "shop_name",
+            "tax_no",
+            "merchant",
+            "registered_address",
+            "legal_person",
+            "previous_name",
+            "store_long_id",
+            "store_short_id",
+            "settlement_period",
+            "primary_account",
+            "anchor",
+            "shop_type",
+            "purpose",
+            "former_name",
+        )
+        for row_index, (shop, _org_name) in enumerate(rows, start=2):
+            for column_index, field in enumerate(export_fields, start=1):
+                worksheet.cell(row=row_index, column=column_index, value=getattr(shop, field, None) or "")
+
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = f"A1:{worksheet.cell(row=1, column=len(SHOP_IMPORT_HEADERS)).coordinate}"
+        widths = {
+            "平台": 14,
+            "店铺名": 24,
+            "注册地址": 32,
+            "primary_account": 22,
+            "settlement_period": 20,
+            "store_long_id": 20,
+            "store_short_id": 20,
+        }
+        for index, header in enumerate(SHOP_IMPORT_HEADERS, start=1):
+            worksheet.column_dimensions[worksheet.cell(row=1, column=index).column_letter].width = widths.get(header, 16)
 
         buffer = BytesIO()
         workbook.save(buffer)

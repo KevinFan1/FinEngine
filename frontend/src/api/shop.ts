@@ -91,6 +91,10 @@ export function downloadShopImportTemplate() {
   return downloadBlob('/shops/import-template')
 }
 
+export function exportShops(params: ShopListParams & { ids?: string }) {
+  return downloadBlob('/shops/export', params as Record<string, any>)
+}
+
 export function importShops(file: File) {
   const data = new FormData()
   data.append('file', file)

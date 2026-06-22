@@ -67,6 +67,12 @@
             <el-button :loading="downloadingTemplate" @click="handleDownloadTemplate">
               <el-icon><Download /></el-icon> 下载模板
             </el-button>
+            <el-button :loading="exportSelectedLoading" :disabled="selectedRows.length === 0" @click="handleExport('selected')">
+              <el-icon><Download /></el-icon> 导出选中
+            </el-button>
+            <el-button :loading="exportAllLoading" @click="handleExport('all')">
+              <el-icon><Download /></el-icon> 导出全部
+            </el-button>
             <el-upload
               action="#"
               accept=".xlsx,.xlsm"
@@ -86,7 +92,8 @@
       </template>
 
       <!-- Table -->
-      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%">
+      <el-table class="summary-table roomy-table" :data="tableData" v-loading="loading" stripe border style="width: 100%" @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="48" align="center" fixed="left" />
         <el-table-column label="序号" width="70" align="center">
           <template #default="{ $index }">
             {{ (pagination.page - 1) * pagination.pageSize + $index + 1 }}
@@ -315,6 +322,7 @@ import {
   createShop,
   deleteShop,
   downloadShopImportTemplate,
+  exportShops,
   getShopDetail,
   getShopList,
   importShops,
@@ -407,8 +415,11 @@ const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const importing = ref(false)
 const downloadingTemplate = ref(false)
+const exportSelectedLoading = ref(false)
+const exportAllLoading = ref(false)
 const importResultVisible = ref(false)
 const importResult = ref<ShopImportResult | null>(null)
+const selectedRows = ref<Shop[]>([])
 
 const form = reactive<ShopFormState>({
   platform_name: '',
@@ -468,6 +479,7 @@ async function fetchData() {
       org_id: searchForm.orgIds.join(',') || undefined,
     })
     tableData.value = res.items || []
+    selectedRows.value = []
     pagination.total = res.total || 0
   } catch {
     // Error handled by interceptor
@@ -636,6 +648,36 @@ function saveBlob(blob: Blob, filename: string) {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+}
+
+function buildExportParams(scope: 'selected' | 'all') {
+  return {
+    keyword: searchForm.keyword || undefined,
+    platform_name: searchForm.platformNames.join(',') || undefined,
+    org_id: searchForm.orgIds.join(',') || undefined,
+    ids: scope === 'selected' ? selectedRows.value.map((row) => row.id).join(',') : undefined,
+  }
+}
+
+function handleSelectionChange(rows: Shop[]) {
+  selectedRows.value = rows
+}
+
+async function handleExport(scope: 'selected' | 'all') {
+  if (scope === 'selected' && selectedRows.value.length === 0) {
+    ElMessage.warning('请选择要导出的店铺')
+    return
+  }
+  const loadingRef = scope === 'selected' ? exportSelectedLoading : exportAllLoading
+  loadingRef.value = true
+  try {
+    const blob = await exportShops(buildExportParams(scope))
+    saveBlob(blob, scope === 'selected' ? '店铺信息_选中.xlsx' : '店铺信息.xlsx')
+  } catch {
+    // Error handled by interceptor
+  } finally {
+    loadingRef.value = false
+  }
 }
 
 async function handleDownloadTemplate() {

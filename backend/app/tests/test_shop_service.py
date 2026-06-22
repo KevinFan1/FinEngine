@@ -10,6 +10,9 @@ class _ScalarResult:
     def __init__(self, value):
         self._value = value
 
+    def scalar(self):
+        return self._value
+
     def scalar_one_or_none(self):
         return self._value
 
@@ -55,6 +58,25 @@ class _CreateShopRaceSession:
 
     async def refresh(self, _instance):
         raise AssertionError("create_shop should return the inserted row")
+
+
+class _ListShopsCaptureSession:
+    def __init__(self) -> None:
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+        if len(self.statements) == 1:
+            return _ScalarResult(0)
+        return _AllResult([])
+
+
+class _AllResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
 
 
 @pytest.mark.asyncio
@@ -123,6 +145,86 @@ def test_shop_import_template_marks_unique_key_headers() -> None:
         comment = sheet.cell(row=1, column=column_index).comment
         assert comment is not None
         assert "唯一" in comment.text
+
+
+def test_shop_export_workbook_uses_import_headers_and_shop_fields() -> None:
+    shop = Shop(
+        id=1,
+        org_id=2,
+        platform_name="douyin",
+        shop_name="抖音旗舰店",
+        tax_no="91310000X",
+        merchant="上海示例商户",
+        registered_address="上海市浦东新区",
+        legal_person="张三",
+        previous_name="旧店铺名",
+        store_long_id="LONG-1",
+        store_short_id="SHORT-1",
+        settlement_period="T+1",
+        primary_account="main-account",
+        anchor="主播A",
+        shop_type="旗舰店",
+        purpose="直播",
+        former_name="former-a",
+    )
+
+    workbook = load_workbook(ShopService.build_export_workbook([(shop, "组织A")]))
+    sheet = workbook["店铺信息"]
+
+    headers = [sheet.cell(row=1, column=index).value for index in range(1, len(SHOP_IMPORT_HEADERS) + 1)]
+    values = [sheet.cell(row=2, column=index).value for index in range(1, len(SHOP_IMPORT_HEADERS) + 1)]
+
+    assert headers == list(SHOP_IMPORT_HEADERS)
+    assert values == [
+        "douyin",
+        "抖音旗舰店",
+        "91310000X",
+        "上海示例商户",
+        "上海市浦东新区",
+        "张三",
+        "旧店铺名",
+        "LONG-1",
+        "SHORT-1",
+        "T+1",
+        "main-account",
+        "主播A",
+        "旗舰店",
+        "直播",
+        "former-a",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_shops_filters_selected_ids() -> None:
+    db = _ListShopsCaptureSession()
+
+    await ShopService.list_shops(
+        db,  # type: ignore[arg-type]
+        org_id=1,
+        ids="3,5",
+        page=1,
+        page_size=20,
+    )
+
+    statement_sql = str(db.statements[1].compile(compile_kwargs={"literal_binds": True}))
+
+    assert "fin_shops.id IN (3, 5)" in statement_sql
+
+
+@pytest.mark.asyncio
+async def test_list_shops_orders_by_updated_at_desc_then_id_desc() -> None:
+    db = _ListShopsCaptureSession()
+
+    await ShopService.list_shops(
+        db,  # type: ignore[arg-type]
+        org_id=1,
+        page=1,
+        page_size=20,
+    )
+
+    statement_sql = str(db.statements[1].compile(compile_kwargs={"literal_binds": True}))
+
+    assert "ORDER BY fin_shops.updated_at DESC, fin_shops.id DESC" in statement_sql
 
 
 def test_shop_import_header_aliases_keep_chinese_and_english_former_names_distinct() -> None:
