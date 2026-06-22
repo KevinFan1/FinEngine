@@ -34,16 +34,18 @@ export interface SidebarMenuDividerItem {
 
 export type SidebarMenuItem = SidebarMenuLinkItem | SidebarMenuDividerItem;
 
-export interface ResolvedSidebarMenuItem
-    extends Omit<SidebarMenuLinkItem, "icon" | "children"> {
+export interface ResolvedSidebarMenuItem extends Omit<
+    SidebarMenuLinkItem,
+    "icon" | "children"
+> {
     icon: Component;
     children?: ResolvedSidebarMenuItem[];
 }
 
 const merchantReconciliationMenuEnabled = false;
 const memberVisibleTopLevelPaths = new Set([
-    "/downloads",
     "/upload",
+    "/downloads",
     "/shops",
     "/order-accounting",
     "/transaction-accounting",
@@ -299,12 +301,20 @@ export function filterSidebarMenuByRole(
         }
         if (item.roles && !item.roles.includes(userRole)) return [];
         if (item.internalOnly && !isInternalOrg) return [];
-        if (userRole === "member" && isTopLevelMenu && !memberVisibleTopLevelPaths.has(item.path)) {
+        if (
+            userRole === "member" &&
+            isTopLevelMenu &&
+            !memberVisibleTopLevelPaths.has(item.path)
+        ) {
             return [];
         }
         if (!item.children?.length) return [item];
 
-        const children = filterSidebarMenuByRole(item.children, userRole, isInternalOrg);
+        const children = filterSidebarMenuByRole(
+            item.children,
+            userRole,
+            isInternalOrg,
+        );
         return children.length ? [{ ...item, children }] : [];
     });
 }

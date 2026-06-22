@@ -1,4 +1,5 @@
 """Service layer for independent BIC accounting."""
+
 import io
 import logging
 import tempfile
@@ -8,8 +9,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Iterable
 
-from openpyxl.cell import WriteOnlyCell
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Font
 from sqlalchemy import delete, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,10 +30,12 @@ from app.services.transaction_accounting_service import TransactionAccountingSer
 from app.services.upload_period_service import EmptyTabularDataError, extract_upload_period, resolve_upload_period_header
 from app.tasks.processors.base import FinancialSummaryExcelProcessorMixin, open_tabular_rows, parse_datetime, safe_str
 from app.tasks.processors.douyin import DOUYIN_BIC_HEADERS
-from app.utils.query_filters import datetime_range_filters, resolve_org_ids
 from app.utils.money import safe_decimal
+from app.utils.query_filters import datetime_range_filters, resolve_org_ids
 
-BIC_TARGET_FEE_ITEM = "质检费(通过)"
+# 放开全部条件，只计算求和数据即可
+BIC_INCLUDED_FEE_ITEMS = frozenset({})
+# BIC_TARGET_FEE_ITEM = "质检费(通过)"
 BIC_DETAIL_EXPORT_HEADERS = ["序号", "平台", "服务商", "店铺id", "店铺名称", "QIC仓", "公司名称", "税号", "抬头类型", "注册地址", "结算金额"]
 BIC_SOURCE_EXPORT_HEADERS = ["店铺", *DOUYIN_BIC_HEADERS]
 BIC_RECONCILIATION_SOURCE_EXPORT_HEADERS = ["店铺", *DOUYIN_BIC_HEADERS]
@@ -103,6 +106,17 @@ def _normalize_bic_text(value: object) -> str:
 
 def _format_source_value(value: object) -> str:
     return _normalize_bic_text(value)
+
+
+def _is_included_bic_fee_item(fee_item: str) -> bool:
+    return not BIC_INCLUDED_FEE_ITEMS or fee_item in BIC_INCLUDED_FEE_ITEMS
+
+
+def _normalize_qic_warehouse(value: object) -> str:
+    text = _normalize_bic_text(value)
+    for suffix in ("(仓)", "(配)", "（仓）", "（配）"):
+        text = text.replace(suffix, "")
+    return text.strip()
 
 
 def _format_source_datetime(value: object) -> str:
@@ -234,7 +248,7 @@ async def _upsert_source_rows_by_flow(
 
     chunk_size = 500
     for index in range(0, len(flow_nos), chunk_size):
-        chunk = flow_nos[index:index + chunk_size]
+        chunk = flow_nos[index : index + chunk_size]
         result = await db.execute(
             select(BicSourceRow).where(
                 BicSourceRow.is_deleted.is_(False),
@@ -981,7 +995,8 @@ class BicAccountingService:
                 result["total_rows"] += 1
                 try:
                     vals = FinancialSummaryExcelProcessorMixin._row_to_values(row, col_idx)
-                    if safe_str(vals.get("费用项")) != BIC_TARGET_FEE_ITEM:
+                    fee_item = safe_str(vals.get("费用项"))
+                    if not _is_included_bic_fee_item(fee_item):
                         continue
                     result["bic_rows"].append(
                         {
@@ -990,9 +1005,9 @@ class BicAccountingService:
                             "order_code": safe_str(vals.get("订单码")),
                             "related_order_no": safe_str(vals.get("关联订单号")),
                             "related_waybill_no": safe_str(vals.get("关联运单号")),
-                            "fee_item": safe_str(vals.get("费用项")),
+                            "fee_item": fee_item,
                             "service_provider": safe_str(vals.get("服务商")) or "-",
-                            "qic_warehouse": safe_str(vals.get("QIC仓")) or "-",
+                            "qic_warehouse": _normalize_qic_warehouse(vals.get("QIC仓")) or "-",
                             "amount": safe_decimal(vals.get("结算金额")),
                             "billing_params": safe_str(vals.get("计费参数")),
                             "billing_completed_time": parse_datetime(vals.get("计费完成时间")),
@@ -1012,7 +1027,11 @@ class BicAccountingService:
                     result["failed_rows"] += 1
                     result["errors"].append(f"Row {result['total_rows'] + header_row_number}: {exc}")
         if result["total_rows"] > 0 and result["success_rows"] == 0 and result["failed_rows"] == 0:
-            result["warnings"].append(f"未找到费用项为“{BIC_TARGET_FEE_ITEM}”的记录")
+            if BIC_INCLUDED_FEE_ITEMS:
+                included_items = "、".join(sorted(BIC_INCLUDED_FEE_ITEMS))
+                result["warnings"].append(f"未找到费用项为“{included_items}”的记录")
+            else:
+                result["warnings"].append("未找到可计算的BIC记录")
         return result
 
     @staticmethod
@@ -1028,7 +1047,7 @@ class BicAccountingService:
         groups: dict[tuple[str, str], dict[str, object]] = {}
         for row in rows:
             service_provider = safe_str(row.get("service_provider")) or "-"
-            qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
+            qic_warehouse = _normalize_qic_warehouse(row.get("qic_warehouse")) or "-"
             group_key = (service_provider, qic_warehouse)
             group = groups.setdefault(group_key, {"amount": Decimal("0"), "row_count": 0})
             group["amount"] = safe_decimal(group["amount"]) + safe_decimal(row.get("amount"))
@@ -1067,7 +1086,7 @@ class BicAccountingService:
         source_rows: list[BicSourceRow] = []
         for row in rows:
             service_provider = safe_str(row.get("service_provider")) or "-"
-            qic_warehouse = safe_str(row.get("qic_warehouse")) or "-"
+            qic_warehouse = _normalize_qic_warehouse(row.get("qic_warehouse")) or "-"
             detail_id = detail_map.get((service_provider, qic_warehouse))
             if detail_id is None:
                 continue
@@ -1207,9 +1226,7 @@ class BicAccountingService:
         platform_codes = TransactionAccountingService._split_filter_values(platform_code)
         if platform_codes:
             filters.append(BicSourceRow.platform_code.in_(platform_codes))
-        service_provider_values = TransactionAccountingService._split_filter_values(
-            service_provider.replace("，", ",") if service_provider else service_provider
-        )
+        service_provider_values = TransactionAccountingService._split_filter_values(service_provider.replace("，", ",") if service_provider else service_provider)
         if exact_service_provider and service_provider_values:
             filters.append(BicSourceRow.service_provider == service_provider_values[0])
         else:
