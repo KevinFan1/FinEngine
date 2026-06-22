@@ -219,19 +219,21 @@ def test_bic_accounting_parse_file_allows_all_fee_items_by_default_and_normalize
             ),
             _row(DOUYIN_BIC_HEADERS, 费用项="质检费(拒绝)", 服务商="服务商A(仓)", QIC仓="华东仓(仓)", 结算金额="99.00"),
             _row(DOUYIN_BIC_HEADERS, 费用项="质检费(通过)", 服务商="服务商B（配）", QIC仓="华南仓（配）", 结算金额="7.70"),
+            _row(DOUYIN_BIC_HEADERS, 费用项="其他费用项", 服务商="服务商D-仓", QIC仓="华西仓", 结算金额="8.80"),
             _row(DOUYIN_BIC_HEADERS, 费用项="其他费用项", 服务商="服务商C", QIC仓="华北仓", 结算金额="5.00"),
         ],
     )
 
     result = BicAccountingService.parse_file(str(file_path))
 
-    assert result["total_rows"] == 4
-    assert result["success_rows"] == 4
+    assert result["total_rows"] == 5
+    assert result["success_rows"] == 5
     assert result["failed_rows"] == 0
     assert [(row["service_provider"], row["qic_warehouse"], row["amount"]) for row in result["bic_rows"]] == [
         ("服务商A", "华东仓", Decimal("12.30")),
         ("服务商A", "华东仓(仓)", Decimal("99.00")),
         ("服务商B", "华南仓（配）", Decimal("7.70")),
+        ("服务商D", "华西仓", Decimal("8.80")),
         ("服务商C", "华北仓", Decimal("5.00")),
     ]
     assert result["bic_rows"][0]["billing_completed_time"] == datetime(2026, 4, 25, 19, 5, 14)
@@ -524,14 +526,16 @@ def test_service_provider_filter_uses_fuzzy_multi_value_matching() -> None:
 
 
 def test_service_provider_filter_normalizes_provider_suffixes() -> None:
-    expr = _service_provider_filter(BicDetail.service_provider, "服务商A(仓)，服务商B（配）")
+    expr = _service_provider_filter(BicDetail.service_provider, "服务商A(仓)，服务商B（配）,服务商C-仓")
 
     statement = str(Select(BicDetail).where(expr).compile(compile_kwargs={"literal_binds": True}))
 
     assert "%服务商A%" in statement
     assert "%服务商B%" in statement
+    assert "%服务商C%" in statement
     assert "(仓)" not in statement
     assert "（配）" not in statement
+    assert "-仓" not in statement
     assert " OR " in statement
 
 
@@ -910,7 +914,7 @@ def test_bic_detail_rows_group_by_normalized_service_provider_and_qic() -> None:
         rows=[
             {"service_provider": "服务商A", "qic_warehouse": "华东仓", "amount": Decimal("1.20"), "raw_row": {}},
             {"service_provider": "服务商A(配)", "qic_warehouse": "华东仓(配)", "amount": Decimal("2.30"), "raw_row": {}},
-            {"service_provider": "服务商B", "qic_warehouse": "华东仓", "amount": Decimal("4.50"), "raw_row": {}},
+            {"service_provider": "服务商B-仓", "qic_warehouse": "华东仓", "amount": Decimal("4.50"), "raw_row": {}},
         ],
         platform_code="douyin",
         shop_id=None,
@@ -944,7 +948,7 @@ def test_bic_source_rows_link_to_detail_rows() -> None:
         rows=[
             {"service_provider": "服务商A", "qic_warehouse": "华东仓", "amount": Decimal("1.20")},
             {"service_provider": "服务商A", "qic_warehouse": "华东仓(配)", "amount": Decimal("2.30")},
-            {"service_provider": "服务商B", "qic_warehouse": "华东仓", "amount": Decimal("4.50")},
+            {"service_provider": "服务商B-配", "qic_warehouse": "华东仓", "amount": Decimal("4.50")},
         ],
         platform_code="douyin",
         shop_id=9,
@@ -969,7 +973,7 @@ def test_bic_source_rows_link_to_detail_rows() -> None:
                 "business_occurred_time": "2026-04-25T19:04:59",
                 "settled_at": "2026-04-25T19:05:15",
             },
-            {"service_provider": "服务商B", "qic_warehouse": "华东仓", "amount": Decimal("4.50"), "fee_item": "质检费(通过)", "transaction_flow_no": "SCP-3"},
+            {"service_provider": "服务商B-配", "qic_warehouse": "华东仓", "amount": Decimal("4.50"), "fee_item": "质检费(通过)", "transaction_flow_no": "SCP-3"},
         ],
         platform_code="douyin",
         shop_id=9,

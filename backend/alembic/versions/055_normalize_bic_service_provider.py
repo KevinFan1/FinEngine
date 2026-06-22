@@ -19,7 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def _normalized_provider_sql(column_name: str) -> str:
     return (
         "COALESCE(NULLIF(btrim("
-        f"replace(replace(replace(replace({column_name}, '(仓)', ''), '(配)', ''), '（仓）', ''), '（配）', '')"
+        "regexp_replace("
+        f"replace(replace(replace(replace({column_name}, '(仓)', ''), '(配)', ''), '（仓）', ''), '（配）', ''),"
+        " '-(仓|配)$', ''"
+        ")"
         "), ''), '-')"
     )
 
@@ -36,6 +39,8 @@ def upgrade() -> None:
            OR service_provider LIKE '%(配)%'
            OR service_provider LIKE '%（仓）%'
            OR service_provider LIKE '%（配）%'
+           OR service_provider LIKE '%-仓'
+           OR service_provider LIKE '%-配'
         """
     )
     op.execute(
@@ -46,6 +51,8 @@ def upgrade() -> None:
            OR service_provider LIKE '%(配)%'
            OR service_provider LIKE '%（仓）%'
            OR service_provider LIKE '%（配）%'
+           OR service_provider LIKE '%-仓'
+           OR service_provider LIKE '%-配'
         """
     )
 

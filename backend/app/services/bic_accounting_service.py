@@ -120,6 +120,9 @@ def _normalize_service_provider(value: object) -> str:
     text = _normalize_bic_text(value)
     for suffix in ("(仓)", "(配)", "（仓）", "（配）"):
         text = text.replace(suffix, "")
+    for suffix in ("-仓", "-配"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
     return text.strip()
 
 
